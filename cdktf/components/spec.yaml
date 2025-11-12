@@ -1,0 +1,98 @@
+swagger: '2.0'
+info:
+  title: Xiaoice API
+  description: API for Xiaoice chat functions
+  version: 1.0.0
+schemes:
+  - https
+produces:
+  - application/json
+paths:
+  /talk:
+    post:
+      summary: Talk stream endpoint
+      operationId: talkStream
+      x-google-backend:
+        address: ${TALK_STREAM}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              askText:
+                type: string
+              sessionId:
+                type: string
+              traceId:
+                type: string
+              extra:
+                type: object
+      responses:
+        200:
+          description: Successful response
+  /welcome:
+    post:
+      summary: Welcome message endpoint
+      operationId: welcome
+      x-google-backend:
+        address: ${WELCOME}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              traceId:
+                type: string
+              sessionId:
+                type: string
+              languageCode:
+                type: string
+      responses:
+        200:
+          description: Successful response
+  /goodbye:
+    post:
+      summary: Goodbye message endpoint
+      operationId: goodbye
+      x-google-backend:
+        address: ${GOODBYE}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              traceId:
+                type: string
+              sessionId:
+                type: string
+              languageCode:
+                type: string
+      responses:
+        200:
+          description: Successful response
+  /recquestions:
+    post:
+      summary: Recommended questions endpoint
+      operationId: recquestions
+      x-google-backend:
+        address: ${RECQUESTIONS}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              traceId:
+                type: string
+              languageCode:
+                type: string
+      responses:
+        200:
+          description: Successful response

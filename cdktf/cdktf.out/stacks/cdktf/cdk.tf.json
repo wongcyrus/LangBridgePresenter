@@ -1,0 +1,877 @@
+{
+  "//": {
+    "metadata": {
+      "backend": "local",
+      "stackName": "cdktf",
+      "version": "0.21.0"
+    },
+    "outputs": {
+      "cdktf": {
+        "api-url": "api-url",
+        "project-id": "project-id"
+      }
+    }
+  },
+  "data": {
+    "archive_file": {
+      "goodbyeFunction_archiveFile_B8C70E7D": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/goodbyeFunction/archiveFile",
+            "uniqueId": "goodbyeFunction_archiveFile_B8C70E7D"
+          }
+        },
+        "output_path": "/workspaces/xiaoice_class_assistant/cdktf/cdktf.out/functions/function-source-tSxvo78TCbIA0Kgxcg7FmReRFgY=.zip",
+        "source_dir": "/workspaces/xiaoice_class_assistant/functions/goodbye",
+        "type": "zip"
+      },
+      "recquestionsFunction_archiveFile_DEE13B1F": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/recquestionsFunction/archiveFile",
+            "uniqueId": "recquestionsFunction_archiveFile_DEE13B1F"
+          }
+        },
+        "output_path": "/workspaces/xiaoice_class_assistant/cdktf/cdktf.out/functions/function-source-uNNsmU8gO6WuzV47aqYVtZ0KhUw=.zip",
+        "source_dir": "/workspaces/xiaoice_class_assistant/functions/recquestions",
+        "type": "zip"
+      },
+      "talkStreamFunction_archiveFile_6150954E": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/archiveFile",
+            "uniqueId": "talkStreamFunction_archiveFile_6150954E"
+          }
+        },
+        "output_path": "/workspaces/xiaoice_class_assistant/cdktf/cdktf.out/functions/function-source-DSWT19AK2XbeC+cgE+oOxDIqUkk=.zip",
+        "source_dir": "/workspaces/xiaoice_class_assistant/functions/talk-stream",
+        "type": "zip"
+      },
+      "welcomeFunction_archiveFile_5BD55F0D": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/welcomeFunction/archiveFile",
+            "uniqueId": "welcomeFunction_archiveFile_5BD55F0D"
+          }
+        },
+        "output_path": "/workspaces/xiaoice_class_assistant/cdktf/cdktf.out/functions/function-source-mlCAnNQ9/LJVJayYUi7KUxH/CQQ=.zip",
+        "source_dir": "/workspaces/xiaoice_class_assistant/functions/welcome",
+        "type": "zip"
+      }
+    },
+    "google_billing_account": {
+      "billing-account": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/billing-account",
+            "uniqueId": "billing-account"
+          }
+        },
+        "billing_account": "01C74C-667DFE-538DBC"
+      }
+    }
+  },
+  "output": {
+    "api-url": {
+      "value": "${google_api_gateway_gateway.api-gateway_85E4765B.default_hostname}"
+    },
+    "project-id": {
+      "value": "${google_project.project.project_id}"
+    }
+  },
+  "provider": {
+    "archive": [
+      {
+      }
+    ],
+    "google-beta": [
+      {
+        "region": "us-east1"
+      }
+    ],
+    "random": [
+      {
+      }
+    ]
+  },
+  "resource": {
+    "google_api_gateway_api": {
+      "api-gateway_api_57BFA6D4": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/api",
+            "uniqueId": "api-gateway_api_57BFA6D4"
+          }
+        },
+        "api_id": "xiaoiceapi",
+        "depends_on": [
+          "google_project_service.api-gateway_iamgoogleapiscom_136CC357",
+          "google_project_service.api-gateway_apigatewaygoogleapiscom_FD1382FA",
+          "google_project_service.api-gateway_servicemanagementgoogleapiscom_BCEB69C7",
+          "google_project_service.api-gateway_servicecontrolgoogleapiscom_599B31D7"
+        ],
+        "project": "${google_project.project.project_id}",
+        "provider": "google-beta"
+      }
+    },
+    "google_api_gateway_api_config": {
+      "api-gateway_apiConfig_B6CA942D": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/apiConfig",
+            "uniqueId": "api-gateway_apiConfig_B6CA942D"
+          }
+        },
+        "api": "${google_api_gateway_api.api-gateway_api_57BFA6D4.api_id}",
+        "depends_on": [
+          "google_project_service.api-gateway_iamgoogleapiscom_136CC357",
+          "google_project_service.api-gateway_apigatewaygoogleapiscom_FD1382FA",
+          "google_project_service.api-gateway_servicemanagementgoogleapiscom_BCEB69C7",
+          "google_project_service.api-gateway_servicecontrolgoogleapiscom_599B31D7"
+        ],
+        "gateway_config": {
+          "backend_config": {
+            "google_service_account": "${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+          }
+        },
+        "lifecycle": {
+          "create_before_destroy": true
+        },
+        "openapi_documents": [
+          {
+            "document": {
+              "contents": "${base64encode(templatefile(\"/workspaces/xiaoice_class_assistant/cdktf/components/spec.yaml\", {\"TALK_STREAM\" = google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.url, \"WELCOME\" = google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.url, \"GOODBYE\" = google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.url, \"RECQUESTIONS\" = google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.url}))}",
+              "path": "spec.yaml"
+            }
+          }
+        ],
+        "project": "${google_project.project.project_id}",
+        "provider": "google-beta"
+      }
+    },
+    "google_api_gateway_gateway": {
+      "api-gateway_85E4765B": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/gateway",
+            "uniqueId": "api-gateway_85E4765B"
+          }
+        },
+        "api_config": "${google_api_gateway_api_config.api-gateway_apiConfig_B6CA942D.id}",
+        "depends_on": [
+          "google_project_service.api-gateway_iamgoogleapiscom_136CC357",
+          "google_project_service.api-gateway_apigatewaygoogleapiscom_FD1382FA",
+          "google_project_service.api-gateway_servicemanagementgoogleapiscom_BCEB69C7",
+          "google_project_service.api-gateway_servicecontrolgoogleapiscom_599B31D7"
+        ],
+        "display_name": "${google_project.project.project_id}-gateway",
+        "gateway_id": "gateway",
+        "project": "${google_project.project.project_id}",
+        "provider": "google-beta"
+      }
+    },
+    "google_app_engine_application": {
+      "cloud-function-deployment_app-engine-application_583671EA": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/app-engine-application",
+            "uniqueId": "cloud-function-deployment_app-engine-application_583671EA"
+          }
+        },
+        "database_type": "CLOUD_DATASTORE_COMPATIBILITY",
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B"
+        ],
+        "location_id": "us-east1",
+        "project": "${google_project.project.project_id}"
+      }
+    },
+    "google_cloud_run_service_iam_binding": {
+      "goodbyeFunction_cloud-run-service-iam-binding_D1E3B531": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/goodbyeFunction/cloud-run-service-iam-binding",
+            "uniqueId": "goodbyeFunction_cloud-run-service-iam-binding_D1E3B531"
+          }
+        },
+        "location": "${google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_project.project.project_id}",
+        "role": "roles/run.invoker",
+        "service": "${google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.name}"
+      },
+      "recquestionsFunction_cloud-run-service-iam-binding_209CE80A": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/recquestionsFunction/cloud-run-service-iam-binding",
+            "uniqueId": "recquestionsFunction_cloud-run-service-iam-binding_209CE80A"
+          }
+        },
+        "location": "${google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_project.project.project_id}",
+        "role": "roles/run.invoker",
+        "service": "${google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.name}"
+      },
+      "talkStreamFunction_cloud-run-service-iam-binding_2EBD4C9F": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/cloud-run-service-iam-binding",
+            "uniqueId": "talkStreamFunction_cloud-run-service-iam-binding_2EBD4C9F"
+          }
+        },
+        "location": "${google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_project.project.project_id}",
+        "role": "roles/run.invoker",
+        "service": "${google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.name}"
+      },
+      "welcomeFunction_cloud-run-service-iam-binding_1C50989B": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/welcomeFunction/cloud-run-service-iam-binding",
+            "uniqueId": "welcomeFunction_cloud-run-service-iam-binding_1C50989B"
+          }
+        },
+        "location": "${google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_project.project.project_id}",
+        "role": "roles/run.invoker",
+        "service": "${google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.name}"
+      }
+    },
+    "google_cloudfunctions2_function": {
+      "goodbyeFunction_cloud-function_A71D7E6F": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/goodbyeFunction/cloud-function",
+            "uniqueId": "goodbyeFunction_cloud-function_A71D7E6F"
+          }
+        },
+        "build_config": {
+          "entry_point": "goodbye",
+          "runtime": "python311",
+          "source": {
+            "storage_source": {
+              "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+              "object": "${google_storage_bucket_object.goodbyeFunction_storage-bucket-object_45E34E5D.name}"
+            }
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B",
+          "google_project_iam_member.cloud-functions-artifact-registry-reader"
+        ],
+        "location": "us-east1",
+        "name": "goodbye",
+        "project": "${google_project.project.project_id}",
+        "service_config": {
+          "available_memory": "256Mi",
+          "environment_variables": {
+          },
+          "max_instance_count": 100,
+          "max_instance_request_concurrency": 1,
+          "min_instance_count": 0,
+          "service_account_email": "${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}",
+          "timeout_seconds": 60
+        }
+      },
+      "recquestionsFunction_cloud-function_0881FF24": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/recquestionsFunction/cloud-function",
+            "uniqueId": "recquestionsFunction_cloud-function_0881FF24"
+          }
+        },
+        "build_config": {
+          "entry_point": "recquestions",
+          "runtime": "python311",
+          "source": {
+            "storage_source": {
+              "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+              "object": "${google_storage_bucket_object.recquestionsFunction_storage-bucket-object_0CD004D1.name}"
+            }
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B",
+          "google_project_iam_member.cloud-functions-artifact-registry-reader"
+        ],
+        "location": "us-east1",
+        "name": "recquestions",
+        "project": "${google_project.project.project_id}",
+        "service_config": {
+          "available_memory": "256Mi",
+          "environment_variables": {
+          },
+          "max_instance_count": 100,
+          "max_instance_request_concurrency": 1,
+          "min_instance_count": 0,
+          "service_account_email": "${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}",
+          "timeout_seconds": 60
+        }
+      },
+      "talkStreamFunction_cloud-function_07D62851": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/cloud-function",
+            "uniqueId": "talkStreamFunction_cloud-function_07D62851"
+          }
+        },
+        "build_config": {
+          "entry_point": "talk_stream",
+          "runtime": "python311",
+          "source": {
+            "storage_source": {
+              "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+              "object": "${google_storage_bucket_object.talkStreamFunction_storage-bucket-object_0B14C746.name}"
+            }
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B",
+          "google_project_iam_member.cloud-functions-artifact-registry-reader"
+        ],
+        "location": "us-east1",
+        "name": "talk-stream",
+        "project": "${google_project.project.project_id}",
+        "service_config": {
+          "available_memory": "512Mi",
+          "environment_variables": {
+          },
+          "max_instance_count": 100,
+          "max_instance_request_concurrency": 1,
+          "min_instance_count": 0,
+          "service_account_email": "${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}",
+          "timeout_seconds": 600
+        }
+      },
+      "welcomeFunction_cloud-function_AC127BAF": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/welcomeFunction/cloud-function",
+            "uniqueId": "welcomeFunction_cloud-function_AC127BAF"
+          }
+        },
+        "build_config": {
+          "entry_point": "welcome",
+          "runtime": "python311",
+          "source": {
+            "storage_source": {
+              "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+              "object": "${google_storage_bucket_object.welcomeFunction_storage-bucket-object_FFCBF2E1.name}"
+            }
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B",
+          "google_project_iam_member.cloud-functions-artifact-registry-reader"
+        ],
+        "location": "us-east1",
+        "name": "welcome",
+        "project": "${google_project.project.project_id}",
+        "service_config": {
+          "available_memory": "256Mi",
+          "environment_variables": {
+          },
+          "max_instance_count": 100,
+          "max_instance_request_concurrency": 1,
+          "min_instance_count": 0,
+          "service_account_email": "${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}",
+          "timeout_seconds": 60
+        }
+      }
+    },
+    "google_cloudfunctions2_function_iam_binding": {
+      "goodbyeFunction_cloudfunctions2-function-iam-member_C4176025": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/goodbyeFunction/cloudfunctions2-function-iam-member",
+            "uniqueId": "goodbyeFunction_cloudfunctions2-function-iam-member_C4176025"
+          }
+        },
+        "cloud_function": "${google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.name}",
+        "location": "${google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_cloudfunctions2_function.goodbyeFunction_cloud-function_A71D7E6F.project}",
+        "role": "roles/cloudfunctions.invoker"
+      },
+      "recquestionsFunction_cloudfunctions2-function-iam-member_C36E6350": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/recquestionsFunction/cloudfunctions2-function-iam-member",
+            "uniqueId": "recquestionsFunction_cloudfunctions2-function-iam-member_C36E6350"
+          }
+        },
+        "cloud_function": "${google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.name}",
+        "location": "${google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_cloudfunctions2_function.recquestionsFunction_cloud-function_0881FF24.project}",
+        "role": "roles/cloudfunctions.invoker"
+      },
+      "talkStreamFunction_cloudfunctions2-function-iam-member_D2270140": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/cloudfunctions2-function-iam-member",
+            "uniqueId": "talkStreamFunction_cloudfunctions2-function-iam-member_D2270140"
+          }
+        },
+        "cloud_function": "${google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.name}",
+        "location": "${google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_cloudfunctions2_function.talkStreamFunction_cloud-function_07D62851.project}",
+        "role": "roles/cloudfunctions.invoker"
+      },
+      "welcomeFunction_cloudfunctions2-function-iam-member_52F5A244": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/welcomeFunction/cloudfunctions2-function-iam-member",
+            "uniqueId": "welcomeFunction_cloudfunctions2-function-iam-member_52F5A244"
+          }
+        },
+        "cloud_function": "${google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.name}",
+        "location": "${google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.location}",
+        "members": [
+          "serviceAccount:${google_service_account.talkStreamFunction_service-account_FB32F2E8.email}"
+        ],
+        "project": "${google_cloudfunctions2_function.welcomeFunction_cloud-function_AC127BAF.project}",
+        "role": "roles/cloudfunctions.invoker"
+      }
+    },
+    "google_project": {
+      "project": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/project",
+            "uniqueId": "project"
+          }
+        },
+        "billing_account": "${data.google_billing_account.billing-account.id}",
+        "deletion_policy": "DELETE",
+        "name": "xiaice-class-assistant",
+        "project_id": "xiaice-class-assistant"
+      }
+    },
+    "google_project_iam_member": {
+      "cloud-functions-artifact-registry-reader": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-functions-artifact-registry-reader",
+            "uniqueId": "cloud-functions-artifact-registry-reader"
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B"
+        ],
+        "member": "serviceAccount:service-${google_project.project.number}@gcf-admin-robot.iam.gserviceaccount.com",
+        "project": "xiaice-class-assistant",
+        "role": "roles/artifactregistry.reader"
+      }
+    },
+    "google_project_service": {
+      "api-gateway_api-gateway-managed-service_E28A4BFF": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/api-gateway-managed-service",
+            "uniqueId": "api-gateway_api-gateway-managed-service_E28A4BFF"
+          }
+        },
+        "depends_on": [
+          "google_api_gateway_api.api-gateway_api_57BFA6D4"
+        ],
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "${google_api_gateway_api.api-gateway_api_57BFA6D4.managed_service}"
+      },
+      "api-gateway_apigatewaygoogleapiscom_FD1382FA": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/apigatewaygoogleapiscom",
+            "uniqueId": "api-gateway_apigatewaygoogleapiscom_FD1382FA"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "apigateway.googleapis.com"
+      },
+      "api-gateway_iamgoogleapiscom_136CC357": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/iamgoogleapiscom",
+            "uniqueId": "api-gateway_iamgoogleapiscom_136CC357"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "iam.googleapis.com"
+      },
+      "api-gateway_servicecontrolgoogleapiscom_599B31D7": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/servicecontrolgoogleapiscom",
+            "uniqueId": "api-gateway_servicecontrolgoogleapiscom_599B31D7"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "servicecontrol.googleapis.com"
+      },
+      "api-gateway_servicemanagementgoogleapiscom_BCEB69C7": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/api-gateway/servicemanagementgoogleapiscom",
+            "uniqueId": "api-gateway_servicemanagementgoogleapiscom_BCEB69C7"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "servicemanagement.googleapis.com"
+      },
+      "cloud-function-deployment_apikeysgoogleapiscom_7DF57E08": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/apikeysgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_apikeysgoogleapiscom_7DF57E08"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "apikeys.googleapis.com"
+      },
+      "cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/artifactregistrygoogleapiscom",
+            "uniqueId": "cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "artifactregistry.googleapis.com"
+      },
+      "cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/cloudbuildgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "cloudbuild.googleapis.com"
+      },
+      "cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/cloudfunctionsgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "cloudfunctions.googleapis.com"
+      },
+      "cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/cloudresourcemanagergoogleapiscom",
+            "uniqueId": "cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "cloudresourcemanager.googleapis.com"
+      },
+      "cloud-function-deployment_eventarcgoogleapiscom_E6BF237D": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/eventarcgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_eventarcgoogleapiscom_E6BF237D"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "eventarc.googleapis.com"
+      },
+      "cloud-function-deployment_iamgoogleapiscom_7FA426A6": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/iamgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_iamgoogleapiscom_7FA426A6"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "iam.googleapis.com"
+      },
+      "cloud-function-deployment_logginggoogleapiscom_DEF6A65B": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/logginggoogleapiscom",
+            "uniqueId": "cloud-function-deployment_logginggoogleapiscom_DEF6A65B"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "logging.googleapis.com"
+      },
+      "cloud-function-deployment_rungoogleapiscom_6743F467": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/rungoogleapiscom",
+            "uniqueId": "cloud-function-deployment_rungoogleapiscom_6743F467"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "run.googleapis.com"
+      },
+      "cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/secretmanagergoogleapiscom",
+            "uniqueId": "cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "secretmanager.googleapis.com"
+      },
+      "cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/storage-apigoogleapiscom",
+            "uniqueId": "cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "storage-api.googleapis.com"
+      },
+      "cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/storage-componentgoogleapiscom",
+            "uniqueId": "cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0"
+          }
+        },
+        "disable_on_destroy": false,
+        "project": "${google_project.project.project_id}",
+        "service": "storage-component.googleapis.com"
+      }
+    },
+    "google_service_account": {
+      "talkStreamFunction_service-account_FB32F2E8": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/service-account",
+            "uniqueId": "talkStreamFunction_service-account_FB32F2E8"
+          }
+        },
+        "account_id": "talk-streamtalkstream",
+        "display_name": "talk-streamtalk_stream",
+        "project": "${google_project.project.project_id}"
+      }
+    },
+    "google_storage_bucket": {
+      "cloud-function-deployment_sourceBucket_7C4598A4": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/sourceBucket",
+            "uniqueId": "cloud-function-deployment_sourceBucket_7C4598A4"
+          }
+        },
+        "depends_on": [
+          "google_project_service.cloud-function-deployment_iamgoogleapiscom_7FA426A6",
+          "google_project_service.cloud-function-deployment_cloudresourcemanagergoogleapiscom_A5C5CC28",
+          "google_project_service.cloud-function-deployment_apikeysgoogleapiscom_7DF57E08",
+          "google_project_service.cloud-function-deployment_rungoogleapiscom_6743F467",
+          "google_project_service.cloud-function-deployment_artifactregistrygoogleapiscom_BFA77002",
+          "google_project_service.cloud-function-deployment_cloudfunctionsgoogleapiscom_C10A0153",
+          "google_project_service.cloud-function-deployment_storage-apigoogleapiscom_E96DBBDB",
+          "google_project_service.cloud-function-deployment_storage-componentgoogleapiscom_645D3EB0",
+          "google_project_service.cloud-function-deployment_cloudbuildgoogleapiscom_9B74C6CA",
+          "google_project_service.cloud-function-deployment_eventarcgoogleapiscom_E6BF237D",
+          "google_project_service.cloud-function-deployment_secretmanagergoogleapiscom_1A7B8455",
+          "google_project_service.cloud-function-deployment_logginggoogleapiscom_DEF6A65B"
+        ],
+        "force_destroy": true,
+        "lifecycle_rule": [
+          {
+            "action": {
+              "type": "Delete"
+            },
+            "condition": {
+              "age": 1
+            }
+          }
+        ],
+        "location": "us-east1",
+        "name": "source${random_string.cloud-function-deployment_bucketPrefix_E4600AAA.result}",
+        "project": "${google_project.project.project_id}",
+        "storage_class": "REGIONAL",
+        "uniform_bucket_level_access": true
+      }
+    },
+    "google_storage_bucket_object": {
+      "goodbyeFunction_storage-bucket-object_45E34E5D": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/goodbyeFunction/storage-bucket-object",
+            "uniqueId": "goodbyeFunction_storage-bucket-object_45E34E5D"
+          }
+        },
+        "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+        "name": "function-source-tSxvo78TCbIA0Kgxcg7FmReRFgY=.zip",
+        "source": "${data.archive_file.goodbyeFunction_archiveFile_B8C70E7D.output_path}"
+      },
+      "recquestionsFunction_storage-bucket-object_0CD004D1": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/recquestionsFunction/storage-bucket-object",
+            "uniqueId": "recquestionsFunction_storage-bucket-object_0CD004D1"
+          }
+        },
+        "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+        "name": "function-source-uNNsmU8gO6WuzV47aqYVtZ0KhUw=.zip",
+        "source": "${data.archive_file.recquestionsFunction_archiveFile_DEE13B1F.output_path}"
+      },
+      "talkStreamFunction_storage-bucket-object_0B14C746": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/talkStreamFunction/storage-bucket-object",
+            "uniqueId": "talkStreamFunction_storage-bucket-object_0B14C746"
+          }
+        },
+        "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+        "name": "function-source-DSWT19AK2XbeC+cgE+oOxDIqUkk=.zip",
+        "source": "${data.archive_file.talkStreamFunction_archiveFile_6150954E.output_path}"
+      },
+      "welcomeFunction_storage-bucket-object_FFCBF2E1": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/welcomeFunction/storage-bucket-object",
+            "uniqueId": "welcomeFunction_storage-bucket-object_FFCBF2E1"
+          }
+        },
+        "bucket": "${google_storage_bucket.cloud-function-deployment_sourceBucket_7C4598A4.name}",
+        "name": "function-source-mlCAnNQ9/LJVJayYUi7KUxH/CQQ=.zip",
+        "source": "${data.archive_file.welcomeFunction_archiveFile_5BD55F0D.output_path}"
+      }
+    },
+    "random_string": {
+      "cloud-function-deployment_bucketPrefix_E4600AAA": {
+        "//": {
+          "metadata": {
+            "path": "cdktf/cloud-function-deployment/bucketPrefix",
+            "uniqueId": "cloud-function-deployment_bucketPrefix_E4600AAA"
+          }
+        },
+        "length": 9,
+        "special": false,
+        "upper": false
+      }
+    }
+  },
+  "terraform": {
+    "backend": {
+      "local": {
+        "path": "/workspaces/xiaoice_class_assistant/cdktf/terraform.cdktf.tfstate"
+      }
+    },
+    "required_providers": {
+      "archive": {
+        "source": "archive",
+        "version": "2.7.1"
+      },
+      "google-beta": {
+        "source": "google-beta",
+        "version": "6.49.3"
+      },
+      "random": {
+        "source": "random",
+        "version": "3.7.2"
+      }
+    }
+  }
+}
