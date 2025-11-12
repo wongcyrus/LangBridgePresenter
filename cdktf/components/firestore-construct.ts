@@ -29,7 +29,7 @@ export class FirestoreConstruct extends Construct {
         // const googleFirestoreDatabase = 
         new GoogleFirestoreDatabase(this, "Firestore", {
             project: props.project,
-            name: "pytestrunner",
+            name: "xiaoice",
             locationId: "nam5",
             type: "FIRESTORE_NATIVE",
             deleteProtectionState: "DELETE_PROTECTION_DISABLED",

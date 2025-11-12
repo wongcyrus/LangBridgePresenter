@@ -10,6 +10,7 @@ import { CloudFunctionConstruct } from "./components/cloud-function-construct";
 import { ApigatewayConstruct } from "./components/api-gateway-construct";
 import { GoogleProjectIamMember } from "./.gen/providers/google-beta/google-project-iam-member";
 import * as dotenv from 'dotenv';
+import { FirestoreConstruct } from "./components/firestore-construct";
 
 dotenv.config();
 
@@ -37,6 +38,8 @@ class XiaoiceApiStack extends TerraformStack {
       billingAccount: billingAccount.id,
       deletionPolicy: "DELETE",
     });
+
+
 
     const cloudFunctionDeploymentConstruct = new CloudFunctionDeploymentConstruct(this, "cloud-function-deployment", {
       project: project.projectId,
@@ -112,12 +115,21 @@ class XiaoiceApiStack extends TerraformStack {
       servicesAccount: talkStreamFunction.serviceAccount,
     });
 
+    FirestoreConstruct.create(this, "firestore", {
+      project: project.projectId,
+      servicesAccount: talkStreamFunction.serviceAccount
+    });
+
     new TerraformOutput(this, "project-id", {
       value: project.projectId,
     });
 
     new TerraformOutput(this, "api-url", {
       value: apigatewayConstruct.gateway.defaultHostname,
+    });
+
+    new TerraformOutput(this, "api-service-name", {
+      value: apigatewayConstruct.apiGatewayApi.managedService,
     });
   }
 }

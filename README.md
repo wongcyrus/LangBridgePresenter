@@ -45,3 +45,16 @@ cdktf/              # Infrastructure as Code
 
 All endpoints return mocked responses for development.
 # xiaoice_class_assistant
+
+### Login your GCP account
+```
+gcloud auth application-default login
+```
+
+### Create API Key
+
+```
+gcloud auth login
+gcloud config set project <project-id>
+gcloud auth application-default set-quota-project <project-id>
+```
