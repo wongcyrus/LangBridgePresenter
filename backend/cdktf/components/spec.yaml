@@ -8,7 +8,7 @@ schemes:
 produces:
   - application/json
 paths:
-  /talk:
+  /api/talk:
     post:
       summary: Talk stream endpoint
       operationId: talkStream
@@ -32,7 +32,7 @@ paths:
       responses:
         200:
           description: Successful response
-  /welcome:
+  /api/welcome:
     post:
       summary: Welcome message endpoint
       operationId: welcome
@@ -54,7 +54,7 @@ paths:
       responses:
         200:
           description: Successful response
-  /goodbye:
+  /api/goodbye:
     post:
       summary: Goodbye message endpoint
       operationId: goodbye
@@ -76,7 +76,7 @@ paths:
       responses:
         200:
           description: Successful response
-  /recquestions:
+  /api/recquestions:
     post:
       summary: Recommended questions endpoint
       operationId: recquestions
@@ -96,7 +96,7 @@ paths:
       responses:
         200:
           description: Successful response
-  /config:
+  /api/config:
     post:
       summary: Configuration endpoint
       operationId: config

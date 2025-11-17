@@ -20,11 +20,11 @@ def calculate_signature(body_string: str, secret_key: str, timestamp: str) -> st
 
 
 def test_talk_stream():
-    """Test the /talk streaming endpoint"""
-    print("Testing /talk streaming endpoint...")
+    """Test the /api/talk streaming endpoint"""
+    print("Testing /api/talk streaming endpoint...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    endpoint = "/talk"
+    endpoint = "/api/talk"
     
     secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
     access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
@@ -74,11 +74,11 @@ def test_talk_stream():
 
 
 def test_welcome():
-    """Test the /welcome endpoint"""
-    print("Testing /welcome endpoint...")
+    """Test the /api/welcome endpoint"""
+    print("Testing /api/welcome endpoint...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    endpoint = "/welcome"
+    endpoint = "/api/welcome"
     
     secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
     access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
@@ -119,11 +119,11 @@ def test_welcome():
 
 
 def test_goodbye():
-    """Test the /goodbye endpoint"""
-    print("Testing /goodbye endpoint...")
+    """Test the /api/goodbye endpoint"""
+    print("Testing /api/goodbye endpoint...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    endpoint = "/goodbye"
+    endpoint = "/api/goodbye"
     
     secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
     access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
@@ -164,11 +164,11 @@ def test_goodbye():
 
 
 def test_recquestions():
-    """Test the /recquestions endpoint"""
-    print("Testing /recquestions endpoint...")
+    """Test the /api/recquestions endpoint"""
+    print("Testing /api/recquestions endpoint...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    endpoint = "/recquestions"
+    endpoint = "/api/recquestions"
     
     secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
     access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
@@ -207,11 +207,11 @@ def test_recquestions():
 
 
 def test_config():
-    """Test the /config endpoint"""
-    print("Testing /config endpoint...")
+    """Test the /api/config endpoint"""
+    print("Testing /api/config endpoint...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    endpoint = "/config"
+    endpoint = "/api/config"
     
     secret_key = os.getenv("XiaoiceChatSecretKey", "test_secret_key")
     access_key = os.getenv("XiaoiceChatAccessKey", "test_access_key")
@@ -322,7 +322,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/config",
+            f"{base_url}/api/config",
             data=body_string,
             headers=headers,
             timeout=10
@@ -360,7 +360,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/welcome",
+            f"{base_url}/api/welcome",
             data=body_string,
             headers=headers,
             timeout=10
@@ -395,7 +395,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/goodbye",
+            f"{base_url}/api/goodbye",
             data=body_string,
             headers=headers,
             timeout=10
@@ -429,7 +429,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/recquestions",
+            f"{base_url}/api/recquestions",
             data=body_string,
             headers=headers,
             timeout=10
@@ -466,7 +466,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/talk",
+            f"{base_url}/api/talk",
             data=body_string,
             headers=headers,
             timeout=10

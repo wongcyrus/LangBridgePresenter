@@ -59,15 +59,27 @@ class XiaoiceApiStack extends TerraformStack {
       functionName: "talk-stream",
       runtime: "python311",
       entryPoint: "talk_stream",
-      timeout: 600,
-      availableMemory: "512Mi",
+      timeout: 1200,
+      availableCpu: "2",
+      availableMemory: "2048Mi",
       makePublic: false,
       cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
       environmentVariables: {
         "XiaoiceChatSecretKey": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
-        "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
+        "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key",
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "GOOGLE_CLOUD_LOCATION": "global",
+        "GOOGLE_GENAI_USE_VERTEXAI": "True"
       },
       additionalDependencies: [artifactRegistryIamMember],
+    });
+
+    // Grant AI Platform (Vertex AI) user role to the service account for Gemini API access
+    const aiPlatformIamMember = new GoogleProjectIamMember(this, "ai-platform-user", {
+      project: projectId,
+      role: "roles/aiplatform.user",
+      member: `serviceAccount:${talkStreamFunction.serviceAccount.email}`,
+      dependsOn: cloudFunctionDeploymentConstruct.services,
     });
 
     const welcomeFunction = await CloudFunctionConstruct.create(this, "welcomeFunction", {
@@ -83,7 +95,7 @@ class XiaoiceApiStack extends TerraformStack {
         "XiaoiceChatSecretKey": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
         "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
       },
-      additionalDependencies: [artifactRegistryIamMember],
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
 
     const goodbyeFunction = await CloudFunctionConstruct.create(this, "goodbyeFunction", {
@@ -99,7 +111,7 @@ class XiaoiceApiStack extends TerraformStack {
         "XiaoiceChatSecretKey": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
         "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
       },
-      additionalDependencies: [artifactRegistryIamMember],
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
 
     const recquestionsFunction = await CloudFunctionConstruct.create(this, "recquestionsFunction", {
@@ -115,7 +127,7 @@ class XiaoiceApiStack extends TerraformStack {
         "XiaoiceChatSecretKey": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
         "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
       },
-      additionalDependencies: [artifactRegistryIamMember],
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
 
     const configFunction = await CloudFunctionConstruct.create(this, "configFunction", {
@@ -131,7 +143,7 @@ class XiaoiceApiStack extends TerraformStack {
         "XiaoiceChatSecretKey": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
         "XiaoiceChatAccessKey": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
       },
-      additionalDependencies: [artifactRegistryIamMember],
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
 
     const apigatewayConstruct = await ApigatewayConstruct.create(this, "api-gateway", {
