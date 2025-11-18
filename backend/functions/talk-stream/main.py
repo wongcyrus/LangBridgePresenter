@@ -75,7 +75,9 @@ def talk_stream(request):
     logger.debug("request_json: %s", request_json)
 
     ask_text = request_json.get("askText", "")
+    # Use a stable conversation id (provided by client) and a stable user_id
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
+    user_id = request_json.get("userId", session_id)
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
     extra = request_json.get("extra", {})
@@ -90,14 +92,32 @@ def talk_stream(request):
             prompt = f"Please respond in {language_code}: {ask_text}"
 
         try:
-            # Create a session for this conversation
+            # Reuse an existing session if present; otherwise create one
+            # with the given session_id
             session = asyncio.run(
-                runner.session_service.create_session(
+                runner.session_service.get_session(
                     app_name='xiaoice_classroom_assistant',
-                    user_id=session_id,
+                    user_id=user_id,
+                    session_id=session_id,
                 )
             )
-            logger.debug("Session created: %s", getattr(session, 'id', None))
+            if session is None:
+                session = asyncio.run(
+                    runner.session_service.create_session(
+                        app_name='xiaoice_classroom_assistant',
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
+                )
+                logger.debug(
+                    "Session created: %s",
+                    getattr(session, 'id', None),
+                )
+            else:
+                logger.debug(
+                    "Session reused: %s",
+                    getattr(session, 'id', None),
+                )
 
             content = types.Content(
                 role='user',
@@ -106,8 +126,8 @@ def talk_stream(request):
 
             accumulated_text = ""
             for event in runner.run(
-                user_id=session_id,
-                session_id=getattr(session, 'id', None),
+                user_id=user_id,
+                session_id=session_id,
                 new_message=content,
             ):
                 try:
@@ -178,4 +198,8 @@ def talk_stream(request):
         "Access-Control-Allow-Origin": "*",
         "X-Accel-Buffering": "no",
     }
-    return Response(stream_response(), mimetype="text/event-stream", headers=headers)
+    return Response(
+        stream_response(),
+        mimetype="text/event-stream",
+        headers=headers,
+    )
