@@ -4,7 +4,6 @@ import os
 import sys
 import functions_framework
 from google.cloud import firestore
-from auth_utils import validate_authentication
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -25,11 +24,7 @@ logger.setLevel(_level)
 @functions_framework.http
 def config(request):
     logger.debug("config invoked: method=%s", request.method)
-    auth_error = validate_authentication(request)
-    if auth_error:
-        logger.warning("auth_error: %s", auth_error)
-        return auth_error
-    
+ 
     if request.method != 'POST':
         logger.warning("method not allowed: %s", request.method)
         return json.dumps({"error": "Method not allowed"}), 405, {

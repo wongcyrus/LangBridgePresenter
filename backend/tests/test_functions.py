@@ -19,6 +19,25 @@ def calculate_signature(body_string: str, secret_key: str, timestamp: str) -> st
     return hashlib.sha512(signature_string.encode("utf-8")).hexdigest().upper()
 
 
+def get_auth_keys():
+    """Return (secret_key, access_key) from env with sensible fallbacks.
+
+    Prefers camelCase variables exported by run_tests.sh, and falls back to
+    CDKTF-style uppercase keys or test defaults.
+    """
+    secret_key = (
+        os.getenv("XiaoiceChatSecretKey")
+        or os.getenv("XIAOICE_CHAT_SECRET_KEY")
+        or "test_secret_key"
+    )
+    access_key = (
+        os.getenv("XiaoiceChatAccessKey")
+        or os.getenv("XIAOICE_CHAT_ACCESS_KEY")
+        or "test_access_key"
+    )
+    return secret_key, access_key
+
+
 def test_talk_stream():
     """Test the /api/talk streaming endpoint"""
     print("Testing /api/talk streaming endpoint...")
@@ -26,8 +45,7 @@ def test_talk_stream():
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
     endpoint = "/api/talk"
     
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    secret_key, access_key = get_auth_keys()
     
     timestamp = str(int(time.time() * 1000))
     session_id = str(uuid.uuid4())
@@ -80,8 +98,7 @@ def test_welcome():
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
     endpoint = "/api/welcome"
     
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    secret_key, access_key = get_auth_keys()
     
     timestamp = str(int(time.time() * 1000))
     session_id = str(uuid.uuid4())
@@ -125,8 +142,7 @@ def test_goodbye():
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
     endpoint = "/api/goodbye"
     
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    secret_key, access_key = get_auth_keys()
     
     timestamp = str(int(time.time() * 1000))
     session_id = str(uuid.uuid4())
@@ -170,8 +186,7 @@ def test_recquestions():
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
     endpoint = "/api/recquestions"
     
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    secret_key, access_key = get_auth_keys()
     
     timestamp = str(int(time.time() * 1000))
     trace_id = str(uuid.uuid4())
@@ -213,10 +228,27 @@ def test_config():
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
     endpoint = "/api/config"
     
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    # Read API key from api_key.json
+    api_key_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "admin_tools",
+        "api_key.json"
+    )
     
-    timestamp = str(int(time.time() * 1000))
+    try:
+        with open(api_key_path, 'r') as f:
+            api_key_data = json.load(f)
+            api_key = api_key_data.get("key_string")
+            if not api_key:
+                print(f"❌ No key_string found in {api_key_path}")
+                return
+            print(f"✅ Loaded API key from {api_key_path}")
+    except FileNotFoundError:
+        print(f"❌ API key file not found: {api_key_path}")
+        return
+    except Exception as e:
+        print(f"❌ Error reading API key: {e}")
+        return
     
     payload = {
         "welcome_messages": {
@@ -246,18 +278,14 @@ def test_config():
     }
     
     body_string = json.dumps(payload, separators=(',', ':'))
-    signature = calculate_signature(body_string, secret_key, timestamp)
     
     headers = {
-        "Content-Type": "application/json",
-        "X-Timestamp": timestamp,
-        "X-Sign": signature,
-        "X-Key": access_key
+        "Content-Type": "application/json"
     }
     
     try:
         response = requests.post(
-            f"{base_url}{endpoint}",
+            f"{base_url}{endpoint}?key={api_key}",
             data=body_string,
             headers=headers,
             timeout=10
@@ -275,8 +303,29 @@ def test_config_and_verify_all():
     print("Testing config update and verification...")
     
     base_url = os.getenv("API_URL", "https://your-api-gateway-url")
-    secret_key = os.getenv("XiaoiceChatAccessKey", "test_secret_key")
-    access_key = os.getenv("XiaoiceChatSecretKey", "test_access_key")
+    secret_key, access_key = get_auth_keys()
+    
+    # Read API key from api_key.json
+    api_key_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "admin_tools",
+        "api_key.json"
+    )
+    
+    try:
+        with open(api_key_path, 'r') as f:
+            api_key_data = json.load(f)
+            api_key = api_key_data.get("key_string")
+            if not api_key:
+                print(f"❌ No key_string found in {api_key_path}")
+                return
+            print(f"✅ Loaded API key from {api_key_path}")
+    except FileNotFoundError:
+        print(f"❌ API key file not found: {api_key_path}")
+        return
+    except Exception as e:
+        print(f"❌ Error reading API key: {e}")
+        return
     
     # Generate random test values
     random_id = str(uuid.uuid4())[:8]
@@ -289,7 +338,6 @@ def test_config_and_verify_all():
     
     # Step 1: Update configuration with random values
     print("Step 1: Updating configuration with random values...")
-    timestamp = str(int(time.time() * 1000))
     
     config_payload = {
         "welcome_messages": {
@@ -311,6 +359,7 @@ def test_config_and_verify_all():
     }
     
     body_string = json.dumps(config_payload, separators=(',', ':'))
+    timestamp = str(int(time.time() * 1000))
     signature = calculate_signature(body_string, secret_key, timestamp)
     
     headers = {
@@ -322,7 +371,7 @@ def test_config_and_verify_all():
     
     try:
         response = requests.post(
-            f"{base_url}/api/config",
+            f"{base_url}/api/config?key={api_key}",
             data=body_string,
             headers=headers,
             timeout=10

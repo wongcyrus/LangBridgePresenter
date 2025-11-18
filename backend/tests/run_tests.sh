@@ -27,9 +27,13 @@ echo "Using API URL: https://$API_URL"
 
 cd "$TESTS_DIR" || exit 1
 
-# Load environment variables from .env if it exists
-if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
+# Load environment variables from backend/cdktf/.env if it exists
+if [ -f "$CDKTF_DIR/.env" ]; then
+    # Export all variables defined in the .env
+    set -a
+    # shellcheck disable=SC1090
+    . "$CDKTF_DIR/.env"
+    set +a
 fi
 
 # Setup virtual environment
@@ -42,7 +46,8 @@ pip install -r requirements.txt
 
 # Set environment variables and run tests
 export API_URL="https://$API_URL"
-export XiaoiceChatSecretKey="${XiaoiceChatSecretKey:-test_secret_key}"
-export XiaoiceChatAccessKey="${XiaoiceChatAccessKey:-test_access_key}"
+# Prefer values from cdktf .env (XIAOICE_*) but allow local override via camelCase vars
+export XiaoiceChatSecretKey="${XiaoiceChatSecretKey:-${XIAOICE_CHAT_SECRET_KEY:-test_secret_key}}"
+export XiaoiceChatAccessKey="${XiaoiceChatAccessKey:-${XIAOICE_CHAT_ACCESS_KEY:-test_access_key}}"
 
 python test_functions.py "$@"

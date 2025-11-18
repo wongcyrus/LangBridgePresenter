@@ -100,6 +100,8 @@ paths:
     post:
       summary: Configuration endpoint
       operationId: config
+      security:
+        - api_key: []
       x-google-backend:
         address: ${CONFIG}
       parameters:
@@ -118,3 +120,8 @@ paths:
       responses:
         200:
           description: Successful response
+securityDefinitions:
+  api_key:
+    type: apiKey
+    name: key
+    in: query

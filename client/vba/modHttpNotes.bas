@@ -5,6 +5,107 @@ Option Explicit
 Public PPTEvents As CAppEvents
 
 ' =========================
+' Configuration
+' =========================
+' Function to read API key from a config file or environment
+Private Function GetApiKey() As String
+    On Error Resume Next
+    
+    ' Option 1: Read from a text file in multiple possible locations
+    Dim configPath As String
+    Dim fso As Object
+    Dim ts As Object
+    Dim apiKey As String
+    Dim wsh As Object
+    Dim locations() As String
+    Dim i As Integer
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    ' Try multiple locations in order of preference
+    ReDim locations(0 To 3)
+    
+    ' Location 1: Same directory as the presentation (if open)
+    If Not ActivePresentation Is Nothing Then
+        If ActivePresentation.Path <> "" Then
+            locations(0) = ActivePresentation.Path & "\api_config.txt"
+        End If
+    End If
+    
+    ' Location 2: User's Documents folder
+    locations(1) = wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt"
+    
+    ' Location 3: User's AppData\Roaming folder
+    locations(2) = wsh.ExpandEnvironmentStrings("%APPDATA%") & "\XiaoiceClassAssistant\api_config.txt"
+    
+    ' Location 4: Temp folder (last resort)
+    locations(3) = wsh.ExpandEnvironmentStrings("%TEMP%") & "\api_config.txt"
+    
+    ' Try each location
+    For i = 0 To 3
+        If locations(i) <> "" Then
+            If fso.FileExists(locations(i)) Then
+                Set ts = fso.OpenTextFile(locations(i), 1) ' 1 = ForReading
+                If Not ts.AtEndOfStream Then
+                    apiKey = Trim(ts.ReadLine)
+                    Debug.Print "API key loaded from: " & locations(i)
+                End If
+                ts.Close
+                Set ts = Nothing
+                If apiKey <> "" Then Exit For
+            End If
+        End If
+    Next i
+    
+    Set fso = Nothing
+    
+    ' Option 2: Read from Windows Registry (requires user to set it once)
+    If apiKey = "" Then
+        apiKey = wsh.RegRead("HKCU\Software\XiaoiceClassAssistant\ApiKey")
+        If apiKey <> "" Then Debug.Print "API key loaded from registry"
+    End If
+    
+    ' Option 3: Fallback to prompt user (first time setup)
+    If apiKey = "" Then
+        apiKey = InputBox("Please enter your API key for Xiaoice Class Assistant:" & vbCrLf & vbCrLf & _
+                         "The key will be saved to:" & vbCrLf & _
+                         wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt", _
+                         "API Key Required", "")
+        
+        ' Save to both registry AND file for next time
+        If apiKey <> "" Then
+            On Error Resume Next
+            ' Save to registry
+            wsh.RegWrite "HKCU\Software\XiaoiceClassAssistant\ApiKey", apiKey, "REG_SZ"
+            
+            ' Save to Documents folder
+            Dim saveFolder As String
+            saveFolder = wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant"
+            Set fso = CreateObject("Scripting.FileSystemObject")
+            
+            ' Create folder if it doesn't exist
+            If Not fso.FolderExists(saveFolder) Then
+                fso.CreateFolder saveFolder
+            End If
+            
+            ' Write the key to file
+            Set ts = fso.CreateTextFile(saveFolder & "\api_config.txt", True)
+            ts.WriteLine apiKey
+            ts.Close
+            Set ts = Nothing
+            Set fso = Nothing
+            
+            Debug.Print "API key saved to: " & saveFolder & "\api_config.txt"
+        End If
+    End If
+    
+    Set wsh = Nothing
+    GetApiKey = apiKey
+    If Err.Number <> 0 Then Err.Clear
+End Function
+
+' =========================
 ' Session init / teardown
 ' =========================
 Public Sub InitSlideShowEvents()
@@ -61,8 +162,17 @@ Public Sub SetWelcome(ByVal welcome As String)
     ' -- Configure your endpoint here --
     Dim baseUrl As String
     baseUrl = "https://gateway-25iq0pr1.ue.gateway.dev"
+    Dim apiKey As String
+    apiKey = GetApiKey()
+    
+    ' Validate API key
+    If apiKey = "" Then
+        Debug.Print "Error: No API key configured. Cannot proceed."
+        Exit Sub
+    End If
+    
     Dim url As String
-    url = baseUrl & "/api/config"
+    url = baseUrl & "/api/config?key=" & apiKey
 
     ' Prepare payload
     Dim bodyString As String
