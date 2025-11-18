@@ -132,14 +132,16 @@ class XiaoiceApiStack extends TerraformStack {
       functionName: "config",
       runtime: "python311",
       entryPoint: "config",
-      timeout: 60,
-      availableMemory: "256Mi",
+      timeout: 1200,
+      availableCpu: "2",
+      availableMemory: "2048Mi",
       makePublic: false,
       cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
       serviceAccount: talkStreamFunction.serviceAccount,
       environmentVariables: {
-        "XIAOICE_CHAT_SECRET_KEY": process.env.XIAOICE_CHAT_SECRET_KEY || "default_secret_key",
-        "XIAOICE_CHAT_ACCESS_KEY": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key"
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "GOOGLE_CLOUD_LOCATION": "global",
+        "GOOGLE_GENAI_USE_VERTEXAI": "True"
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });

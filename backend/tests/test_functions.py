@@ -251,6 +251,10 @@ def test_config():
         return
     
     payload = {
+        "presentation_messages": {
+            "en": "Welcome to today's presentation!",
+            "zh": "欢迎参加今天的演示！"
+        },
         "welcome_messages": {
             "en": "Hello! Welcome to our updated service!",
             "zh": "您好！欢迎使用我们更新的服务！"
@@ -298,6 +302,83 @@ def test_config():
         print(f"Error: {e}")
 
 
+def test_config_generate_presentation():
+    """Test config endpoint with agent-generated presentation messages"""
+    print("Testing config with agent-generated presentation messages...")
+    
+    base_url = os.getenv("API_URL", "https://your-api-gateway-url")
+    endpoint = "/api/config"
+    secret_key, access_key = get_auth_keys()
+    
+    # Read API key from api_key.json
+    api_key_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "admin_tools",
+        "api_key.json"
+    )
+    
+    try:
+        with open(api_key_path, 'r') as f:
+            api_key_data = json.load(f)
+            api_key = api_key_data.get("key_string")
+            if not api_key:
+                print(f"❌ No key_string found in {api_key_path}")
+                return
+            print(f"✅ Loaded API key from {api_key_path}")
+    except FileNotFoundError:
+        print(f"❌ API key file not found: {api_key_path}")
+        return
+    except Exception as e:
+        print(f"❌ Error reading API key: {e}")
+        return
+    
+    payload = {
+        "generate_presentation": True,
+        "languages": ["en", "zh"],
+        "context": "quarterly business review",
+        "presentation_messages": {},
+        "welcome_messages": {
+            "en": "Welcome!",
+            "zh": "欢迎！"
+        },
+        "goodbye_messages": {
+            "en": "Goodbye!",
+            "zh": "再见！"
+        }
+    }
+    
+    body_string = json.dumps(payload, separators=(',', ':'))
+    timestamp = str(int(time.time() * 1000))
+    signature = calculate_signature(body_string, secret_key, timestamp)
+    
+    headers = {
+        "Content-Type": "application/json",
+        "X-Timestamp": timestamp,
+        "X-Sign": signature,
+        "X-Key": access_key
+    }
+    
+    try:
+        print("Sending request to generate presentation messages...")
+        response = requests.post(
+            f"{base_url}{endpoint}?key={api_key}",
+            data=body_string,
+            headers=headers,
+            timeout=60
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.text}")
+        
+        if response.status_code == 200:
+            print("✅ Config updated successfully with generated messages")
+        else:
+            print(f"❌ Config update failed: {response.text}")
+            
+    except Exception as e:
+        print(f"❌ Error: {e}")
+
+
 def test_config_and_verify_all():
     """Test config update with random values and verify all APIs return them"""
     print("Testing config update and verification...")
@@ -329,6 +410,7 @@ def test_config_and_verify_all():
     
     # Generate random test values
     random_id = str(uuid.uuid4())[:8]
+    test_presentation = f"RANDOM_PRESENTATION_{random_id}"
     test_welcome = f"RANDOM_WELCOME_{random_id}"
     test_goodbye = f"RANDOM_GOODBYE_{random_id}"
     test_question = f"RANDOM_QUESTION_{random_id}"
@@ -340,6 +422,10 @@ def test_config_and_verify_all():
     print("Step 1: Updating configuration with random values...")
     
     config_payload = {
+        "presentation_messages": {
+            "en": test_presentation,
+            "zh": f"中文_{test_presentation}"
+        },
         "welcome_messages": {
             "en": test_welcome,
             "zh": f"中文_{test_welcome}"
@@ -551,10 +637,15 @@ if __name__ == "__main__":
             test_recquestions()
         elif test_type == "config":
             test_config()
+        elif test_type == "generate":
+            test_config_generate_presentation()
         elif test_type == "full":
             test_config_and_verify_all()
         else:
-            print("Usage: python test_functions.py [talk|welcome|goodbye|recquestions|config|full]")
+            print(
+                "Usage: python test_functions.py "
+                "[talk|welcome|goodbye|recquestions|config|generate|full]"
+            )
     else:
         print("Running comprehensive test...")
         test_config_and_verify_all()

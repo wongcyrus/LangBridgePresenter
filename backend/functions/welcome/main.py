@@ -38,20 +38,38 @@ def welcome(request):
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
+
+    userParams = request_json.get("userParams", {})
+    logger.debug("userParams: %s", userParams)
+
+    # Check if this is a presentation context
+    is_presentation = False
+    if isinstance(userParams, str):
+        is_presentation = "presentation" in userParams.lower()
     
     config = get_config()
-    welcome_messages = config.get("welcome_messages", {})
     
-    reply = welcome_messages.get(
-        language_code, welcome_messages.get("en", "Welcome!")
-    )
+    # Use presentation_messages if presentation context,
+    # otherwise welcome_messages
+    if is_presentation:
+        messages = config.get("presentation_messages", {})       
+        logger.debug("Using presentation_messages")
+        reply = messages.get(
+            language_code, messages.get("en", "Hello")
+        )
+    else:
+        messages = config.get("welcome_messages", {})        
+        logger.debug("Using welcome_messages")    
+        reply = messages.get(
+            language_code, messages.get("en", "Welcome!")
+        )
     logger.debug("reply_text: %s", reply)
     response = {
         "id": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "traceId": trace_id,
         "sessionId": session_id,
         "replyText": reply,
-        "replyType": "Welcome",
+        "replyType": "Llm",
         "timestamp": datetime.now().timestamp(),
         "extra": request_json.get("extra", {})
     }

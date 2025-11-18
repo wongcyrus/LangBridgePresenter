@@ -156,7 +156,7 @@ End Function
 ' =========================
 ' Main entry (called by event)
 ' =========================
-Public Sub SetWelcome(ByVal welcome As String)
+Public Sub SetPresentation(ByVal presentation As String)
     On Error Resume Next
     
     ' -- Configure your endpoint here --
@@ -176,7 +176,7 @@ Public Sub SetWelcome(ByVal welcome As String)
 
     ' Prepare payload
     Dim bodyString As String
-    bodyString = BuildConfigPayload(welcome, "", "", "")
+    bodyString = BuildConfigPayloadWithGeneration(presentation)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -337,8 +337,23 @@ End Sub
 ' JSON & encoding helpers
 ' =========================
 
+' Build payload for agent-generated presentation messages
+Private Function BuildConfigPayloadWithGeneration(ByVal context As String) As String
+    Dim json As String
+    json = _
+        "{" & _
+          """generate_presentation"":true," & _
+          """languages"":[""en"",""zh""]," & _
+          """context"":""" & JsonEscape(context) & """," & _
+          """presentation_messages"":{}," & _
+          """welcome_messages"":{}," & _
+          """goodbye_messages"":{}" & _
+        "}"
+    BuildConfigPayloadWithGeneration = json
+End Function
+
 ' Build compact JSON (no extra spaces/newlines).
-Private Function BuildConfigPayload(ByVal testWelcome As String, _
+Private Function BuildConfigPayload(ByVal testPresentation As String, _
                                       ByVal testGoodbye As String, _
                                       ByVal testQuestion As String, _
                                       ByVal testTalk As String) As String
@@ -354,9 +369,9 @@ Private Function BuildConfigPayload(ByVal testWelcome As String, _
     Dim json As String
     json = _
         "{" & _
-          """welcome_messages"":{" & _
-            """en"":""" & JsonEscape(testWelcome) & """," & _
-            """zh"":""" & JsonEscape(testWelcome) & """" & _
+          """presentation_messages"":{" & _
+            """en"":""" & JsonEscape(testPresentation) & """," & _
+            """zh"":""" & JsonEscape(testPresentation) & """" & _
           "}," & _
           """goodbye_messages"":{" & _
             """en"":""" & JsonEscape(testGoodbye) & """," & _
