@@ -18,6 +18,7 @@ Private Function GetApiKey() As String
     Dim apiKey As String
     Dim wsh As Object
     Dim locations() As String
+    Dim oneDriveDetected As Boolean
     Dim i As Integer
     
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -27,10 +28,25 @@ Private Function GetApiKey() As String
     ReDim locations(0 To 3)
     
     ' Location 1: Same directory as the presentation (if open)
+    Debug.Print "DEBUG GetApiKey: Checking ActivePresentation..."
     If Not ActivePresentation Is Nothing Then
+        Debug.Print "DEBUG GetApiKey: ActivePresentation is not Nothing"
+        Debug.Print "DEBUG GetApiKey: ActivePresentation.Path = '" & ActivePresentation.Path & "'"
         If ActivePresentation.Path <> "" Then
-            locations(0) = ActivePresentation.Path & "\api_config.txt"
+            ' If path is a OneDrive/SharePoint URL, do not use it
+            If Left$(ActivePresentation.Path, 7) = "http://" Or Left$(ActivePresentation.Path, 8) = "https://" Then
+                Debug.Print "DEBUG GetApiKey: OneDrive/SharePoint URL detected - location 0 disabled"
+                oneDriveDetected = True
+                ' Leave locations(0) empty; warn later only if other locations fail
+            Else
+                locations(0) = ActivePresentation.Path & "\api_config.txt"
+                Debug.Print "DEBUG GetApiKey: Location 0 set to: " & locations(0)
+            End If
+        Else
+            Debug.Print "DEBUG GetApiKey: ActivePresentation.Path is empty (presentation not saved yet?)"
         End If
+    Else
+        Debug.Print "DEBUG GetApiKey: ActivePresentation is Nothing"
     End If
     
     ' Location 2: User's Documents folder
@@ -44,8 +60,10 @@ Private Function GetApiKey() As String
     
     ' Try each location
     For i = 0 To 3
+        Debug.Print "DEBUG GetApiKey: Trying location " & i & ": " & locations(i)
         If locations(i) <> "" Then
             If fso.FileExists(locations(i)) Then
+                Debug.Print "DEBUG GetApiKey: File exists at location " & i
                 Set ts = fso.OpenTextFile(locations(i), 1) ' 1 = ForReading
                 If Not ts.AtEndOfStream Then
                     apiKey = Trim(ts.ReadLine)
@@ -54,9 +72,24 @@ Private Function GetApiKey() As String
                 ts.Close
                 Set ts = Nothing
                 If apiKey <> "" Then Exit For
+            Else
+                Debug.Print "DEBUG GetApiKey: File does not exist at location " & i
             End If
+        Else
+            Debug.Print "DEBUG GetApiKey: Location " & i & " is empty"
         End If
     Next i
+    
+    ' If not found in other locations and OneDrive was detected, show guidance
+    If apiKey = "" And oneDriveDetected Then
+        MsgBox "Your presentation is stored in OneDrive/SharePoint." & vbCrLf & vbCrLf & _
+               "We couldn't find 'api_config.txt' in the supported locations." & vbCrLf & _
+               "Do NOT place the key next to the OneDrive presentation." & vbCrLf & _
+               "Please store your API key in one of these locations:" & vbCrLf & _
+               "  • " & wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt" & vbCrLf & _
+               "  • Registry key: HKCU\Software\XiaoiceClassAssistant\ApiKey", _
+               vbExclamation, "API key location not found"
+    End If
     
     Set fso = Nothing
     
@@ -159,11 +192,15 @@ End Function
 Public Sub SetPresentation(ByVal presentation As String)
     On Error Resume Next
     
-    ' -- Configure your endpoint here --
-    Dim baseUrl As String
-    baseUrl = "https://gateway-25iq0pr1.ue.gateway.dev"
+    ' Load credentials and endpoint (no hard-coded URL)
     Dim apiKey As String
     apiKey = GetApiKey()
+    Dim baseUrl As String
+    baseUrl = GetBaseUrl(apiKey)
+    
+    ' Debug: Print loaded configuration
+    Debug.Print "DEBUG: Base URL = " & baseUrl
+    Debug.Print "DEBUG: API Key = " & Left$(apiKey, 8) & "..." ' Show only first 8 chars for security
     
     ' Validate API key
     If apiKey = "" Then
@@ -173,6 +210,7 @@ Public Sub SetPresentation(ByVal presentation As String)
     
     Dim url As String
     url = baseUrl & "/api/config?key=" & apiKey
+    Debug.Print "DEBUG: Full URL = " & url
 
     ' Prepare payload
     Dim bodyString As String
@@ -211,6 +249,189 @@ Public Sub SetPresentation(ByVal presentation As String)
     
     If Err.Number <> 0 Then Err.Clear
 End Sub
+
+' =========================
+' Endpoint configuration loader (mirrors GetApiKey pattern)
+' =========================
+Private Function GetBaseUrl(Optional ByVal existingApiKey As String = "") As String
+    On Error Resume Next
+    
+    Dim baseUrl As String
+    Dim configPath As String
+    Dim fso As Object
+    Dim ts As Object
+    Dim wsh As Object
+    Dim locations() As String
+    Dim oneDriveDetected As Boolean
+    Dim i As Integer
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    ' Try multiple locations (same order as GetApiKey)
+    ReDim locations(0 To 3)
+    Debug.Print "DEBUG GetBaseUrl: Checking ActivePresentation..."
+    If Not ActivePresentation Is Nothing Then
+        Debug.Print "DEBUG GetBaseUrl: ActivePresentation is not Nothing"
+        Debug.Print "DEBUG GetBaseUrl: ActivePresentation.Path = '" & ActivePresentation.Path & "'"
+        If ActivePresentation.Path <> "" Then
+            ' If path is a OneDrive/SharePoint URL, do not use it
+            If Left$(ActivePresentation.Path, 7) = "http://" Or Left$(ActivePresentation.Path, 8) = "https://" Then
+                Debug.Print "DEBUG GetBaseUrl: OneDrive/SharePoint URL detected - location 0 disabled"
+                oneDriveDetected = True
+                ' Leave locations(0) empty; warn later only if other locations fail
+            Else
+                locations(0) = ActivePresentation.Path & "\api_config.txt"
+                Debug.Print "DEBUG GetBaseUrl: Location 0 set to: " & locations(0)
+            End If
+        Else
+            Debug.Print "DEBUG GetBaseUrl: ActivePresentation.Path is empty (presentation not saved yet?)"
+        End If
+    Else
+        Debug.Print "DEBUG GetBaseUrl: ActivePresentation is Nothing"
+    End If
+    locations(1) = wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt"
+    locations(2) = wsh.ExpandEnvironmentStrings("%APPDATA%") & "\XiaoiceClassAssistant\api_config.txt"
+    locations(3) = wsh.ExpandEnvironmentStrings("%TEMP%") & "\api_config.txt"
+    
+    ' Read second line (first line is API key) if present
+    For i = 0 To 3
+        Debug.Print "DEBUG GetBaseUrl: Trying location " & i & ": " & locations(i)
+        If locations(i) <> "" Then
+            If fso.FileExists(locations(i)) Then
+                Debug.Print "DEBUG GetBaseUrl: File exists at location " & i
+                Set ts = fso.OpenTextFile(locations(i), 1)
+                If Not ts.AtEndOfStream Then
+                    Dim firstLine As String
+                    firstLine = Trim(ts.ReadLine) ' API key (ignored here)
+                End If
+                If Not ts.AtEndOfStream Then
+                    baseUrl = Trim(ts.ReadLine)
+                    Debug.Print "Base URL loaded from: " & locations(i)
+                Else
+                    Debug.Print "DEBUG GetBaseUrl: File has only 1 line (no base URL)"
+                End If
+                ts.Close
+                Set ts = Nothing
+                If baseUrl <> "" Then Exit For
+            Else
+                Debug.Print "DEBUG GetBaseUrl: File does not exist at location " & i
+            End If
+        Else
+            Debug.Print "DEBUG GetBaseUrl: Location " & i & " is empty"
+        End If
+    Next i
+    
+    ' If not found in other locations and OneDrive was detected, show guidance
+    If baseUrl = "" And oneDriveDetected Then
+        MsgBox "Your presentation is stored in OneDrive/SharePoint." & vbCrLf & vbCrLf & _
+               "We couldn't find 'api_config.txt' with a Base URL in the supported locations." & vbCrLf & _
+               "Do NOT place the file next to the OneDrive presentation." & vbCrLf & _
+               "Please store your config in one of these locations:" & vbCrLf & _
+               "  • " & wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt (2 lines: API key then Base URL)" & vbCrLf & _
+               "  • Registry key: HKCU\Software\XiaoiceClassAssistant\BaseUrl", _
+               vbExclamation, "Base URL location not found"
+    End If
+    Set fso = Nothing
+    
+    ' Registry fallback
+    If baseUrl = "" Then
+        On Error Resume Next
+        baseUrl = wsh.RegRead("HKCU\Software\XiaoiceClassAssistant\BaseUrl")
+        If Err.Number <> 0 Then
+            baseUrl = ""
+            Err.Clear
+        End If
+        If baseUrl <> "" Then Debug.Print "Base URL loaded from registry"
+        On Error GoTo 0
+    End If
+    
+    ' Prompt user if still empty
+    If baseUrl = "" Then
+        Debug.Print "DEBUG GetBaseUrl: Base URL not found - prompting user"
+        On Error Resume Next
+        baseUrl = InputBox("Enter the API Base URL for Xiaoice Class Assistant:" & vbCrLf & vbCrLf & _
+                           "Example: https://your-gateway-id.ue.gateway.dev" & vbCrLf & _
+                           "It will be saved alongside your API key.", _
+                           "API Base URL Required", "")
+        If Err.Number <> 0 Then
+            Debug.Print "DEBUG GetBaseUrl: InputBox error: " & Err.Description
+            Err.Clear
+        End If
+        On Error GoTo 0
+        
+        Debug.Print "DEBUG GetBaseUrl: User entered: '" & baseUrl & "'"
+        Debug.Print "DEBUG GetBaseUrl: User entered: '" & baseUrl & "'"
+        
+        If baseUrl <> "" Then
+            ' Remove trailing slash if present
+            If Right$(baseUrl, 1) = "/" Then
+                baseUrl = Left$(baseUrl, Len(baseUrl) - 1)
+                Debug.Print "DEBUG GetBaseUrl: Removed trailing slash: '" & baseUrl & "'"
+            End If
+            
+            On Error Resume Next
+            ' Persist to registry
+            wsh.RegWrite "HKCU\Software\XiaoiceClassAssistant\BaseUrl", baseUrl, "REG_SZ"
+            If Err.Number <> 0 Then
+                Debug.Print "DEBUG GetBaseUrl: Registry write error: " & Err.Description
+                Err.Clear
+            Else
+                Debug.Print "DEBUG GetBaseUrl: Base URL saved to registry"
+            End If
+            
+            ' Persist to file (two-line format: API key then base URL)
+            Dim saveFolder As String
+            saveFolder = wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant"
+            Set fso = CreateObject("Scripting.FileSystemObject")
+            If Not fso.FolderExists(saveFolder) Then
+                fso.CreateFolder saveFolder
+                If Err.Number <> 0 Then
+                    Debug.Print "DEBUG GetBaseUrl: Folder creation error: " & Err.Description
+                    Err.Clear
+                End If
+            End If
+            
+            ' Read existing API key if file exists
+            Dim existingKey As String
+            existingKey = existingApiKey
+            If existingKey = "" And fso.FileExists(saveFolder & "\api_config.txt") Then
+                Set ts = fso.OpenTextFile(saveFolder & "\api_config.txt", 1)
+                If Not ts.AtEndOfStream Then
+                    existingKey = Trim(ts.ReadLine)
+                End If
+                ts.Close
+                Set ts = Nothing
+            End If
+            
+            Set ts = fso.CreateTextFile(saveFolder & "\api_config.txt", True)
+            ' Preserve existing API key if available
+            ts.WriteLine existingKey
+            ts.WriteLine baseUrl
+            ts.Close
+            Set ts = Nothing
+            Set fso = Nothing
+            If Err.Number <> 0 Then
+                Debug.Print "DEBUG GetBaseUrl: File save error: " & Err.Description
+                Err.Clear
+            Else
+                Debug.Print "Base URL saved to: " & saveFolder & "\api_config.txt"
+            End If
+            On Error GoTo 0
+        Else
+            Debug.Print "DEBUG GetBaseUrl: User cancelled or entered empty URL"
+        End If
+    End If
+    
+    ' Final validation
+    If baseUrl = "" Then
+        Debug.Print "WARNING GetBaseUrl: Base URL is still empty - API calls will fail"
+    End If
+    
+    Set wsh = Nothing
+    GetBaseUrl = baseUrl
+    If Err.Number <> 0 Then Err.Clear
+End Function
 
 ' =========================
 ' HTTP helpers

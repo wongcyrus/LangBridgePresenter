@@ -8,6 +8,10 @@ from google.cloud import firestore
 from google.adk.agents import Agent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from firestore_utils import (
+    get_cached_presentation_message,
+    cache_presentation_message
+)
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -53,7 +57,13 @@ runner = InMemoryRunner(
 
 
 def generate_presentation_message(language_code="en", context=""):
-    """Generate a presentation message using the ADK agent."""
+    """Generate a presentation message using the ADK agent with caching."""
+    # Check cache first
+    cached = get_cached_presentation_message(language_code, context)
+    if cached:
+        return cached
+    
+    # Generate new message
     prompt = (
         f"Generate a presentation introduction message "
         f"for a classroom presentation in {language_code}. "
@@ -103,7 +113,13 @@ def generate_presentation_message(language_code="en", context=""):
                 if text:
                     generated_text += text
 
-        return generated_text.strip()
+        result = generated_text.strip()
+        
+        # Cache the result
+        if result:
+            cache_presentation_message(language_code, result, context)
+        
+        return result
     except Exception as e:
         logger.exception("Failed to generate presentation message: %s", e)
         return None
@@ -111,7 +127,7 @@ def generate_presentation_message(language_code="en", context=""):
 
 @functions_framework.http
 def config(request):
-    logger.debug("config invoked: method=%s", request.method)    
+    logger.debug("config invoked: method=%s", request.method)
 
     if request.method != 'POST':
         logger.warning("method not allowed: %s", request.method)

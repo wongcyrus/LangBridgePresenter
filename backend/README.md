@@ -58,3 +58,23 @@ gcloud auth login
 gcloud config set project <project-id>
 gcloud auth application-default set-quota-project <project-id>
 ```
+
+## Admin Tools
+
+Tools in `admin_tools/` help manage API keys and pre-generate configuration.
+
+### Pre-generate Presentation Messages from PPTX
+
+To cache presentation messages from PowerPoint slides:
+
+```bash
+cd admin_tools
+./setup.sh  # Install dependencies
+venv/bin/python preload_presentation_messages.py \
+  --pptx /path/to/deck.pptx \
+  --languages en,zh \
+  --template "Welcome to {title}" \
+  --slide 1
+```
+
+This updates `presentation_messages` in Firestore (`xiaoice_config/messages`), making `/api/welcome` responses faster by avoiding real-time generation.
