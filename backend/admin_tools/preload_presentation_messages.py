@@ -16,11 +16,14 @@ Usage:
     --context "quarterly review"
 
 Notes:
-  - Cache entries use key "{language_code}:{context}" or just "{language_code}"
+  - Cache entries use key "v1:{language}:{hash}" format matching firestore_utils.py
+  - Hash is first 12 chars of SHA256 of normalized context
+  - Empty context uses "default" instead of hash
   - No translation is performed; same template used for all languages
 """
 
 import argparse
+import hashlib
 import os
 from typing import Dict, List
 
@@ -30,6 +33,29 @@ from pptx import Presentation
 
 def parse_languages(s: str) -> List[str]:
     return [x.strip() for x in s.split(",") if x.strip()]
+
+
+def _normalize_context(context: str) -> str:
+    """Normalize context by trimming and collapsing whitespace."""
+    if not context:
+        return ""
+    # Collapse all whitespace runs to a single space and strip ends
+    return " ".join(str(context).split())
+
+
+def _cache_key(language_code: str, context: str) -> str:
+    """Build a stable, short cache key safe for Firestore doc IDs.
+
+    Uses lowercase language + 12-char SHA256 of normalized context.
+    Avoids very long document IDs and ensures consistent lookups.
+    Must match the logic in firestore_utils.py
+    """
+    lang = (language_code or "").strip().lower() or "unknown"
+    norm_ctx = _normalize_context(context)
+    if not norm_ctx:
+        return f"v1:{lang}:default"
+    digest = hashlib.sha256(norm_ctx.encode("utf-8")).hexdigest()[:12]
+    return f"v1:{lang}:{digest}"
 
 
 def get_slide_text(prs: Presentation, slide_index: int) -> str:
@@ -55,12 +81,14 @@ def cache_message(
     db: firestore.Client, language_code: str, context: str, message: str
 ):
     """Write a cache entry for generate_presentation_message lookup."""
-    cache_key = f"{language_code}:{context}" if context else language_code
+    cache_key = _cache_key(language_code, context)
+    norm_ctx = _normalize_context(context)
     cache_ref = db.collection("xiaoice_presentation_cache").document(cache_key)
     cache_ref.set({
         "message": message,
-        "language_code": language_code,
-        "context": context or "",
+        "language_code": (language_code or "").strip().lower(),
+        "context": norm_ctx,
+        "context_hash": cache_key.rsplit(":", 1)[-1],
         "updated_at": firestore.SERVER_TIMESTAMP
     })
 
@@ -116,7 +144,7 @@ def main():
     # Write cache entries for each language
     for lang in languages:
         cache_message(db, lang, args.context, message)
-        cache_key = f"{lang}:{args.context}" if args.context else lang
+        cache_key = _cache_key(lang, args.context)
         print(f"Cached '{cache_key}': {message}")
 
     # Update config document

@@ -61,8 +61,10 @@ def generate_presentation_message(language_code="en", context=""):
     # Check cache first
     cached = get_cached_presentation_message(language_code, context)
     if cached:
+        logger.info("Returning cached message for %s", language_code)
         return cached
     
+    logger.info("No cache found, generating new message for %s", language_code)
     # Generate new message
     prompt = (
         f"Generate a presentation introduction message "
@@ -117,11 +119,22 @@ def generate_presentation_message(language_code="en", context=""):
         
         # Cache the result
         if result:
+            logger.info(
+                "Generated text for %s, attempting cache write",
+                language_code
+            )
             cache_presentation_message(language_code, result, context)
+            logger.info("Cache write completed for %s", language_code)
+        else:
+            logger.warning(
+                "Generated empty result for %s, skipping cache",
+                language_code
+            )
         
         return result
     except Exception as e:
         logger.exception("Failed to generate presentation message: %s", e)
+        # Don't cache failures
         return None
 
 
