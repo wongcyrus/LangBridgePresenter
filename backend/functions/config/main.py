@@ -8,6 +8,7 @@ from google.cloud import firestore
 from google.adk.agents import Agent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+import hashlib
 from firestore_utils import (
     get_cached_presentation_message,
     cache_presentation_message
@@ -56,6 +57,28 @@ runner = InMemoryRunner(
 )
 
 
+def _normalize_context(context: str) -> str:
+    """Trim and collapse whitespace in context (speaker notes)."""
+    if not context:
+        return ""
+    return " ".join(str(context).split())
+
+
+def _session_id_for(language_code: str, context: str) -> str:
+    """Build a stable session id per language and notes content.
+
+    Prevents reusing the same conversation for different slides/notes,
+    which could cause the model to repeat the first response.
+    """
+    norm = _normalize_context(context)
+    if not norm:
+        digest = "default"
+    else:
+        digest = hashlib.sha256(norm.encode("utf-8")).hexdigest()[:12]
+    lang = (language_code or "").strip().lower() or "unknown"
+    return f"presentation_gen_{lang}_{digest}"
+
+
 def generate_presentation_message(language_code="en", context=""):
     """Generate a presentation message using the ADK agent with caching.
     
@@ -94,7 +117,8 @@ def generate_presentation_message(language_code="en", context=""):
         )
 
     try:
-        session_id = f"presentation_gen_{language_code}"
+        # Use per-notes session to avoid reusing earlier conversation
+        session_id = _session_id_for(language_code, context)
         user_id = "system"
 
         # Get or create session
