@@ -9,10 +9,9 @@ import functions_framework
 from flask import Response
 from auth_utils import validate_authentication
 from firestore_utils import get_config
-from google.adk.agents import Agent
+from google.adk.agents import config_agent_utils
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from google.adk.tools import google_search
 
 
 # Robust logging setup that works on Cloud Functions/Cloud Run
@@ -32,24 +31,17 @@ logger = logging.getLogger(__name__)
 logger.setLevel(_level)
 
 
-# Initialize the ADK agent with Gemini 2.5 Flash
+# Initialize the ADK agent from YAML configuration
 def create_agent():
-    """Create and return an ADK agent for conversation."""
-    return Agent(
-        model='gemini-2.5-flash',
-        name='classroom_assistant',
-        description=(
-            "A helpful classroom assistant "
-            "that answers student questions."
-        ),
-        instruction=(
-            "You are Xiaoice, a friendly and helpful classroom assistant. "
-            "Respond to student questions in a clear, educational, and "
-            "encouraging manner. "
-            "Keep responses concise but informative."
-        ),
-        tools=[google_search]
+    """Create and return an ADK agent from YAML config."""
+    # Get the directory where this script is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_file_path = os.path.join(
+        current_dir, "talking_agent", "root_agent.yaml"
     )
+    
+    # Load the agent from the config file using utility function
+    return config_agent_utils.from_config(config_file_path)
 
 
 # Create runner (reusable across requests)

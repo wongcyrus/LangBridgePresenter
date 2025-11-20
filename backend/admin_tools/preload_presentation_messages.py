@@ -30,7 +30,7 @@ import sys
 from typing import Dict, List
 
 from google.cloud import firestore
-from google.adk.agents import Agent
+from google.adk.agents import config_agent_utils
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from pptx import Presentation
@@ -45,22 +45,20 @@ logger = logging.getLogger(__name__)
 
 
 def create_agent():
-    """Create and return an ADK agent for message generation."""
-    return Agent(
-        model="gemini-2.5-flash-lite",
-        name='presentation_preloader',
-        description=(
-            "An assistant that generates classroom presentation "
-            "messages from speaker notes."
-        ),
-        instruction=(
-            "You are an assistant that transforms presentation "
-            "speaker notes into clear, engaging messages for students. "
-            "Generate messages that are informative, encouraging, "
-            "and appropriate for classroom settings. "
-            "Keep messages concise and focused on the key points."
-        ),
+    """Create and return an ADK agent from YAML config."""
+    # Get path to the agent config file
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_dir = os.path.dirname(script_dir)
+    config_file_path = os.path.join(
+        backend_dir,
+        "functions",
+        "config",
+        "presenter_agent",
+        "root_agent.yaml"
     )
+    
+    # Load the agent from the config file using utility function
+    return config_agent_utils.from_config(config_file_path)
 
 
 def parse_languages(s: str) -> List[str]:
