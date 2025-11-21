@@ -27,3 +27,6 @@ dist-ssr
 # Firebase
 .firebase/
 firebaserc
+
+# Environment
+.env

@@ -2,14 +2,14 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyAJPv12AFv8L5KZpN3M0DUndDWVtt2wWYA",
-  authDomain: "xiaoice-class-assistant.firebaseapp.com",
-  projectId: "xiaoice-class-assistant",
-  storageBucket: "xiaoice-class-assistant.firebasestorage.app",
-  messagingSenderId: "621615798732",
-  appId: "1:621615798732:web:fc7cf940b12334b1a0e569"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, "xiaoice");
+export const db = getFirestore(app);
