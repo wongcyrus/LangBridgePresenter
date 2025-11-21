@@ -2,10 +2,12 @@ import { Construct } from "constructs";
 import { GoogleFirestoreDatabase } from "../.gen/providers/google-beta/google-firestore-database";
 import { GoogleProjectIamMember } from "../.gen/providers/google-beta/google-project-iam-member";
 import { GoogleServiceAccount } from "../.gen/providers/google-beta/google-service-account";
+import { ITerraformDependable } from "cdktf";
 
 export interface FirestoreConstructProps {
   project: string;
   servicesAccount: GoogleServiceAccount;
+  dependsOn?: ITerraformDependable[];
 }
 
 export class FirestoreConstruct extends Construct {
@@ -20,6 +22,7 @@ export class FirestoreConstruct extends Construct {
       locationId: "nam5",
       type: "FIRESTORE_NATIVE",
       deletionPolicy: "DELETE",
+      dependsOn: props.dependsOn,
     });
 
     new GoogleProjectIamMember(this, "firestore-iam-member", {

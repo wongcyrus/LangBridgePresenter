@@ -8,6 +8,7 @@ import { GoogleServiceAccount } from "../.gen/providers/google-beta/google-servi
 import { GoogleStorageBucketObject } from "../.gen/providers/google-beta/google-storage-bucket-object";
 import { CloudFunctionDeploymentConstruct } from "./cloud-function-deployment-construct";
 import path = require("path");
+import { ITerraformDependable } from "cdktf";
 
 export interface CloudFunctionConstructProps {
     readonly functionName: string;
@@ -23,6 +24,7 @@ export interface CloudFunctionConstructProps {
     readonly makePublic?: boolean;
     readonly serviceAccount?: GoogleServiceAccount;
     readonly additionalDependencies?: any[];
+    readonly dependsOn?: ITerraformDependable[];
 }
 
 export class CloudFunctionConstruct extends Construct {
@@ -70,9 +72,13 @@ export class CloudFunctionConstruct extends Construct {
         });
 
 
-        const dependencies = [...props.cloudFunctionDeploymentConstruct.services];
+        const dependencies: ITerraformDependable[] = [...props.cloudFunctionDeploymentConstruct.services];
         if (props.additionalDependencies) {
             dependencies.push(...props.additionalDependencies);
+        }
+        // Add explicit dependencies if provided (e.g., for API enabling)
+        if (props.dependsOn) {
+            dependencies.push(...props.dependsOn);
         }
 
         this.cloudFunction = new GoogleCloudfunctions2Function(this, "cloud-function", {

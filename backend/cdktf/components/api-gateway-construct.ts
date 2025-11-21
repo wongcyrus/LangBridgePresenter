@@ -1,102 +1,77 @@
 import { Construct } from "constructs";
-import { GoogleApiGatewayGateway } from "../.gen/providers/google-beta/google-api-gateway-gateway";
-
 import { GoogleApiGatewayApi } from "../.gen/providers/google-beta/google-api-gateway-api";
 import { GoogleApiGatewayApiConfigA } from "../.gen/providers/google-beta/google-api-gateway-api-config";
-
-import { Fn } from "cdktf";
+import { GoogleApiGatewayGateway } from "../.gen/providers/google-beta/google-api-gateway-gateway";
 import { GoogleBetaProvider } from "../.gen/providers/google-beta/provider";
-import { GoogleProjectService } from "../.gen/providers/google-beta/google-project-service";
 import { GoogleServiceAccount } from "../.gen/providers/google-beta/google-service-account";
-
 import path = require("path");
+import { Fn, ITerraformDependable } from "cdktf";
 
 export interface ApigatewayConstructProps {
-    readonly api: string;    
-    readonly replaces: { [id: string]: string; };
+    readonly api: string;
     readonly project: string;
     readonly provider: GoogleBetaProvider;
+    readonly replaces: { [key: string]: string };
     readonly servicesAccount: GoogleServiceAccount;
+    readonly dependsOn?: ITerraformDependable[];
 }
 
 export class ApigatewayConstruct extends Construct {
-    public readonly apis = [
-        "iam.googleapis.com",
-        "apigateway.googleapis.com",
-        "servicemanagement.googleapis.com",
-        "servicecontrol.googleapis.com",
-    ];
-    prop: ApigatewayConstructProps;
-
-    public gateway!: GoogleApiGatewayGateway;
     public apiGatewayApi!: GoogleApiGatewayApi;
+    public apiGatewayApiConfig!: GoogleApiGatewayApiConfigA;
+    public gateway!: GoogleApiGatewayGateway;
 
-    private constructor(scope: Construct, id: string, props: ApigatewayConstructProps) {
+    private constructor(scope: Construct, id: string) {
         super(scope, id);
-        this.prop = props;
     }
 
     private async build(props: ApigatewayConstructProps) {
-
-        const services = [];
-        for (const api of this.apis) {
-            services.push(new GoogleProjectService(this, `${api.replaceAll(".", "")}`, {
-                project: props.project,
-                service: api,
-                disableOnDestroy: false,
-            }));
-        }
         this.apiGatewayApi = new GoogleApiGatewayApi(this, "api", {
+            provider: props.provider,
             apiId: props.api,
             project: props.project,
-            provider: props.provider,
-            dependsOn: services,
+            displayName: props.api,
+            dependsOn: props.dependsOn,
         });
 
-        const apiConfig = new GoogleApiGatewayApiConfigA(this, "apiConfig", {
+        this.apiGatewayApiConfig = new GoogleApiGatewayApiConfigA(this, "apiConfig", {
+            provider: props.provider,
             api: this.apiGatewayApi.apiId,
+            project: props.project,
             openapiDocuments: [
                 {
                     document: {
                         path: "spec.yaml",
-                        contents: Fn.base64encode(Fn.templatefile(path.resolve(__dirname, "spec.yaml"),props.replaces)),
-                    }
+                        contents: Fn.base64encode(
+                            Fn.templatefile(
+                                path.resolve(__dirname, "spec.yaml"),
+                                props.replaces
+                            )
+                        ),
+                    },
                 },
             ],
             gatewayConfig: {
                 backendConfig: {
                     googleServiceAccount: props.servicesAccount.email,
-                }
+                },
             },
-            lifecycle: {
-                createBeforeDestroy: true,
-            },
-            project: props.project,
-            provider: props.provider,
-            dependsOn: services,
-        })
-
-        this.gateway = new GoogleApiGatewayGateway(this, "gateway", {
-            displayName:  props.project + "-gateway",
-            gatewayId: "gateway",
-            apiConfig: apiConfig.id,
-            project: props.project,
-            provider: props.provider,
-            dependsOn: services,
+            dependsOn: props.dependsOn ? [this.apiGatewayApi, ...props.dependsOn] : [this.apiGatewayApi],
         });
 
-        // Enable the generated API Gateway managed service
-        // This service has the format: <api-id>-<hash>.apigateway.<project-id>.cloud.goog
-        new GoogleProjectService(this, "api-gateway-managed-service", {
+        this.gateway = new GoogleApiGatewayGateway(this, "gateway", {
+            provider: props.provider,
+            gatewayId: "gateway",
             project: props.project,
-            service: this.apiGatewayApi.managedService,
-            disableOnDestroy: false,
-            dependsOn: [this.apiGatewayApi],
+            apiConfig: this.apiGatewayApiConfig.id,
+            displayName: "langbridge-presenter-gateway",
+            region: "us-east1", // hardcoded for now as it's limited availability
+            dependsOn: props.dependsOn ? [this.apiGatewayApiConfig, ...props.dependsOn] : [this.apiGatewayApiConfig],
         });
     }
 
     public static async create(scope: Construct, id: string, props: ApigatewayConstructProps) {
-        const me = new ApigatewayConstruct(scope, id, props);
+        const me = new ApigatewayConstruct(scope, id);
         await me.build(props);
         return me;
     }

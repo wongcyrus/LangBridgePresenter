@@ -6,6 +6,7 @@ import { StringResource } from "./.gen/providers/random/string-resource";
 import { DataGoogleBillingAccount } from "./.gen/providers/google-beta/data-google-billing-account";
 import { GoogleBetaProvider } from "./.gen/providers/google-beta/provider/index";
 import { GoogleProject } from "./.gen/providers/google-beta/google-project";
+import { GoogleProjectService } from "./.gen/providers/google-beta/google-project-service";
 import { CloudFunctionDeploymentConstruct } from "./components/cloud-function-deployment-construct";
 import { CloudFunctionConstruct } from "./components/cloud-function-construct";
 import { ApigatewayConstruct } from "./components/api-gateway-construct";
@@ -14,6 +15,10 @@ import { GoogleStorageBucketIamMember } from "./.gen/providers/google-beta/googl
 import * as dotenv from 'dotenv';
 import { FirestoreConstruct } from "./components/firestore-construct";
 import { GoogleStorageBucket } from "./.gen/providers/google-beta/google-storage-bucket";
+import { FirebaseHostingConstruct } from "./components/firebase-hosting-construct";
+
+import { TimeProvider } from "./.gen/providers/time/provider";
+import { Sleep } from "./.gen/providers/time/sleep";
 
 dotenv.config();
 
@@ -24,10 +29,12 @@ class LangBridgeApiStack extends TerraformStack {
 
   async buildLangBridgeApiStack() {
     const projectId = process.env.PROJECTID!;
+    const clientProjectId = `${projectId}-client`;
 
     const googleBetaProvider = new GoogleBetaProvider(this, "google", {
       region: process.env.REGION!,
     });
+    new TimeProvider(this, "time", {});
     const archiveProvider = new ArchiveProvider(this, "archive", {});
     const randomProvider = new RandomProvider(this, "random", {});
 
@@ -42,7 +49,75 @@ class LangBridgeApiStack extends TerraformStack {
       deletionPolicy: "DELETE",
     });
 
+    // Create the client project for Firebase Hosting and Firestore
+    const clientProject = new GoogleProject(this, "client-project", {
+      projectId: clientProjectId,
+      name: clientProjectId,
+      billingAccount: billingAccount.id,
+      deletionPolicy: "DELETE",
+    });
 
+    // Enable necessary Google Cloud Platform APIs
+    const enabledServices = [
+      "cloudresourcemanager.googleapis.com",
+      "serviceusage.googleapis.com",
+      "compute.googleapis.com",
+      "cloudfunctions.googleapis.com",
+      "cloudbuild.googleapis.com",
+      "artifactregistry.googleapis.com",
+      "datastore.googleapis.com", // For Firestore
+      "firebaserules.googleapis.com", // For Firebase Hosting & Firestore rules
+      "firebase.googleapis.com", // Firebase Management API
+      "firestore.googleapis.com",
+      "apigateway.googleapis.com",
+      "servicemanagement.googleapis.com",
+      "servicecontrol.googleapis.com",
+      "iam.googleapis.com", // For IAM operations
+      "aiplatform.googleapis.com", // For Vertex AI if used by agents
+    ];
+
+    const enabledServiceResources = [];
+    for (const service of enabledServices) {
+      const svc = new GoogleProjectService(this, `service-${service.replace('.', '-')}`, {
+        project: project.projectId,
+        service: service,
+        disableOnDestroy: false, // Keep services enabled even if this stack is destroyed
+        dependsOn: [project],
+      });
+      enabledServiceResources.push(svc);
+    }
+
+    // Enable services for the client project (Firebase Hosting, Firestore)
+    const clientEnabledServices = [
+      "firebase.googleapis.com",
+      "firebasehosting.googleapis.com",
+      "firestore.googleapis.com",
+      "datastore.googleapis.com",
+      "firebaserules.googleapis.com",
+    ];
+
+    const clientEnabledServiceResources = [];
+    for (const service of clientEnabledServices) {
+      const svc = new GoogleProjectService(this, `client-service-${service.replace('.', '-')}`, {
+        project: clientProject.projectId,
+        service: service,
+        disableOnDestroy: false,
+        dependsOn: [clientProject],
+      });
+      clientEnabledServiceResources.push(svc);
+    }
+
+    // Wait for APIs to fully propagate
+    const timeSleep = new Sleep(this, "wait_for_apis", {
+      createDuration: "30s",
+      dependsOn: enabledServiceResources,
+    });
+    const clientTimeSleep = new Sleep(this, "wait_for_client_apis", {
+      createDuration: "30s",
+      dependsOn: clientEnabledServiceResources,
+    });
+    const apisEnabledWithDelay = [timeSleep];
+    const clientApisEnabledWithDelay = [clientTimeSleep];
 
     const cloudFunctionDeploymentConstruct = new CloudFunctionDeploymentConstruct(this, "cloud-function-deployment", {
       project: project.projectId,
@@ -50,6 +125,8 @@ class LangBridgeApiStack extends TerraformStack {
       archiveProvider: archiveProvider,
       region: process.env.REGION!,
     });
+    // Ensure APIs are enabled before deployment bucket and functions
+    cloudFunctionDeploymentConstruct.node.addDependency(...apisEnabledWithDelay);
 
     const speechBucketSuffix = new StringResource(this, "speechFileBucketSuffix", {
       length: 9,
@@ -100,6 +177,7 @@ class LangBridgeApiStack extends TerraformStack {
         "GOOGLE_GENAI_USE_VERTEXAI": "True"
       },
       additionalDependencies: [artifactRegistryIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
 
     // Grant AI Platform (Vertex AI) user role to the service account for Gemini API access
@@ -108,18 +186,19 @@ class LangBridgeApiStack extends TerraformStack {
       project: projectId,
       role: "roles/aiplatform.user",
       member: `serviceAccount:${talkStreamFunction.serviceAccount.email}`,
-      dependsOn: cloudFunctionDeploymentConstruct.services,
+      dependsOn: [...cloudFunctionDeploymentConstruct.services, ...apisEnabledWithDelay],
     });
-
-    const clientProjectId = process.env.CLIENT_PROJECT_ID!;
 
     // Allow writing to the client's Firestore project (xiaoice-class-assistant)
     // This is required because of the project ID mismatch (backend=xiaice... vs client=xiaoice...)
+    /*
     new GoogleProjectIamMember(this, "cross-project-firestore-writer", {
       project: clientProjectId,
       role: "roles/datastore.user",
       member: `serviceAccount:${talkStreamFunction.serviceAccount.email}`,
+      dependsOn: apisEnabledWithDelay,
     });
+    */
 
     const welcomeFunction = await CloudFunctionConstruct.create(this, "welcomeFunction", {
       functionName: "welcome",
@@ -135,6 +214,7 @@ class LangBridgeApiStack extends TerraformStack {
         "XIAOICE_CHAT_ACCESS_KEY": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key",
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
     const speechFunction = await CloudFunctionConstruct.create(this, "speechFunction", {
       functionName: "speech",
@@ -151,13 +231,14 @@ class LangBridgeApiStack extends TerraformStack {
         "SPEECH_FILE_BUCKET": speechFileBucket.name,
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
     // Grant storage.objectAdmin to speech function service account for bucket access and signed URL generation
     new GoogleProjectIamMember(this, "speech-bucket-object-admin", {
       project: projectId,
       role: "roles/storage.objectAdmin",
       member: `serviceAccount:${talkStreamFunction.serviceAccount.email}`,
-      dependsOn: cloudFunctionDeploymentConstruct.services,
+      dependsOn: [...cloudFunctionDeploymentConstruct.services, ...apisEnabledWithDelay],
     });
     // Grant Service Account Token Creator role to allow the service account to sign on behalf of itself
     // Public read access for speech bucket (serving MP3 directly)
@@ -165,7 +246,7 @@ class LangBridgeApiStack extends TerraformStack {
       bucket: speechFileBucket.name,
       role: "roles/storage.objectViewer",
       member: "allUsers",
-      dependsOn: [speechFileBucket],
+      dependsOn: [speechFileBucket, ...apisEnabledWithDelay],
     });
     const goodbyeFunction = await CloudFunctionConstruct.create(this, "goodbyeFunction", {
       functionName: "goodbye",
@@ -181,6 +262,7 @@ class LangBridgeApiStack extends TerraformStack {
         "XIAOICE_CHAT_ACCESS_KEY": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key",
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
     const recquestionsFunction = await CloudFunctionConstruct.create(this, "recquestionsFunction", {
       functionName: "recquestions",
@@ -196,6 +278,7 @@ class LangBridgeApiStack extends TerraformStack {
         "XIAOICE_CHAT_ACCESS_KEY": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key",
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
 
     const configFunction = await CloudFunctionConstruct.create(this, "configFunction", {
@@ -217,6 +300,7 @@ class LangBridgeApiStack extends TerraformStack {
         "CLIENT_FIRESTORE_DATABASE_ID": "(default)",
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+      dependsOn: apisEnabledWithDelay,
     });
 
     const apigatewayConstruct = await ApigatewayConstruct.create(this, "api-gateway", {
@@ -232,11 +316,21 @@ class LangBridgeApiStack extends TerraformStack {
         "CONFIG": configFunction.cloudFunction.url
       },
       servicesAccount: talkStreamFunction.serviceAccount,
+      dependsOn: apisEnabledWithDelay,
     });
 
     FirestoreConstruct.create(this, "firestore", {
       project: project.projectId,
-      servicesAccount: talkStreamFunction.serviceAccount
+      servicesAccount: talkStreamFunction.serviceAccount,
+      dependsOn: apisEnabledWithDelay,
+    });
+
+    const firebaseHosting = new FirebaseHostingConstruct(this, "firebase-hosting", {
+        project: clientProjectId,
+        appDisplayName: "LangBridge Student Web",
+        siteId: clientProjectId,
+        provider: googleBetaProvider,
+        dependsOn: clientApisEnabledWithDelay,
     });
 
     new TerraformOutput(this, "project-id", {
@@ -252,6 +346,18 @@ class LangBridgeApiStack extends TerraformStack {
     });
     new TerraformOutput(this, "speech-file-bucket", {
       value: speechFileBucket.name,
+    });
+
+    new TerraformOutput(this, "client-project-id", {
+      value: clientProject.projectId,
+    });
+
+    new TerraformOutput(this, "webapp-app-id", {
+        value: firebaseHosting.webApp.appId,
+    });
+
+    new TerraformOutput(this, "hosting-url", {
+        value: firebaseHosting.hostingSite.defaultUrl,
     });
   }
 }
