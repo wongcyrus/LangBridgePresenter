@@ -22,5 +22,5 @@ def create_agent():
 agent = create_agent()
 runner = InMemoryRunner(
     agent=agent,
-    app_name=.langbridge_message_generator',
+    app_name='langbridge_message_generator',
 )

@@ -48,7 +48,7 @@ def create_agent():
 agent = create_agent()
 runner = InMemoryRunner(
     agent=agent,
-    app_name=.langbridge_classroom_assistant',
+    app_name='langbridge_classroom_assistant',
 )
 
 
@@ -88,7 +88,7 @@ def talk_stream(request):
             # with the given session_id
             session = asyncio.run(
                 runner.session_service.get_session(
-                    app_name=.langbridge_classroom_assistant',
+                    app_name='langbridge_classroom_assistant',
                     user_id=user_id,
                     session_id=session_id,
                 )
@@ -96,7 +96,7 @@ def talk_stream(request):
             if session is None:
                 session = asyncio.run(
                     runner.session_service.create_session(
-                        app_name=.langbridge_classroom_assistant',
+                        app_name='langbridge_classroom_assistant',
                         user_id=user_id,
                         session_id=session_id,
                     )

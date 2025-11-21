@@ -61,7 +61,7 @@ def generate_presentation_message(language_code="en", context="", course_id=None
         # Get or create session
         session = asyncio.run(
             runner.session_service.get_session(
-                app_name=.langbridge_message_generator',
+                app_name='langbridge_message_generator',
                 user_id=user_id,
                 session_id=session_id,
             )
@@ -69,7 +69,7 @@ def generate_presentation_message(language_code="en", context="", course_id=None
         if session is None:
             session = asyncio.run(
                 runner.session_service.create_session(
-                    app_name=.langbridge_message_generator',
+                    app_name='langbridge_message_generator',
                     user_id=user_id,
                     session_id=session_id,
                 )
