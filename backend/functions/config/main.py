@@ -6,6 +6,7 @@ import hashlib
 import functions_framework
 from google.cloud import firestore, texttospeech, storage
 from message_generator import generate_presentation_message
+import course_utils
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -52,10 +53,17 @@ def config(request):
             "languages": {}
         }
         bucket_name = os.environ.get("SPEECH_FILE_BUCKET")
+        course_id = request_json.get("courseId")
 
         if request_json.get("generate_presentation", False):
-            logger.info("Generating presentation messages with agent")
-            languages = request_json.get("languages", ["en"])
+            logger.info(f"Generating presentation messages with agent. CourseID: {course_id}")
+            
+            # Use course languages if available, else fallback to request or default
+            if course_id:
+                languages = course_utils.get_course_languages(course_id)
+            else:
+                languages = request_json.get("languages", ["en"])
+            
             # Only accept the canonical 'context' field from clients
             context = request_json.get("context", "")
             # Log the provided speaker notes context with a safe preview
@@ -67,8 +75,19 @@ def config(request):
                 _preview
             )
             
+            # Log this event
+            if course_id:
+                course_utils.log_presentation_event(course_id, {
+                    "type": "slide_change",
+                    "context_snippet": _preview,
+                    "languages": languages,
+                    "timestamp": firestore.SERVER_TIMESTAMP
+                })
+
             # Add context to broadcast payload so clients can see original text if needed
             broadcast_payload["original_context"] = context
+            broadcast_payload["course_id"] = course_id
+            broadcast_payload["supported_languages"] = languages
 
             if not context:
                 logger.warning(
@@ -77,7 +96,8 @@ def config(request):
                 )
 
             for lang in languages:
-                generated = generate_presentation_message(lang, context)
+                # Pass course_id to generation logic
+                generated = generate_presentation_message(lang, context, course_id=course_id)
                 if generated:
                     presentation_messages[lang] = generated
                     logger.info(
@@ -105,18 +125,10 @@ def config(request):
                                 logger.info("Generating new speech file: %s", filename)
                                 tts_client = texttospeech.TextToSpeechClient()
                                 
-                                if lang.startswith("en"):
-                                    voice_language = "en-US"
-                                elif lang.startswith("zh"):
-                                    voice_language = "zh-CN"
-                                else:
-                                    voice_language = "en-US"
+                                # Use Course Config for Voice Selection
+                                voice = course_utils.get_voice_params(course_id, lang)
                                 
                                 synthesis_input = texttospeech.SynthesisInput(text=generated)
-                                voice = texttospeech.VoiceSelectionParams(
-                                    language_code=voice_language,
-                                    ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
-                                )
                                 audio_config = texttospeech.AudioConfig(
                                     audio_encoding=texttospeech.AudioEncoding.MP3,
                                     speaking_rate=1.0
@@ -154,9 +166,11 @@ def config(request):
                         project="xiaoice-class-assistant",
                         database="(default)" 
                     )
-                    broadcast_ref = broadcast_db.collection('presentation_broadcast').document('current')
+                    # Use course_id as document ID if available, else 'current'
+                    doc_id = course_id if course_id else 'current'
+                    broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
                     broadcast_ref.set(broadcast_payload)
-                    logger.info("Successfully broadcasted presentation updates to xiaoice-class-assistant")
+                    logger.info(f"Successfully broadcasted presentation updates to xiaoice-class-assistant (doc: {doc_id})")
                 except Exception as b_e:
                     logger.error("Failed to broadcast presentation updates: %s", b_e)
 

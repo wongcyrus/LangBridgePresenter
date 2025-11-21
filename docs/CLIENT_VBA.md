@@ -11,13 +11,22 @@ The VBA Client integrates directly into Microsoft PowerPoint to provide real-tim
 
 ## Configuration
 
-### API Key Setup
-The client looks for the API key in the following order:
+### API Key, Base URL, and Course ID Setup
+The client loads configuration from `api_config.txt` or the Windows Registry.
 
+**`api_config.txt` Format:**
+- **Line 1**: API Key (Required)
+- **Line 2**: Base URL (Optional, defaults to registry/prompt)
+- **Line 3**: Course ID (Optional, enables Course-specific content/languages)
+
+**Search Order:**
 1. **`api_config.txt`** in the presentation's folder.
 2. **`%USERPROFILE%\Documents\XiaoiceClassAssistant\api_config.txt`**.
-3. **Windows Registry**: `HKCU\Software\XiaoiceClassAssistant\ApiKey`.
-4. **User Prompt**: If not found, asks the user and saves to the registry/file.
+3. **Windows Registry**:
+    - `HKCU\Software\XiaoiceClassAssistant\ApiKey`
+    - `HKCU\Software\XiaoiceClassAssistant\BaseUrl`
+    - `HKCU\Software\XiaoiceClassAssistant\CourseId`
+4. **User Prompt**: If Key/URL not found, asks the user.
 
 ### Macros
 The integration relies on a Class Module (`CAppEvents`) to handle application events.

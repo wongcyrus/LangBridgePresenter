@@ -130,7 +130,7 @@ def get_cached_presentation_message(language_code: str, context: str = ""):
 
 
 def cache_presentation_message(
-    language_code: str, message: str, context: str = ""
+    language_code: str, message: str, context: str = "", course_id: str = None
 ):
     """Store generated presentation message in Firestore cache."""
     if not message:
@@ -148,6 +148,7 @@ def cache_presentation_message(
         cache_ref = db.collection(
             'xiaoice_presentation_cache'
         ).document(cache_key)
+        
         cache_data = {
             "message": message,
             "language_code": (language_code or "").strip().lower(),
@@ -155,8 +156,13 @@ def cache_presentation_message(
             "context_hash": cache_key.rsplit(":", 1)[-1],
             "updated_at": firestore.SERVER_TIMESTAMP
         }
+        
+        if course_id:
+            cache_data["course_ids"] = firestore.ArrayUnion([course_id])
+
         logger.debug("Writing cache data: %s", cache_data)
-        cache_ref.set(cache_data)
+        # Use merge=True so we don't overwrite other fields or the array if it exists
+        cache_ref.set(cache_data, merge=True)
         logger.info("✅ Successfully cached result for key=%s", cache_key)
     except Exception as e:
         logger.exception(

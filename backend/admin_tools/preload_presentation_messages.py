@@ -38,6 +38,10 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 from pptx import Presentation
 
+# Add path to backend/functions/config to import course_utils
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "functions", "config"))
+import course_utils
+
 # Import config for bucket name
 try:
     import config
@@ -203,19 +207,26 @@ def cache_message(
     db: firestore.Client,
     language_code: str,
     context: str,
-    message: str
+    message: str,
+    course_id: str = None
 ):
     """Write a cache entry for generate_presentation_message lookup."""
     cache_key = _cache_key(language_code, context)
     norm_ctx = _normalize_context(context)
     cache_ref = db.collection("xiaoice_presentation_cache").document(cache_key)
-    cache_ref.set({
+    
+    data = {
         "message": message,
         "language_code": (language_code or "").strip().lower(),
         "context": norm_ctx,
         "context_hash": cache_key.rsplit(":", 1)[-1],
         "updated_at": firestore.SERVER_TIMESTAMP
-    })
+    }
+    
+    if course_id:
+        data["course_ids"] = firestore.ArrayUnion([course_id])
+        
+    cache_ref.set(data, merge=True)
 
 
 def update_config(db: firestore.Client, messages: Dict[str, str]):
@@ -232,7 +243,8 @@ def update_config(db: firestore.Client, messages: Dict[str, str]):
 def generate_speech_file(
     bucket_name: str,
     message: str,
-    language_code: str
+    language_code: str,
+    voice_params: texttospeech.VoiceSelectionParams = None
 ) -> str:
     """Generate speech file and upload to bucket.
     
@@ -256,19 +268,21 @@ def generate_speech_file(
         logger.info("Speech file already exists: %s", filename)
         return filename
     
-    # Determine voice language
-    if language_code.startswith("en"):
-        voice_language = "en-US"
-    elif language_code.startswith("zh"):
-        voice_language = "zh-CN"
-    else:
-        voice_language = "en-US"
+    # Determine voice params if not provided
+    if not voice_params:
+        if language_code.startswith("en"):
+            voice_language = "en-US"
+        elif language_code.startswith("zh"):
+            voice_language = "zh-CN"
+        else:
+            voice_language = "en-US"
+            
+        voice_params = texttospeech.VoiceSelectionParams(
+            language_code=voice_language,
+            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
+        )
     
     synthesis_input = texttospeech.SynthesisInput(text=message)
-    voice = texttospeech.VoiceSelectionParams(
-        language_code=voice_language,
-        ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
-    )
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
         speaking_rate=1.0
@@ -276,7 +290,7 @@ def generate_speech_file(
     
     tts_response = tts_client.synthesize_speech(
         input=synthesis_input,
-        voice=voice,
+        voice=voice_params,
         audio_config=audio_config
     )
     
@@ -297,6 +311,9 @@ def main():
     parser.add_argument(
         "--languages", default="en", help="Comma list, e.g. en,zh"
     )
+    parser.add_argument(
+        "--course-id", help="Optional Course ID for config and cache tagging"
+    )
 
     args = parser.parse_args()
 
@@ -314,6 +331,16 @@ def main():
             )
 
     languages = parse_languages(args.languages)
+    
+    # If course_id is provided, override languages with course config
+    if args.course_id:
+        course_langs = course_utils.get_course_languages(args.course_id)
+        if course_langs:
+            languages = course_langs
+            print(f"Using languages from course {args.course_id}: {', '.join(languages)}")
+        else:
+            print(f"Warning: Course {args.course_id} found but no languages defined. Using CLI args.")
+    
     prs = Presentation(args.pptx)
     total_slides = len(prs.slides)
     
@@ -379,7 +406,8 @@ def main():
                 db,
                 lang,
                 speaker_notes,  # Just the notes content
-                generated_message
+                generated_message,
+                course_id=args.course_id
             )
             cache_key = _cache_key(lang, speaker_notes)
             cached_count += 1
@@ -395,10 +423,14 @@ def main():
             # Generate speech file if bucket specified
             if bucket_name:
                 try:
+                    # Use course_utils to get voice params
+                    voice_params = course_utils.get_voice_params(args.course_id, lang)
+                    
                     speech_file = generate_speech_file(
                         bucket_name,
                         generated_message,
-                        lang
+                        lang,
+                        voice_params=voice_params
                     )
                     print(f"       -> Speech: {speech_file}")
                     speech_count += 1

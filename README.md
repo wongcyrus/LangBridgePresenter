@@ -12,6 +12,13 @@ Detailed documentation for each component can be found in the `docs/` directory:
 - **[VBA PowerPoint Client](docs/CLIENT_VBA.md)**: Guide for the PowerPoint integration that pushes slide notes.
 - **[Admin Tools & Caching](docs/ADMIN_TOOLS.md)**: Explanation of the content-based caching strategy and admin scripts.
 
+### ✨ New in this version:
+
+- **Multi-language support**: Now includes English, Mandarin, and Cantonese Text-to-Speech (TTS).
+- **Course-level configuration**: Manage languages, voices, and content caching per course.
+  - See [Admin Tools & Caching](docs/ADMIN_TOOLS.md) for how to set up courses.
+  - See [VBA PowerPoint Client](docs/CLIENT_VBA.md) for how to configure your presentations with a `CourseID`.
+
 ## 🎬 Demo
 
 [![Xiaoice Class Assistant Demo 1](https://img.youtube.com/vi/JQs-Za-DAQ0/0.jpg)](https://www.youtube.com/shorts/JQs-Za-DAQ0)

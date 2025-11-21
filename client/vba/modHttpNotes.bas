@@ -275,6 +275,10 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     Dim baseUrl As String
     baseUrl = GetBaseUrl(apiKey)
     
+    ' Get Course ID if available
+    Dim courseId As String
+    courseId = GetCourseId()
+    
     ' Validate API key
     If apiKey = "" Then
         Exit Sub
@@ -283,9 +287,9 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     Dim url As String
     url = baseUrl & "/api/config?key=" & apiKey
 
-    ' Prepare payload with the speaker notes
+    ' Prepare payload with the speaker notes and course ID
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(currentNotes)
+    bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -349,6 +353,10 @@ Public Sub SetPresentation(ByVal presentation As String)
     Dim baseUrl As String
     baseUrl = GetBaseUrl(apiKey)
     
+    ' Get Course ID if available
+    Dim courseId As String
+    courseId = GetCourseId()
+    
     ' Validate API key
     If apiKey = "" Then
         Exit Sub
@@ -371,7 +379,7 @@ Public Sub SetPresentation(ByVal presentation As String)
     ' Prepare payload with just the speaker notes (no slide number)
     ' This way cache works even if slides are reordered
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(slideNotes)
+    bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -571,8 +579,77 @@ Private Function GetBaseUrl(Optional ByVal existingApiKey As String = "") As Str
 End Function
 
 ' =========================
+' Course ID Configuration loader (similar pattern)
+' =========================
+Private Function GetCourseId() As String
+    On Error Resume Next
+    
+    Dim courseId As String
+    Dim configPath As String
+    Dim fso As Object
+    Dim ts As Object
+    Dim wsh As Object
+    Dim locations() As String
+    Dim i As Integer
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    ' Try multiple locations (same order as GetApiKey)
+    ReDim locations(0 To 3)
+    If Not ActivePresentation Is Nothing Then
+        If ActivePresentation.Path <> "" Then
+            If Left$(ActivePresentation.Path, 7) <> "http://" And Left$(ActivePresentation.Path, 8) <> "https://" Then
+                locations(0) = ActivePresentation.Path & "\api_config.txt"
+            End If
+        End If
+    End If
+    locations(1) = wsh.SpecialFolders("MyDocuments") & "\XiaoiceClassAssistant\api_config.txt"
+    locations(2) = wsh.ExpandEnvironmentStrings("%APPDATA%") & "\XiaoiceClassAssistant\api_config.txt"
+    locations(3) = wsh.ExpandEnvironmentStrings("%TEMP%") & "\api_config.txt"
+    
+    ' Read third line (Key, URL, CourseID)
+    For i = 0 To 3
+        If locations(i) <> "" Then
+            If fso.FileExists(locations(i)) Then
+                Set ts = fso.OpenTextFile(locations(i), 1)
+                ' Skip line 1 (Key)
+                If Not ts.AtEndOfStream Then ts.SkipLine
+                ' Skip line 2 (URL)
+                If Not ts.AtEndOfStream Then ts.SkipLine
+                ' Read line 3 (CourseID)
+                If Not ts.AtEndOfStream Then
+                    courseId = Trim(ts.ReadLine)
+                End If
+                ts.Close
+                Set ts = Nothing
+                If courseId <> "" Then Exit For
+            End If
+        End If
+    Next i
+    
+    Set fso = Nothing
+    
+    ' Registry fallback
+    If courseId = "" Then
+        On Error Resume Next
+        courseId = wsh.RegRead("HKCU\Software\XiaoiceClassAssistant\CourseId")
+        If Err.Number <> 0 Then
+            courseId = ""
+            Err.Clear
+        End If
+        On Error GoTo 0
+    End If
+    
+    Set wsh = Nothing
+    GetCourseId = courseId
+    If Err.Number <> 0 Then Err.Clear
+End Function
+
+' =========================
 ' HTTP helpers
 ' =========================
+
 
 ' -- ServerXMLHTTP method (Often blocked by security) --
 Private Sub PostJsonXmlHttp(ByVal url As String, ByVal bodyString As String, _
@@ -696,12 +773,22 @@ End Sub
 ' =========================
 
 ' Build payload for agent-generated presentation messages
-Private Function BuildConfigPayloadWithGeneration(ByVal context As String) As String
+Private Function BuildConfigPayloadWithGeneration(ByVal context As String, Optional ByVal courseId As String = "") As String
     Dim json As String
+    
+    ' If courseId is provided, use it (backend handles languages from course config)
+    ' If not, fallback to legacy behavior with default languages
+    Dim courseConfig As String
+    If courseId <> "" Then
+        courseConfig = """courseId"":""" & JsonEscape(courseId) & ""","
+    Else
+        courseConfig = """languages"":[""en"",""zh""],"
+    End If
+    
     json = _
         "{" & _
           """generate_presentation"":true," & _
-          """languages"":[""en"",""zh""]," & _
+          courseConfig & _
           """context"":""" & JsonEscape(context) & """," & _
           """presentation_messages"":{}," & _
           """welcome_messages"":{}," & _

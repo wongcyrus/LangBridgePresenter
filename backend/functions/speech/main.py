@@ -9,6 +9,7 @@ import functions_framework
 from auth_utils import validate_authentication
 from firestore_utils import get_config
 from google.cloud import texttospeech, storage
+import course_utils
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -40,6 +41,7 @@ def speech(request):
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
+    course_id = request_json.get("courseId")
 
     userParams = request_json.get("userParams", {})
     logger.debug("userParams: %s", userParams)
@@ -88,18 +90,10 @@ def speech(request):
             logger.info("Generating new speech file: %s", filename)
             tts_client = texttospeech.TextToSpeechClient()
             
-            if language_code.startswith("en"):
-                voice_language = "en-US"
-            elif language_code.startswith("zh"):
-                voice_language = "zh-CN"
-            else:
-                voice_language = "en-US"
+            # Use Course Config for Voice Selection
+            voice = course_utils.get_voice_params(course_id, language_code)
             
             synthesis_input = texttospeech.SynthesisInput(text=reply)
-            voice = texttospeech.VoiceSelectionParams(
-                language_code=voice_language,
-                ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
-            )
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
                 speaking_rate=1.0
@@ -137,3 +131,4 @@ def speech(request):
     }
 
     return json.dumps(response), 200, {"Content-Type": "application/json"}
+

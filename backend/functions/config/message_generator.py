@@ -13,12 +13,13 @@ from utils import normalize_context, session_id_for
 logger = logging.getLogger(__name__)
 
 
-def generate_presentation_message(language_code="en", context=""):
+def generate_presentation_message(language_code="en", context="", course_id=None):
     """Generate a presentation message using the ADK agent with caching.
     
     Args:
         language_code: Target language (e.g., 'en', 'zh')
         context: Speaker notes from current slide
+        course_id: Optional Course ID for logging and cache tagging
     """
     # Check cache first using speaker notes as key
     cached = get_cached_presentation_message(language_code, context)
@@ -27,6 +28,8 @@ def generate_presentation_message(language_code="en", context=""):
             "✅ Cache hit for %s (notes: %s...)",
             language_code, context[:30]
         )
+        # Ideally we would update the course_ids here too, but for now we skip it
+        # to avoid an extra write on every read.
         return cached
     
     logger.info("❌ Cache miss for %s, generating new message", language_code)
@@ -98,7 +101,7 @@ def generate_presentation_message(language_code="en", context=""):
                 language_code
             )
             if normalize_context(context):
-                cache_presentation_message(language_code, result, context)
+                cache_presentation_message(language_code, result, context, course_id=course_id)
                 logger.info("Cache write completed for %s", language_code)
             else:
                 logger.info(

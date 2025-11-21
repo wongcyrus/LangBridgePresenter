@@ -1,6 +1,6 @@
 # Admin Tools & Caching
 
-The `backend/admin_tools` directory contains scripts for managing the system's cache and configuration.
+The `backend/admin_tools` directory contains scripts for managing the system's cache, courses, and configuration.
 
 ## Content-Based Caching Logic
 
@@ -19,15 +19,34 @@ This ensures:
 - **Insert-Proof**: New slides don't shift existing IDs.
 - **De-duplication**: Identical notes share the same cache.
 
-## Preloading Scripts
+## Tools
 
-### `preload_presentation_messages.py`
+### 1. `manage_courses.py`
 
-**Purpose**: analyzing a PowerPoint file, generating AI responses for each slide's notes, and storing them in Firestore.
+Manages Course Configurations (languages, voices, etc.).
 
-**Usage**:
+**Usage:**
+
 ```bash
-python preload_presentation_messages.py --pptx presentation.pptx --languages en,zh
+# Create or Update a course
+python manage_courses.py update --id "course_101" --title "Intro to AI" --langs "en-US,zh-CN,yue-HK"
+
+# List all courses
+python manage_courses.py list
+```
+
+### 2. `preload_presentation_messages.py`
+
+Pre-generates AI presentation messages from a PowerPoint file and caches them.
+
+**Usage:**
+
+```bash
+# Using Course Config (Recommended)
+python preload_presentation_messages.py --pptx /path/to/deck.pptx --course-id "course_101"
+
+# Manual Language Selection (Legacy)
+python preload_presentation_messages.py --pptx /path/to/deck.pptx --languages "en,zh"
 ```
 
 **Process**:
@@ -35,9 +54,10 @@ python preload_presentation_messages.py --pptx presentation.pptx --languages en,
 2. Extracts speaker notes from every slide.
 3. Computes the hash of the notes.
 4. Checks Firestore. If missing, calls the AI to generate a "presentation script" or summary.
-5. Saves the result to Firestore.
+5. Saves the result to Firestore (tagged with `course_id`).
+6. Generates and uploads TTS audio (using course-specific voice settings).
 
-### `create_api_key.py` / `delete_api_key.py`
+### 3. `create_api_key.py` / `delete_api_key.py`
 
 **Purpose**: Manage API keys for the API Gateway.
 
