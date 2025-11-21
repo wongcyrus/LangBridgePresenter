@@ -12,6 +12,11 @@ Detailed documentation for each component can be found in the `docs/` directory:
 - **[VBA PowerPoint Client](docs/CLIENT_VBA.md)**: Guide for the PowerPoint integration that pushes slide notes.
 - **[Admin Tools & Caching](docs/ADMIN_TOOLS.md)**: Explanation of the content-based caching strategy and admin scripts.
 
+## 🎬 Demo
+
+- [Xiaoice Class Assistant Demo 1](https://youtube.com/shorts/JQs-Za-DAQ0?feature=share)
+- [Xiaoice Class Assistant Demo 2](https://youtube.com/shorts/s_MwaATKnzE?feature=share)
+
 ## 🚀 Quick Start
 
 ### 1. Backend Deployment
