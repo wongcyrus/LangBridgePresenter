@@ -8,13 +8,13 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 
 ### 🌐 Real-Time Translation & Synchronization
 *   **Live Updates**: As the presenter changes slides, the new content appears instantly on the student's device.
-*   **Multi-Language Support**: Students can switch languages on the fly. Supported languages include:
-    *   English (US)
-    *   Chinese (Mandarin - Simplified & Traditional)
-    *   Cantonese (Hong Kong)
-    *   Spanish
-    *   Japanese
-    *   Korean
+*   **Multi-Language Support**: Students can switch languages on the fly. Language codes follow the **BCP-47** standard used by Google Cloud. Supported languages include:
+    *   English (US) (`en-US`)
+    *   Chinese (Mandarin - Simplified & Traditional) (`zh-CN`, `zh-TW`)
+    *   Cantonese (Hong Kong) (`yue-HK`)
+    *   Spanish (`es-ES`)
+    *   Japanese (`ja-JP`)
+    *   Korean (`ko-KR`)
 
 ### 🔊 Smart Audio Player (Text-to-Speech)
 *   **Auto-Play**: Automatically plays the audio narration for new slides as they arrive (can be toggled off).

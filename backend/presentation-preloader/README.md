@@ -16,13 +16,28 @@ This tool pre-generates presentation messages from PPTX speaker notes using Gemi
 Run the script pointing to your PPTX file:
 
 ```bash
-python main.py --pptx /path/to/deck.pptx --languages en,zh
+python main.py --pptx /path/to/deck.pptx --languages en-US,yue-HK,zh-CN
 ```
 
 Arguments:
 - `--pptx`: Path to the PowerPoint file.
 - `--languages`: Comma-separated list of languages (e.g., `en,zh`).
 - `--course-id`: Optional Course ID to use configuration from Firestore.
+
+### Supported Languages
+
+The language codes follow the **BCP-47** standard used by Google Cloud Text-to-Speech.
+
+Common supported codes:
+- **`en-US`**: English (United States)
+- **`zh-CN`**: Chinese (Mandarin, Simplified)
+- **`yue-HK`**: Chinese (Cantonese, Hong Kong)
+- **`zh-TW`**: Chinese (Mandarin, Traditional)
+- **`es-ES`**: Spanish (Spain)
+- **`ja-JP`**: Japanese (Japan)
+- **`ko-KR`**: Korean (Korea)
+
+You can use short codes like `en` or `zh` if your course configuration maps them, but full BCP-47 tags are recommended for precision with Text-to-Speech.
 
 ## Configuration
 

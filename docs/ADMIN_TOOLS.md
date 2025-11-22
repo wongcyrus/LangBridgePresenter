@@ -25,6 +25,8 @@ This ensures:
 
 Manages Course Configurations (languages, voices, etc.).
 
+**Language Codes**: These follow the **BCP-47** standard (e.g., `en-US`, `zh-CN`, `yue-HK`).
+
 **Usage:**
 
 ```bash
@@ -40,6 +42,8 @@ python manage_courses.py list
 **Location**: `backend/presentation-preloader/`
 
 Pre-generates AI presentation messages from a PowerPoint file and caches them.
+
+**Language Codes**: These follow the **BCP-47** standard (e.g., `en-US`, `zh-CN`, `yue-HK`).
 
 **Usage:**
 
@@ -57,7 +61,7 @@ pip install -r requirements.txt
 python main.py --pptx /path/to/deck.pptx --course-id "course_101"
 
 # Manual Language Selection
-python main.py --pptx /path/to/deck.pptx --languages "en,zh"
+python main.py --pptx /path/to/deck.pptx --languages "en-US,zh-CN,yue-HK"
 ```
 
 **Process**:

@@ -12,7 +12,7 @@ This tool:
 Usage:
   python main.py \
     --pptx /path/to/deck.pptx \
-    --languages en,zh
+    --languages en,yue-HK,zh-CN
 
 Notes:
   - Generates ONE message per unique speaker notes content

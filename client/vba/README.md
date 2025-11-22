@@ -19,7 +19,7 @@ Before using the VBA client, ensure you have:
 
 ## Course Configuration
 
-To associate your presentation with a course (required for multi-language support), add the Course ID as the **third line** in your `api_config.txt` file.
+To associate your presentation with a course (required for multi-language support), add the Course ID as the **third line** in your `api_config.txt` file. The language codes used for configuration (e.g., in `manage_courses.py`) should follow the **BCP-47** standard (e.g., `en-US`, `zh-CN`, `yue-HK`).
 
 ### File Format (3 lines):
 ```
