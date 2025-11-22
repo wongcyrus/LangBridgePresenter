@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 # Default configuration if no course is specified or found
 DEFAULT_LANGUAGES = ["en-US", "zh-CN"]
 DEFAULT_VOICES = {
-    "en-US": {"name": "en-US-Neural2-J", "gender": texttospeech.SsmlVoiceGender.FEMALE},
-    "zh-CN": {"name": "zh-CN-Neural2-C", "gender": texttospeech.SsmlVoiceGender.FEMALE},
+    "en-US": {"name": "en-US-Neural2-F", "gender": texttospeech.SsmlVoiceGender.FEMALE},
+    "zh-CN": {"name": "cmn-CN-Chirp3-HD-Achernar", "gender": texttospeech.SsmlVoiceGender.FEMALE},
     "yue-HK": {"name": "yue-HK-Standard-A", "gender": texttospeech.SsmlVoiceGender.FEMALE},
     "zh-TW": {"name": "zh-TW-Standard-A", "gender": texttospeech.SsmlVoiceGender.FEMALE}
 }
@@ -74,6 +74,10 @@ def get_voice_params(course_id: str, language_code: str):
                 language_code=language_code,
                 ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
             )
+
+    # Adjust language_code if voice name implies a specific one (e.g. cmn-CN for zh-CN)
+    if voice_name and voice_name.startswith("cmn-CN") and language_code == "zh-CN":
+        language_code = "cmn-CN"
 
     return texttospeech.VoiceSelectionParams(
         language_code=language_code,

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import functions_framework
 from google.cloud import firestore, texttospeech, storage
 from message_generator import generate_presentation_message
@@ -95,66 +96,154 @@ def config(request):
                     "Will generate a generic message and skip caching."
                 )
 
-            for lang in languages:
-                # Pass course_id to generation logic
-                generated = generate_presentation_message(lang, context, course_id=course_id)
-                if generated:
-                    presentation_messages[lang] = generated
-                    logger.info(
-                        "Generated presentation for %s: %s",
-                        lang,
-                        generated
-                    )
+            # Step 1: Generate all messages in parallel
+            logger.info("Generating messages for %d languages in parallel", len(languages))
+            message_results = {}
+            
+            def generate_for_language(lang):
+                """Helper to generate message for a single language"""
+                try:
+                    result = generate_presentation_message(lang, context, course_id=course_id)
+                    if isinstance(result, tuple):
+                        generated, audio_url = result
+                    else:
+                        # Backwards compatibility
+                        generated = result
+                        audio_url = None
                     
-                    # Logic to broadcast speech URL
+                    if generated:
+                        logger.info("Generated presentation for %s: %s", lang, generated)
+                        return (lang, generated, audio_url, None)
+                    else:
+                        logger.warning("Failed to generate message for %s", lang)
+                        return (lang, None, None, "Generation failed")
+                except Exception as e:
+                    logger.error("Error generating message for %s: %s", lang, e)
+                    return (lang, None, None, str(e))
+            
+            with ThreadPoolExecutor(max_workers=min(len(languages), 5)) as executor:
+                future_to_lang = {executor.submit(generate_for_language, lang): lang for lang in languages}
+                for future in as_completed(future_to_lang):
+                    lang, generated, audio_url, error = future.result()
+                    if generated:
+                        message_results[lang] = {
+                            "text": generated,
+                            "audio_url": audio_url  # May be None
+                        }
+                        presentation_messages[lang] = generated
+            
+            logger.info("Generated %d/%d messages successfully", len(message_results), len(languages))
+            
+            # Step 2: Generate MP3s in parallel for all successful messages
+            if not bucket_name:
+                logger.warning("SPEECH_FILE_BUCKET not configured - skipping all audio generation")
+                # Add text-only data to broadcast
+                for lang, data in message_results.items():
+                    broadcast_payload["languages"][lang] = {"text": data["text"]}
+            else:
+                logger.info("Generating MP3s for %d languages in parallel", len(message_results))
+                
+                def generate_mp3_for_language(lang, data):
+                    """Helper to generate MP3 for a single language"""
+                    generated = data["text"]
+                    cached_audio_url = data.get("audio_url")
+                    
+                    # If we have cached audio_url, use it
+                    if cached_audio_url:
+                        logger.info("[MP3-%s] ✅ Using cached audio_url: %s", lang, cached_audio_url)
+                        return (lang, {"text": generated, "audio_url": cached_audio_url}, None)
+                    
+                    logger.info("[MP3-START] Processing %s: '%s...'", lang, generated[:50])
                     lang_data = {"text": generated}
-                    if bucket_name:
-                        try:
-                            # Reconstruct filename hash logic matching preload script
-                            content_hash = hashlib.sha256(
-                                f"{generated}:{lang}".encode("utf-8")
-                            ).hexdigest()[:12]
-                            filename = f"speech_{lang}_{content_hash}.mp3"
+                    try:
+                        # Generate filename from CONTEXT hash (not message content)
+                        # This ensures same context always gets same filename
+                        from utils import normalize_context
+                        norm_ctx = normalize_context(context)
+                        content_hash = hashlib.sha256(
+                            norm_ctx.encode("utf-8")
+                        ).hexdigest()[:12]
+                        filename = f"speech_{lang}_{content_hash}.mp3"
+                        logger.info("[MP3-%s] Context hash: %s, Filename: %s", lang, content_hash, filename)
+                        
+                        # Initialize clients inside the thread
+                        storage_client = storage.Client()
+                        bucket = storage_client.bucket(bucket_name)
+                        blob = bucket.blob(filename)
+                        
+                        if not blob.exists():
+                            logger.info("[MP3-%s] File not cached, generating TTS", lang)
+                            tts_client = texttospeech.TextToSpeechClient()
                             
-                            # Check if file exists, if not create it
-                            storage_client = storage.Client()
-                            bucket = storage_client.bucket(bucket_name)
-                            blob = bucket.blob(filename)
+                            # Use Course Config for Voice Selection
+                            voice = course_utils.get_voice_params(course_id, lang)
+                            logger.info("[MP3-%s] Using voice: %s", lang, voice.name if hasattr(voice, 'name') else voice.language_code)
                             
-                            if not blob.exists():
-                                logger.info("Generating new speech file: %s", filename)
-                                tts_client = texttospeech.TextToSpeechClient()
-                                
-                                # Use Course Config for Voice Selection
-                                voice = course_utils.get_voice_params(course_id, lang)
-                                
-                                synthesis_input = texttospeech.SynthesisInput(text=generated)
-                                audio_config = texttospeech.AudioConfig(
-                                    audio_encoding=texttospeech.AudioEncoding.MP3,
-                                    speaking_rate=1.0
-                                )
-                                tts_response = tts_client.synthesize_speech(
-                                    input=synthesis_input,
-                                    voice=voice,
-                                    audio_config=audio_config
-                                )
-                                
-                                blob.upload_from_string(
-                                    tts_response.audio_content,
-                                    content_type="audio/mpeg"
-                                )
-                                logger.info("Uploaded new speech file: %s", filename)
-                            else:
-                                logger.info("Using cached speech file: %s", filename)
+                            # Sanitize text for TTS API
+                            from utils import sanitize_text_for_tts
+                            clean_text = sanitize_text_for_tts(generated)
+                            if clean_text != generated:
+                                logger.info("[MP3-%s] Text sanitized for TTS (removed %d chars)", lang, len(generated) - len(clean_text))
+                            
+                            synthesis_input = texttospeech.SynthesisInput(text=clean_text)
+                            audio_config = texttospeech.AudioConfig(
+                                audio_encoding=texttospeech.AudioEncoding.MP3,
+                                speaking_rate=1.0
+                            )
+                            logger.info("[MP3-%s] Calling TTS API...", lang)
+                            tts_response = tts_client.synthesize_speech(
+                                input=synthesis_input,
+                                voice=voice,
+                                audio_config=audio_config
+                            )
+                            logger.info("[MP3-%s] TTS response received, size: %d bytes", lang, len(tts_response.audio_content))
+                            
+                            blob.upload_from_string(
+                                tts_response.audio_content,
+                                content_type="audio/mpeg"
+                            )
+                            logger.info("[MP3-%s] ✅ Uploaded new speech file: %s", lang, filename)
+                        else:
+                            logger.info("[MP3-%s] ✅ Using cached speech file: %s", lang, filename)
 
-                            # Public URL for the object
-                            speech_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
-                            lang_data["audio_url"] = speech_url
-                            logger.info("Broadcast audio URL for %s: %s", lang, speech_url)
-                        except Exception as tts_e:
-                             logger.error("Failed to generate/upload speech for %s: %s", lang, tts_e)
-                    
-                    broadcast_payload["languages"][lang] = lang_data
+                        # Public URL for the object
+                        speech_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
+                        lang_data["audio_url"] = speech_url
+                        logger.info("[MP3-%s] ✅ Audio URL ready: %s", lang, speech_url)
+                        
+                        # Update cache with audio_url for future lookups
+                        from firestore_utils import cache_presentation_message
+                        try:
+                            cache_presentation_message(
+                                lang, 
+                                generated, 
+                                context, 
+                                course_id=course_id, 
+                                audio_url=speech_url
+                            )
+                            logger.info("[MP3-%s] Updated cache with audio_url", lang)
+                        except Exception as cache_e:
+                            logger.warning("[MP3-%s] Failed to update cache: %s", lang, cache_e)
+                        
+                        return (lang, lang_data, None)
+                        
+                    except Exception as tts_e:
+                        logger.error("[MP3-%s] ❌ Failed: %s", lang, str(tts_e), exc_info=True)
+                        logger.warning("[MP3-%s] Broadcasting text without audio", lang)
+                        return (lang, lang_data, str(tts_e))
+                
+                with ThreadPoolExecutor(max_workers=min(len(message_results), 5)) as executor:
+                    future_to_lang = {
+                        executor.submit(generate_mp3_for_language, lang, data): lang 
+                        for lang, data in message_results.items()
+                    }
+                    for future in as_completed(future_to_lang):
+                        lang, lang_data, error = future.result()
+                        broadcast_payload["languages"][lang] = lang_data
+                        if error:
+                            logger.warning("MP3 generation had error for %s: %s", lang, error)
+                
+                logger.info("Completed MP3 generation for %d languages", len(broadcast_payload["languages"]))
             
             # Broadcast the updates to a dedicated collection for listeners
             if broadcast_payload["languages"]:

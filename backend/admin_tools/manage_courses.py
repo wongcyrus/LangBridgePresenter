@@ -63,8 +63,8 @@ def main():
         
         # Default voice configs for now (can be expanded to be arguments later)
         voice_configs = {
-            "en-US": {"name": "en-US-Neural2-J", "gender": "FEMALE"},
-            "zh-CN": {"name": "zh-CN-Neural2-C", "gender": "FEMALE"},
+            "en-US": {"name": "en-US-Neural2-F", "gender": "FEMALE"},
+            "zh-CN": {"name": "cmn-CN-Chirp3-HD-Achernar", "gender": "FEMALE"},
             "yue-HK": {"name": "yue-HK-Standard-A", "gender": "FEMALE"},
             "zh-TW": {"name": "zh-TW-Standard-A", "gender": "FEMALE"}
         }

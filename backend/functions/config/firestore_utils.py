@@ -90,7 +90,7 @@ def _cache_key(language_code: str, context: str) -> str:
 def get_cached_presentation_message(language_code: str, context: str = ""):
     """Retrieve cached presentation message from Firestore.
     
-    Returns the cached message if found, None otherwise.
+    Returns tuple (message, audio_url) if found, (None, None) otherwise.
     """
     cache_key = _cache_key(language_code, context)
     logger.debug("Looking up cache with key=%s", cache_key)
@@ -109,7 +109,9 @@ def get_cached_presentation_message(language_code: str, context: str = ""):
                     language_code,
                     cache_key
                 )
-                return cached_data["message"]
+                message = cached_data["message"]
+                audio_url = cached_data.get("audio_url")  # May be None
+                return (message, audio_url)
             else:
                 logger.warning(
                     "Cache doc exists but missing 'message' for key=%s",
@@ -126,11 +128,11 @@ def get_cached_presentation_message(language_code: str, context: str = ""):
             cache_key,
             e
         )
-    return None
+    return (None, None)
 
 
 def cache_presentation_message(
-    language_code: str, message: str, context: str = "", course_id: str = None
+    language_code: str, message: str, context: str = "", course_id: str = None, audio_url: str = None
 ):
     """Store generated presentation message in Firestore cache."""
     if not message:
@@ -159,6 +161,9 @@ def cache_presentation_message(
         
         if course_id:
             cache_data["course_ids"] = firestore.ArrayUnion([course_id])
+        
+        if audio_url:
+            cache_data["audio_url"] = audio_url
 
         logger.debug("Writing cache data: %s", cache_data)
         # Use merge=True so we don't overwrite other fields or the array if it exists

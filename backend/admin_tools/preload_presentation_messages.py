@@ -30,7 +30,8 @@ import hashlib
 import logging
 import os
 import sys
-from typing import Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Tuple
 
 from google.cloud import firestore, texttospeech, storage
 from google.adk.agents import config_agent_utils
@@ -86,6 +87,62 @@ def _normalize_context(context: str) -> str:
     return " ".join(str(context).split())
 
 
+def _sanitize_text_for_tts(text: str, max_length: int = 5000) -> str:
+    """Clean and prepare text for Google TTS API.
+    
+    Args:
+        text: Input text to sanitize
+        max_length: Maximum character length for TTS input
+        
+    Returns:
+        Sanitized text safe for TTS API
+    """
+    if not text:
+        return ""
+    
+    import re
+    
+    # Remove or replace problematic characters
+    # Remove special unicode characters that TTS doesn't handle well
+    text = text.replace('⟪', '')
+    text = text.replace('⧸', '/')
+    text = text.replace('⟫', '')
+    
+    # Remove control characters except common whitespace
+    text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
+    
+    # Ensure sentences end with proper punctuation
+    # Split very long sentences at natural break points
+    if len(text) > max_length:
+        # Try to split at sentence boundaries
+        sentences = re.split(r'([.!?。！？])\s*', text)
+        result = []
+        current_chunk = ""
+        
+        for i in range(0, len(sentences), 2):
+            sentence = sentences[i]
+            punct = sentences[i + 1] if i + 1 < len(sentences) else ""
+            
+            # If adding this sentence would exceed max, start new chunk
+            if len(current_chunk) + len(sentence) + len(punct) > max_length:
+                if current_chunk:
+                    result.append(current_chunk.strip())
+                current_chunk = sentence + punct
+            else:
+                current_chunk += sentence + punct
+        
+        if current_chunk:
+            result.append(current_chunk.strip())
+        
+        # Return first chunk only (or consider limiting message generation)
+        text = result[0] if result else text[:max_length]
+    
+    return text.strip()
+
+
 def _cache_key(language_code: str, context: str) -> str:
     """Build a stable, short cache key safe for Firestore doc IDs.
 
@@ -123,8 +180,12 @@ def generate_message_from_notes(
         f"clear, engaging message for students in {language_code} "
         f"language.\\n\\n"
         f"Speaker Notes:\\n{speaker_notes}\\n\\n"
-        f"Generate a concise message (2-4 sentences) that captures the "
-        f"key points. Return ONLY the message text, no explanations."
+        f"IMPORTANT REQUIREMENTS:\\n"
+        f"1. Generate a concise message (2-4 SHORT sentences, each under 100 characters in length and total message under 250 characters)\\n"
+        f"2. Use simple, clear language suitable for text-to-speech\\n"
+        f"3. Avoid special characters, symbols, or unusual punctuation\\n"
+        f"4. Use standard sentence-ending punctuation (periods, question marks)\\n"
+        f"5. Return ONLY the message text, no explanations or formatting"
     )
 
     try:
@@ -208,7 +269,8 @@ def cache_message(
     language_code: str,
     context: str,
     message: str,
-    course_id: str = None
+    course_id: str = None,
+    audio_url: str = None
 ):
     """Write a cache entry for generate_presentation_message lookup."""
     cache_key = _cache_key(language_code, context)
@@ -225,6 +287,9 @@ def cache_message(
     
     if course_id:
         data["course_ids"] = firestore.ArrayUnion([course_id])
+    
+    if audio_url:
+        data["audio_url"] = audio_url
         
     cache_ref.set(data, merge=True)
 
@@ -244,6 +309,7 @@ def generate_speech_file(
     bucket_name: str,
     message: str,
     language_code: str,
+    context: str,
     voice_params: texttospeech.VoiceSelectionParams = None
 ) -> str:
     """Generate speech file and upload to bucket.
@@ -254,9 +320,11 @@ def generate_speech_file(
     tts_client = texttospeech.TextToSpeechClient()
     storage_client = storage.Client()
     
-    # Generate stable filename from message content and language
+    # Generate stable filename from CONTEXT hash (not message content)
+    # This ensures same context always gets same filename
+    norm_ctx = _normalize_context(context)
     content_hash = hashlib.sha256(
-        f"{message}:{language_code}".encode("utf-8")
+        norm_ctx.encode("utf-8")
     ).hexdigest()[:12]
     filename = f"speech_{language_code}_{content_hash}.mp3"
     
@@ -282,7 +350,12 @@ def generate_speech_file(
             ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
         )
     
-    synthesis_input = texttospeech.SynthesisInput(text=message)
+    # Sanitize text for TTS
+    clean_message = _sanitize_text_for_tts(message)
+    if clean_message != message:
+        logger.info("Text sanitized for TTS (removed %d chars)", len(message) - len(clean_message))
+    
+    synthesis_input = texttospeech.SynthesisInput(text=clean_message)
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
         speaking_rate=1.0
@@ -377,63 +450,85 @@ def main():
         print(f"\nSlide {slide_idx}: Processing {len(speaker_notes)} "
               f"chars of notes")
         
-        # Generate message for each language for this slide
-        for lang in languages:
-            logger.info(
-                "Generating message for slide %d, language %s",
-                slide_idx,
-                lang
-            )
-            
-            generated_message = generate_message_from_notes(
-                runner,
-                speaker_notes,
-                lang,
-                slide_idx
-            )
-            
-            if not generated_message:
-                logger.warning(
-                    "Failed to generate message for slide %d, lang %s",
+        # Step 1: Generate messages for all languages in parallel
+        def generate_for_lang(lang: str) -> Tuple[str, str, str]:
+            """Generate message for one language. Returns (lang, message, error)"""
+            try:
+                logger.info(
+                    "Generating message for slide %d, language %s",
                     slide_idx,
                     lang
                 )
-                continue
-            
-            # Cache with speaker notes only (no slide number)
-            # This way cache works even if slides are reordered
-            cache_message(
-                db,
-                lang,
-                speaker_notes,  # Just the notes content
-                generated_message,
-                course_id=args.course_id
-            )
-            cache_key = _cache_key(lang, speaker_notes)
-            cached_count += 1
-            
-            # Store first 80 chars for display
-            if len(generated_message) > 80:
-                preview = generated_message[:80] + "..."
-            else:
-                preview = generated_message
-            print(f"  [{lang}] Cached '{cache_key}'")
-            print(f"       -> {preview}")
-            
-            # Generate speech file if bucket specified
-            if bucket_name:
-                try:
-                    # Use course_utils to get voice params
-                    voice_params = course_utils.get_voice_params(args.course_id, lang)
+                generated_message = generate_message_from_notes(
+                    runner,
+                    speaker_notes,
+                    lang,
+                    slide_idx
+                )
+                
+                if not generated_message:
+                    logger.warning(
+                        "Failed to generate message for slide %d, lang %s",
+                        slide_idx,
+                        lang
+                    )
+                    return (lang, "", "Generation failed")
+                
+                return (lang, generated_message, "")
+            except Exception as e:
+                logger.error(
+                    "Error generating message for slide %d, lang %s: %s",
+                    slide_idx,
+                    lang,
+                    e
+                )
+                return (lang, "", str(e))
+        
+        # Generate all messages in parallel
+        message_results = {}
+        print(f"  Generating messages for {len(languages)} languages in parallel...")
+        with ThreadPoolExecutor(max_workers=min(len(languages), 5)) as executor:
+            future_to_lang = {executor.submit(generate_for_lang, lang): lang for lang in languages}
+            for future in as_completed(future_to_lang):
+                lang, generated_message, error = future.result()
+                if generated_message:
+                    message_results[lang] = generated_message
                     
+                    # Cache with speaker notes only (no slide number)
+                    cache_message(
+                        db,
+                        lang,
+                        speaker_notes,
+                        generated_message,
+                        course_id=args.course_id
+                    )
+                    cache_key = _cache_key(lang, speaker_notes)
+                    cached_count += 1
+                    
+                    # Store first 80 chars for display
+                    preview = generated_message[:80] + "..." if len(generated_message) > 80 else generated_message
+                    print(f"  [{lang}] Cached '{cache_key}'")
+                    print(f"       -> {preview}")
+                    
+                    # Build messages dict for config (keyed by lang:slideN)
+                    all_messages[f"{lang}:slide{slide_idx}"] = generated_message
+        
+        print(f"  Generated {len(message_results)}/{len(languages)} messages successfully")
+        
+        # Step 2: Generate MP3s for all languages in parallel
+        if bucket_name and message_results:
+            def generate_mp3_for_lang(lang: str, message: str) -> Tuple[str, str, str]:
+                """Generate MP3 for one language. Returns (lang, filename, error)"""
+                try:
+                    voice_params = course_utils.get_voice_params(args.course_id, lang)
                     speech_file = generate_speech_file(
                         bucket_name,
-                        generated_message,
+                        message,
                         lang,
+                        speaker_notes,  # Pass context for hash
                         voice_params=voice_params
                     )
-                    print(f"       -> Speech: {speech_file}")
-                    speech_count += 1
+                    return (lang, speech_file, "")
                 except Exception as e:
                     logger.warning(
                         "Failed to generate speech for slide %d, lang %s: %s",
@@ -441,9 +536,36 @@ def main():
                         lang,
                         e
                     )
+                    return (lang, "", str(e))
             
-            # Build messages dict for config (keyed by lang:slideN)
-            all_messages[f"{lang}:slide{slide_idx}"] = generated_message
+            print(f"  Generating MP3s for {len(message_results)} languages in parallel...")
+            mp3_results = {}
+            with ThreadPoolExecutor(max_workers=min(len(message_results), 5)) as executor:
+                future_to_lang = {
+                    executor.submit(generate_mp3_for_lang, lang, msg): lang 
+                    for lang, msg in message_results.items()
+                }
+                for future in as_completed(future_to_lang):
+                    lang, speech_file, error = future.result()
+                    if speech_file:
+                        mp3_results[lang] = speech_file
+                        print(f"  [{lang}] Speech: {speech_file}")
+                        speech_count += 1
+            
+            print(f"  Generated {speech_count} MP3 files")
+            
+            # Update cache entries with audio URLs
+            for lang, speech_file in mp3_results.items():
+                audio_url = f"https://storage.googleapis.com/{bucket_name}/{speech_file}"
+                cache_message(
+                    db,
+                    lang,
+                    speaker_notes,
+                    message_results[lang],
+                    course_id=args.course_id,
+                    audio_url=audio_url
+                )
+                print(f"  [{lang}] Updated cache with audio_url")
 
     # Update config document
     if all_messages:
