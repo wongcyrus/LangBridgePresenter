@@ -15,6 +15,11 @@ import { GoogleStorageBucket } from "./.gen/providers/google-beta/google-storage
 import { FirebaseHostingConstruct } from "./components/firebase-hosting-construct";
 import { ServiceEnablementConstruct } from "./components/service-enablement-construct";
 import { IamRoleConstruct } from "./components/iam-role-construct";
+import { DataGoogleFirebaseWebAppConfigA } from "./.gen/providers/google-beta/data-google-firebase-web-app-config";
+
+import { WebClientDeploymentConstruct } from "./components/web-client-deployment-construct";
+import * as path from "path";
+import { NullProvider } from "./.gen/providers/null/provider";
 
 import { TimeProvider } from "./.gen/providers/time/provider";
 import { Sleep } from "./.gen/providers/time/sleep";
@@ -36,6 +41,7 @@ class LangBridgeApiStack extends TerraformStack {
     new TimeProvider(this, "time", {});
     const archiveProvider = new ArchiveProvider(this, "archive", {});
     const randomProvider = new RandomProvider(this, "random", {});
+    new NullProvider(this, "null", {});
 
     const billingAccount = new DataGoogleBillingAccount(this, "billing-account", {
       billingAccount: process.env.BILLING_ACCOUNT!,
@@ -313,6 +319,24 @@ class LangBridgeApiStack extends TerraformStack {
         siteId: clientProjectId,
         provider: googleBetaProvider,
         dependsOn: [clientTimeSleep],
+    });
+
+    // Retrieve Firebase web app config (includes generated API key)
+    const firebaseWebAppConfig = new DataGoogleFirebaseWebAppConfigA(this, "firebase-web-app-config", {
+      project: clientProjectId,
+      webAppId: firebaseHosting.webApp.appId,
+      provider: googleBetaProvider,
+      dependsOn: [firebaseHosting.webApp]
+    });
+
+    // Deploy the web client code using auto-generated Firebase API key
+    new WebClientDeploymentConstruct(this, "web-client-deploy", {
+        clientProjectId: clientProjectId,
+        sourcePath: path.resolve(__dirname, "../../client/web-student"),
+        firebaseApiKey: firebaseWebAppConfig.apiKey,
+        firebaseWebAppAppId: firebaseHosting.webApp.appId,
+        firebaseHostingSiteDefaultUrl: firebaseHosting.hostingSite.defaultUrl,
+        dependsOn: [firebaseHosting.hostingSite]
     });
 
     new TerraformOutput(this, "project-id", {

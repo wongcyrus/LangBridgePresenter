@@ -6,3 +6,4 @@ temp/
 # API configuration files (contain sensitive keys)
 **/api_config.txt
 backend/admin_tools/api_key.json
+node_modules

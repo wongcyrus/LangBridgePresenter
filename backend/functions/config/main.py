@@ -170,6 +170,10 @@ def config(request):
                     doc_id = course_id if course_id else 'current'
                     broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
                     broadcast_ref.set(broadcast_payload)
+                    
+                    # Add to history (subcollection)
+                    broadcast_ref.collection('messages').add(broadcast_payload)
+                    
                     logger.info(f"Successfully broadcasted presentation updates to xiaoice-class-assistant (doc: {doc_id})")
                 except Exception as b_e:
                     logger.error("Failed to broadcast presentation updates: %s", b_e)

@@ -7,7 +7,8 @@
     "google-beta@~>7.12.0",
     "random@~>3.7.2",
     "archive@~>2.7.1",
-    "hashicorp/time@~>0.9.1"
+    "hashicorp/time@~>0.9.1",
+    "hashicorp/null@~>3.2.1"
   ],
   "terraformModules": [],
   "context": {}

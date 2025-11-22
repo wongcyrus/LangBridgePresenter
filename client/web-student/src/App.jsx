@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, collection, query, orderBy, limitToLast } from "firebase/firestore";
 import { db } from "./firebase";
 
 function App() {
@@ -10,15 +10,14 @@ function App() {
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
   const [currentLang, setCurrentLang] = useState('en');
-  const [message, setMessage] = useState("Waiting for presentation data...");
-  const [originalContext,ObOriginalContext] = useState("");
+  const [messages, setMessages] = useState([]);
   const [audioUrl, setAudioUrl] = useState("");
   const [autoplay, setAutoplay] = useState(true);
+  const [supportedLangs, setSupportedLangs] = useState([]);
   
   const audioRef = useRef(null);
   const lastAudioUrlRef = useRef("");
-
-  const [supportedLangs, setSupportedLangs] = useState([]);
+  const messagesEndRef = useRef(null);
 
   const LANGUAGE_NAMES = {
     "en": "English",
@@ -36,6 +35,15 @@ function App() {
     return LANGUAGE_NAMES[code] || code;
   };
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // 1. Listen to metadata (Status & Supported Languages)
   useEffect(() => {
     console.log(`Connecting to presentation_broadcast/${courseId}`);
     setStatus({ text: "🟡 Connecting...", color: "orange" });
@@ -45,70 +53,64 @@ function App() {
       
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
-        updateUI(data);
         
         // Update supported languages list
         let langs = [];
         if (data.supported_languages && Array.isArray(data.supported_languages)) {
             langs = data.supported_languages;
         } else if (data.languages) {
-            // Fallback: derive from available keys if explicit list missing
             langs = Object.keys(data.languages);
         }
         
-        // Ensure current selection is valid, or default to first available
         if (langs.length > 0) {
             setSupportedLangs(langs);
-            // If currentLang is not in the new list (and list isn't empty), switch to first available?
-            // Or maybe we shouldn't force switch to avoid annoying UX if it's just a glitch.
-            // But if we start with 'en' and the course only has 'zh', we should probably switch.
-            // Let's just ensure the user can see the options.
         }
-        
-      } else {
-        setMessage("Waiting for presentation data...");
       }
     }, (error) => {
       console.error("Listen error:", error);
       setStatus({ text: "🔴 Connection Error", color: "red" });
+    });
+
+    return () => unsubscribe();
+  }, [courseId]);
+
+  // 2. Listen to Messages (Chat History)
+  useEffect(() => {
+    const messagesRef = collection(db, "presentation_broadcast", courseId, "messages");
+    const q = query(messagesRef, orderBy("updated_at", "asc"), limitToLast(100));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
       
-      if (error.code === 'permission-denied') {
-        setMessage("Permission Denied. Check Firestore Security Rules.");
+      setMessages(msgs);
+
+      // Handle Audio for the latest message
+      if (msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1];
+        const langData = getLangData(lastMsg, currentLang);
+        
+        if (langData && langData.audio_url && langData.audio_url !== lastAudioUrlRef.current) {
+          lastAudioUrlRef.current = langData.audio_url;
+          setAudioUrl(langData.audio_url);
+        }
       }
     });
 
     return () => unsubscribe();
-  }, [courseId, currentLang]); // Re-run if courseId or language changes
+  }, [courseId, currentLang]);
 
-  const updateUI = (data) => {
-    if (data.original_context) {
-      ObOriginalContext("Original Notes: " + data.original_context.substring(0, 100) + "...");
+  // Helper to get data for current language (with fallback)
+  const getLangData = (data, lang) => {
+    if (!data.languages) return null;
+    let langData = data.languages[lang];
+    if (!langData) {
+        const match = Object.keys(data.languages).find(k => k.startsWith(lang) || lang.startsWith(k));
+        if (match) langData = data.languages[match];
     }
-
-    // Try to find data for currentLang, or try prefixes (e.g. 'en' matches 'en-US')
-    let langData = null;
-    if (data.languages) {
-        langData = data.languages[currentLang];
-        if (!langData) {
-            // Try finding a key that starts with currentLang (e.g. 'en-US' for 'en') or vice versa
-            const match = Object.keys(data.languages).find(k => k.startsWith(currentLang) || currentLang.startsWith(k));
-            if (match) langData = data.languages[match];
-        }
-    }
-    
-    if (langData) {
-      if (langData.text) {
-        setMessage(langData.text);
-      }
-
-      if (langData.audio_url && langData.audio_url !== lastAudioUrlRef.current) {
-        lastAudioUrlRef.current = langData.audio_url;
-        setAudioUrl(langData.audio_url);
-        // Auto-play handling is done via useEffect on audioUrl change
-      }
-    } else {
-      setMessage(`(No content available for ${currentLang})`);
-    }
+    return langData;
   };
 
   // Handle Audio Autoplay
@@ -120,16 +122,17 @@ function App() {
 
   const handleLangChange = (e) => {
     setCurrentLang(e.target.value);
-    // Reset message temporarily while switching? Or keep old one? 
-    // Better to keep old one until next update or re-fetch if we stored full doc.
-    // Actually, we have the full doc in the snapshot closure if we used state for data.
-    // But for simplicity, we just let the next snapshot update it or rely on the fact 
-    // that `updateUI` is called inside the snapshot callback. 
-    // WAIT: `updateUI` relies on `currentLang` state.
-    // But `updateUI` is defined inside the component, so it sees the *current render's* `currentLang`.
-    // The `onSnapshot` callback closes over the variables from when it was defined.
-    // So changing `currentLang` won't update the *existing* subscription's callback logic immediately 
-    // unless we re-subscribe (which we do because `currentLang` is in dependency array).
+    // Reset audio url ref so it can re-play if we switch back or to a lang with same URL (unlikely)
+    lastAudioUrlRef.current = ""; 
+    // Actually, we might want to re-play the *current* latest message in the new language immediately?
+    // The `useEffect` for messages will re-run because `currentLang` changed? 
+    // No, I put `currentLang` in dependency array of message effect? 
+    // Yes. So it will re-evaluate `msgs` (which are from snapshot, but snapshot callback closes over state? No, snapshot persists).
+    // Wait, `onSnapshot` doesn't re-run just because `currentLang` changed unless we unsubscribe/resubscribe.
+    // But we DO want to re-evaluate the "latest audio" logic when language changes.
+    // My current `useEffect` [courseId, currentLang] DOES re-subscribe. That's slightly inefficient (fetches all docs again? No, Firestore SDK caches).
+    // Better: Separate the listener from the "current lang audio update" logic.
+    // But for now, re-subscribing is safest to ensure closure freshness.
   };
 
   return (
@@ -157,33 +160,47 @@ function App() {
         </div>
       </header>
 
-      <div className="content-area">
-        <div className="message-text">
-          {message}
-        </div>
-        
-        <div className="audio-controls">
-          <audio 
-            ref={audioRef} 
-            src={audioUrl} 
-            controls 
-          >
-            Your browser does not support the audio element.
-          </audio>
-          <div style={{ marginTop: '5px', fontSize: '0.8rem', color: '#666' }}>
-            <label>
+      <div className="chat-area">
+        {messages.length === 0 && (
+           <div className="empty-state">Waiting for presentation to start...</div>
+        )}
+        {messages.map((msg) => {
+          const langData = getLangData(msg, currentLang);
+          const content = langData ? langData.text : "(Translating...)";
+          const isSystem = !langData; // Or check if it's a system message?
+
+          return (
+            <div key={msg.id} className={`chat-message ${isSystem ? 'system' : 'presenter'}`}>
+              <div className="message-bubble">
+                {langData ? langData.text : <span style={{fontStyle: 'italic', opacity: 0.6}}>(Content not available in {getLangName(currentLang)})</span>}
+              </div>
+              {msg.original_context && (
+                 <div className="original-context">
+                   {msg.original_context.substring(0, 80)}{msg.original_context.length > 80 ? "..." : ""}
+                 </div>
+              )}
+            </div>
+          );
+        })}
+        <div ref={messagesEndRef} />
+      </div>
+      
+      <div className="footer-controls">
+          <div className="audio-player-wrapper">
+            <audio 
+                ref={audioRef} 
+                src={audioUrl} 
+                controls 
+                className="main-audio"
+            />
+            <label className="autoplay-toggle">
               <input 
                 type="checkbox" 
                 checked={autoplay} 
                 onChange={(e) => setAutoplay(e.target.checked)} 
-              /> Auto-play audio
+              /> Autoplay
             </label>
           </div>
-        </div>
-
-        <div className="context-preview">
-          {originalContext}
-        </div>
       </div>
     </div>
   );

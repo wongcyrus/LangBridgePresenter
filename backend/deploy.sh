@@ -1,5 +1,5 @@
-cd cdktf
+cd "$(dirname "$0")/cdktf"
 npm install cdktf-cli@latest
 npm i
-npx cdktf get
-npx cdktf deploy --auto-approve
+npx cdktf-cli get
+npx cdktf-cli deploy --auto-approve
