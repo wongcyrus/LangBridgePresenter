@@ -63,14 +63,46 @@ python preload_presentation_messages.py --pptx /path/to/deck.pptx --languages "e
 
 **Usage**:
 ```bash
-python create_api_key.py --project <project_id> --name <key_name>
+# Create an API key for a digital human
+python create_api_key.py <digital_human_id> <name>
+
+# Example
+python create_api_key.py 12345678 "Cyrus"
+
+# Delete an API key
+python delete_api_key.py <api_key_string>
 ```
+
+**Note**: The API key will be automatically added to Firestore and restricted to the configured API service. The key details are saved to a JSON file in the current directory.
 
 ## Environment Setup
 
-The admin tools require a Python environment with dependencies installed:
+The admin tools require a Python environment with dependencies installed and proper GCP authentication configured.
+
+### Quick Setup
 
 ```bash
 cd backend/admin_tools
+
+# Option 1: Use the automated setup script
+./setup.sh
+
+# Option 2: Manual setup
+pip install virtualenv
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
+
+# Configure Application Default Credentials quota project
+gcloud auth application-default set-quota-project langbridge-presenter
 ```
+
+### Authentication Requirements
+
+⚠️ **Important**: Before running any admin tools, ensure you have:
+
+1. **Authenticated with GCP**: Run `gcloud auth login` if you haven't already
+2. **Set the correct project**: `gcloud config set project langbridge-presenter`
+3. **Configured ADC quota project**: `gcloud auth application-default set-quota-project langbridge-presenter`
+
+The quota project ensures that API calls are billed to the correct GCP project, especially important when working with multiple projects or when the default credentials point to a different/deleted project.

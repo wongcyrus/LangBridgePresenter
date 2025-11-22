@@ -1,7 +1,7 @@
 # PowerShell script to run preload_presentation_messages.py with proper environment variables
 
 # Set environment variables for Google Cloud and Vertex AI
-$env:GOOGLE_CLOUD_PROJECT = "xiaice-class-assistant"
+$env:GOOGLE_CLOUD_PROJECT = "langbridge-presenter"
 $env:GOOGLE_CLOUD_LOCATION = "global"
 $env:GOOGLE_GENAI_USE_VERTEXAI = "True"
 

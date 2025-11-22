@@ -1,11 +1,53 @@
 # VBA Client Configuration
 
+## Prerequisites
+
+Before using the VBA client, ensure you have:
+
+1. **Created a course** in the backend (see [Admin Tools Documentation](../../docs/ADMIN_TOOLS.md)):
+   ```bash
+   cd backend/admin_tools
+   python manage_courses.py update --id "demo" --title "Demo Course" --langs "en-US,zh-CN,yue-HK"
+   ```
+
+2. **Generated an API key** for your digital human:
+   ```bash
+   python create_api_key.py 12345678 "Cyrus"
+   ```
+
+3. **Configured your presentation** with the Course ID in the speaker notes (see Course Configuration section below)
+
+## Course Configuration
+
+To associate your presentation with a course (required for multi-language support), add the Course ID as the **third line** in your `api_config.txt` file.
+
+### File Format (3 lines):
+```
+AIzaSyCTgbvlKqCTbb-ICq_fcTDR7cZsz6l8G2g
+https://langbridgeapi-1ynqko7b4cw5d.apigateway.langbridge-presenter.cloud.goog
+demo
+```
+
+**Line 1**: API Key  
+**Line 2**: Base URL  
+**Line 3**: Course ID (e.g., `demo`)
+
+This tells the system which course configuration to use, including:
+- Supported languages (e.g., English, Mandarin, Cantonese)
+- Voice settings for each language
+- Cached presentation content
+
+**Note**: If no Course ID is provided (only 2 lines in the file), the system will use default languages (en, zh).
+
 ## API Key Configuration
 
 The VBA client supports three methods for configuring the API key (in order of priority):
 
 ### Option 1: Config File (Recommended for Development)
-Create a file named `api_config.txt` containing only your API key (one line, no extra spaces).
+Create a file named `api_config.txt` with up to three lines:
+1. API Key (required)
+2. Base URL (optional - will prompt if not provided)
+3. Course ID (optional - defaults to legacy behavior if not provided)
 
 The VBA code will search for this file in the following locations (in order):
 
@@ -16,7 +58,9 @@ The VBA code will search for this file in the following locations (in order):
 
 **Example file content:**
 ```
-AIzaSyDbT1tVQgd_-bxDc0hxm_xxkllboCiTh-w
+AIzaSyCTgbvlKqCTbb-ICq_fcTDR7cZsz6l8G2g
+https://langbridgeapi-1ynqko7b4cw5d.apigateway.langbridge-presenter.cloud.goog
+demo
 ```
 
 **Quick Setup:**
@@ -24,7 +68,7 @@ AIzaSyDbT1tVQgd_-bxDc0hxm_xxkllboCiTh-w
 2. Navigate to `%USERPROFILE%\Documents`
 3. Create a new folder named `LangBridge`
 4. Create a text file named `api_config.txt` in that folder
-5. Paste your API key as the only line in the file
+5. Add three lines: your API key, the Base URL, and the Course ID
 
 **Pros:**
 - Easy to update

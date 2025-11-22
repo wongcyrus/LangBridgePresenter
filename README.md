@@ -36,7 +36,29 @@ The backend is managed via CDK for Terraform (CDKTF).
 
 See [Backend Documentation](docs/BACKEND.md) for full details.
 
-### 2. Client Setup
+### 2. Setup Admin Tools & Create a Course
+
+Before using the clients, set up the admin tools and create a demo course:
+
+```bash
+cd backend/admin_tools
+
+# Setup Python environment and authenticate
+./setup.sh
+# OR manually:
+source venv/bin/activate
+gcloud auth application-default set-quota-project langbridge-presenter
+
+# Create a demo course
+python manage_courses.py update --id "demo" --title "Demo Course" --langs "en-US,zh-CN,yue-HK"
+
+# Create an API key for a digital human
+python create_api_key.py 12345678 "Cyrus"
+```
+
+See [Admin Tools & Caching](docs/ADMIN_TOOLS.md) for more details.
+
+### 3. Client Setup
 
 #### Python Window Monitor
 Captures your screen content to provide visual context to the AI.
