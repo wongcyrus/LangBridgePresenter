@@ -34,6 +34,7 @@ function App() {
   const [playingMsgId, setPlayingMsgId] = useState(null);
   const [playlist, setPlaylist] = useState([]); // Array of msg objects to play
   const [autoplay, setAutoplay] = useState(true);
+  const [isReady, setIsReady] = useState(false); // User has clicked "Join"
 
   // Refs
   const audioRef = useRef(new Audio());
@@ -79,8 +80,13 @@ function App() {
     if (langData && langData.audio_url) {
         setPlayingMsgId(msg.id);
         audioRef.current.src = langData.audio_url;
-        audioRef.current.play().catch(e => console.error("Playback failed", e));
-        setIsPlaying(true);
+        audioRef.current.play()
+            .then(() => setIsPlaying(true))
+            .catch(e => {
+                console.error("Playback failed", e);
+                setIsPlaying(false);
+                setPlayingMsgId(null);
+            });
     }
   };
 
@@ -118,6 +124,8 @@ function App() {
 
   // 1. Metadata
   useEffect(() => {
+    if (!isReady) return;
+
     const unsubscribe = onSnapshot(doc(db, "presentation_broadcast", courseId), (docSnapshot) => {
       if (docSnapshot.exists()) {
         setStatus({ text: "🟢 Live", color: "green" });
@@ -135,10 +143,12 @@ function App() {
       }
     });
     return () => unsubscribe();
-  }, [courseId]);
+  }, [courseId, isReady]);
 
   // 2. Messages
   useEffect(() => {
+    if (!isReady) return;
+
     // Get messages sorted by time (Oldest -> Newest)
     const messagesRef = collection(db, "presentation_broadcast", courseId, "messages");
     const q = query(messagesRef, orderBy("updated_at", "asc"), limitToLast(100));
@@ -165,10 +175,19 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, [courseId, currentLang, autoplay]); // Re-bind if params change
+  }, [courseId, currentLang, autoplay, isReady]); // Re-bind if params change
 
   // Display Order: Newest First
   const displayMessages = [...messages].reverse();
+
+  if (!isReady) {
+      return (
+          <div className="splash-screen">
+              <h1>LangBridge Student Client</h1>
+              <button onClick={() => setIsReady(true)}>Join Class</button>
+          </div>
+      );
+  }
 
   return (
     <div className="container">
