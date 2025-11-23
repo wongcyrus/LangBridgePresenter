@@ -1,3 +1,9 @@
 {
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "backend/tests"
+    ],
+    "python.envFile": "${workspaceFolder}/backend/tests/.env.test"
 }

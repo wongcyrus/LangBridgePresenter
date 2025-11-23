@@ -29,7 +29,6 @@ cd "$TESTS_DIR" || exit 1
 
 # Load environment variables from backend/cdktf/.env if it exists
 if [ -f "$CDKTF_DIR/.env" ]; then
-    # Export all variables defined in the .env
     set -a
     # shellcheck disable=SC1090
     . "$CDKTF_DIR/.env"
@@ -50,4 +49,6 @@ export API_URL="https://$API_URL"
 export XiaoiceChatSecretKey="${XiaoiceChatSecretKey:-${XIAOICE_CHAT_SECRET_KEY:-test_secret_key}}"
 export XiaoiceChatAccessKey="${XiaoiceChatAccessKey:-${XIAOICE_CHAT_ACCESS_KEY:-test_access_key}}"
 
-python test_functions.py "$@"
+# Run pytest with verbose output
+# Pass any arguments to this script directly to pytest (e.g. -k "welcome")
+pytest -v "$@"

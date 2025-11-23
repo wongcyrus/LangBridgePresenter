@@ -111,7 +111,7 @@ async def call_writer(analysis: str, previous_context: str, theme: str) -> str:
     return await workers.run_simple_agent(workers.writer_runner, prompt)
 
 
-async def process_presentation(pptx_path: str, pdf_path: str):
+async def process_presentation(pptx_path: str, pdf_path: str, course_id: str = None):
     global workers
     
     logger.info(f"Processing PPTX: {pptx_path}")
