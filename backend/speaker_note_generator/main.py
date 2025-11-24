@@ -479,7 +479,7 @@ def main():
     parser.add_argument("--course-id", help="Optional: Course ID to fetch theme context")
     parser.add_argument("--progress-file", help="Override path for progress JSON file")
     parser.add_argument("--retry-errors", action="store_true", help="Retry slides previously marked as error")
-    parser.add_argument("--region", help="Google Cloud Region (default: us-central1)", default="us-central1")
+    parser.add_argument("--region", help="Google Cloud Region (default: global)", default="global")
 
     args = parser.parse_args()
 
@@ -496,7 +496,7 @@ def main():
     if args.region:
         os.environ["GOOGLE_CLOUD_LOCATION"] = args.region
     elif "GOOGLE_CLOUD_LOCATION" not in os.environ:
-        os.environ["GOOGLE_CLOUD_LOCATION"] = "us-central1"
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
     asyncio.run(process_presentation(args.pptx, args.pdf, args.course_id))
 

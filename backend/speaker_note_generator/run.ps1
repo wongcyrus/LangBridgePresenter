@@ -37,7 +37,7 @@ if (-not $pptx -or -not $pdf) {
 # Set Google Cloud environment variables
 # Change GOOGLE_CLOUD_PROJECT to your alternate project ID to avoid rate limits
 $env:GOOGLE_CLOUD_PROJECT = 'langbridge-presenter'  # Change this to your other project
-$env:GOOGLE_CLOUD_LOCATION = 'us-central1'
+$env:GOOGLE_CLOUD_LOCATION = 'global'
 $env:GOOGLE_GENAI_USE_VERTEXAI = 'True'
 
 Write-Host "Starting Speaker Note Generator..." -ForegroundColor Cyan

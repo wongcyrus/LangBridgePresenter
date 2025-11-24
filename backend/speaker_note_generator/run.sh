@@ -16,11 +16,11 @@ fi
 # Set Google Cloud Environment Variables
 # You may need to adjust these or set them in your shell before running
 export GOOGLE_CLOUD_PROJECT="langbridge-presenter"
-export GOOGLE_CLOUD_LOCATION="us-central1"
+export GOOGLE_CLOUD_LOCATION="global"
 export GOOGLE_GENAI_USE_VERTEXAI="True"
 
 # Default region
-export GOOGLE_CLOUD_LOCATION="us-central1"
+export GOOGLE_CLOUD_LOCATION="global"
 
 echo "Starting Speaker Note Generator..."
 echo "Project: $GOOGLE_CLOUD_PROJECT"
