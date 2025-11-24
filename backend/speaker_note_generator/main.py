@@ -15,7 +15,7 @@ import io
 import json
 import hashlib
 import tempfile
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import pymupdf  # fitz
 from PIL import Image
@@ -30,6 +30,7 @@ from google.adk.agents import LlmAgent
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from agents.supervisor import supervisor_agent
 from agents.analyst import analyst_agent
+from agents.overviewer import overviewer_agent
 
 # Setup logging
 logging.basicConfig(
@@ -42,41 +43,41 @@ logger = logging.getLogger(__name__)
 # Global registry for images
 IMAGE_REGISTRY: Dict[str, Image.Image] = {}
 
+def _create_image_part(image: Image.Image) -> types.Part:
+    """Helper to create a Part object from a PIL Image safely."""
+    if hasattr(types.Part, 'from_image'):
+        return types.Part.from_image(image=image)
+    else:
+        buf = io.BytesIO()
+        image.save(buf, format='PNG')
+        img_bytes = buf.getvalue()
+        if hasattr(types.Part, 'from_bytes'):
+            return types.Part.from_bytes(
+                data=img_bytes,
+                mime_type='image/png'
+            )
+        else:
+            return types.Part(
+                mime_type='image/png',
+                data=img_bytes
+            )
+
 async def run_stateless_agent(
     agent: LlmAgent,
     prompt: str,
-    image: Image.Image = None,
+    images: List[Image.Image] = None,
 ) -> str:
     """Helper to run a stateless single-turn agent."""
     runner = InMemoryRunner(agent=agent, app_name=agent.name)
     user_id = "system_user"
     
     parts = [types.Part.from_text(text=prompt)]
-    if image:
-        # Attempt to build an image part across library versions.
-        try:
-            if hasattr(types.Part, 'from_image'):
-                parts.append(types.Part.from_image(image=image))
-            else:
-                buf = io.BytesIO()
-                image.save(buf, format='PNG')
-                img_bytes = buf.getvalue()
-                if hasattr(types.Part, 'from_bytes'):
-                    parts.append(
-                        types.Part.from_bytes(
-                            data=img_bytes,
-                            mime_type='image/png'
-                        )
-                    )
-                else:
-                    parts.append(
-                        types.Part(
-                            mime_type='image/png',
-                            data=img_bytes
-                        )
-                    )
-        except Exception as e:
-            logger.error(f"Failed to attach image part: {e}")
+    if images:
+        for img in images:
+            try:
+                parts.append(_create_image_part(img))
+            except Exception as e:
+                logger.error(f"Failed to attach image part: {e}")
 
     content = types.Content(role='user', parts=parts)
     
@@ -109,8 +110,8 @@ async def run_stateless_agent(
 
     print(f"\n┌── [Agent: {agent.name}]")
     print(f"│ Task: {prompt.strip()[:500].replace(chr(10), ' ') + ('...' if len(prompt) > 500 else '')}")
-    if image:
-        print(f"│ [Image Attached]")
+    if images:
+        print(f"│ [{len(images)} Images Attached]")
 
     response_text = ""
     try:
@@ -140,7 +141,23 @@ async def call_analyst(image_id: str) -> str:
         return "Error: Image not found."
     
     prompt_text = "Analyze this slide image."
-    return await run_stateless_agent(analyst_agent, prompt_text, image=image)
+    return await run_stateless_agent(analyst_agent, prompt_text, images=[image])
+
+async def call_writer(
+    analysis: str,
+    previous_context: str,
+    theme: str,
+    global_context: str = "No global context provided." 
+) -> str:
+    """Tool: Writes the script."""
+    logger.info("[Tool] call_writer invoked.")
+    prompt = (
+        f"SLIDE_ANALYSIS:\n{analysis}\n\n"
+        f"PRESENTATION_THEME: {theme}\n"
+        f"PREVIOUS_CONTEXT: {previous_context}\n"
+        f"GLOBAL_CONTEXT: {global_context}\n"
+    )
+    return await run_stateless_agent(writer_agent, prompt)
 
 
 async def process_presentation(
@@ -155,12 +172,25 @@ async def process_presentation(
     prs = Presentation(pptx_path)
     pdf_doc = pymupdf.open(pdf_path)
     limit = min(len(prs.slides), len(pdf_doc))
+
+    # 0. PASS 1: Global Context Generation
+    logger.info("--- Pass 1: Generating Global Context ---")
+    all_images = []
+    for i in range(limit):
+        pix = pdf_doc[i].get_pixmap(dpi=75) # Lower DPI for overview to save bandwidth/tokens
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        all_images.append(img)
+    
+    global_context = await run_stateless_agent(
+        overviewer_agent,
+        "Here are the slides for the entire presentation. Analyze them.",
+        images=all_images
+    )
+    logger.info(f"Global Context Generated: {len(global_context)} chars")
     
     # Configure Supervisor Tools
-    # Append the function tool 'call_analyst' to the existing list if missing
-    # supervisor_agent.tools is a list
-    if call_analyst not in supervisor_agent.tools:
-        supervisor_agent.tools.append(call_analyst)
+    # Assign list of functions directly to override defaults and ensure new signatures are used
+    supervisor_agent.tools = [call_analyst, call_writer]
 
     # Initialize Supervisor Runner
     supervisor_runner = InMemoryRunner(
@@ -245,8 +275,19 @@ async def process_presentation(
         return f"slide_{index}_{h}"
 
     progress = load_progress(progress_file)
+    # Save Global Context to progress for debugging/resuming
+    if "global_context" not in progress:
+        progress["global_context"] = global_context
+        save_progress(progress_file, progress)
+    else:
+        # Use cached global context if available and valid
+        if progress["global_context"] and len(progress["global_context"]) > 50:
+             logger.info("Using cached Global Context from progress file.")
+             global_context = progress["global_context"]
+
     logger.info(f"Using progress file: {progress_file} (retry_errors={retry_errors})")
 
+    # 1. Pass 2: Slide Loop
     for i in range(limit):
         slide_idx = i + 1
         slide = prs.slides[i]
@@ -282,12 +323,14 @@ async def process_presentation(
         IMAGE_REGISTRY[image_id] = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
         # 2. Prompt Supervisor
+        # Inject GLOBAL CONTEXT here
         supervisor_prompt = (
             f"Here is Slide {slide_idx}.\n"
             f"Existing Notes: \"{existing_notes}\"\n"
             f"Image ID: \"{image_id}\"\n"
             f"Previous Slide Summary: \"{previous_slide_summary}\"\n"
-            f"Theme: \"{presentation_theme}\"\n\n"
+            f"Theme: \"{presentation_theme}\"\n"
+            f"Global Context: \"{global_context}\"\n\n"
             f"Please proceed with the workflow."
         )
 
@@ -311,7 +354,7 @@ async def process_presentation(
                         fn_call = getattr(part, "function_call", None)
                         if fn_call:
                             print(f"\n[Supervisor] 📞 calling tool: {fn_call.name}")
-                            # print(f"             Args: {fn_call.args}") # Args can be verbose
+                            # print(f"             Args: {fn_call.args}") 
 
                         # Check for Text
                         text = getattr(part, "text", "") or ""
