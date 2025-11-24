@@ -209,6 +209,7 @@ async def process_presentation(
     pptx_path: str,
     pdf_path: str,
     course_id: str = None,
+    skip_visuals: bool = False,
 ):
     # Late Import to allow env var configuration
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -235,7 +236,7 @@ async def process_presentation(
         analysis: str,
         previous_context: str,
         theme: str,
-        global_context: str = "No global context provided." 
+        global_context: str = "No global context provided."
     ) -> str:
         """Tool: Writes the script."""
         logger.info("[Tool] speech_writer invoked.")
@@ -421,109 +422,111 @@ async def process_presentation(
             previous_slide_summary = final_response[:200]
 
             # 4. VISUALIZATION STEP (New)
-            logger.info(f"--- Processing Visual for Slide {slide_idx} ---")
-            
-            # Simplified filename to ensure stable skipping if file exists
-            # We no longer use the hash in the filename for simpler caching during dev
-            vis_dir = os.path.join(os.path.dirname(pptx_path), "visuals")
-            os.makedirs(vis_dir, exist_ok=True)
-            img_filename = f"slide_{slide_idx}_reimagined.png"
-            img_path = os.path.join(vis_dir, img_filename)
-
-            img_bytes = None
-
-            if os.path.exists(img_path) and not retry_errors: # Skip if exists and not retrying errors
-                logger.info(f"Visual already exists for Slide {slide_idx} ({img_filename}). Skipping generation.")
-                try:
-                    with open(img_path, "rb") as f:
-                        img_bytes = f.read()
-                    # Update Previous Image for next iteration (Style Consistency)
-                    try:
-                         previous_reimagined_image = Image.open(io.BytesIO(img_bytes))
-                    except Exception as img_err:
-                         logger.warning(f"Could not load generated image for next iteration context: {img_err}")
-                         previous_reimagined_image = None
-                except Exception as e:
-                    logger.error(f"Failed to load existing image {img_path}: {e}")
-                    img_bytes = None # Force re-generation if load fails
-            
-            if img_bytes is None: # Only generate if not skipped or load failed
-                logger.info(f"--- Generating Visual for Slide {slide_idx} ---")
+            if not skip_visuals:
+                logger.info(f"--- Processing Visual for Slide {slide_idx} ---")
                 
-                logo_instruction = ""
-                if slide_idx == 1:
-                    logo_instruction = "You MUST prominently feature the logo/branding from IMAGE 1 (Original Draft Slide) in an appropriate corner."
+                # Simplified filename to ensure stable skipping if file exists
+                # We no longer use the hash in the filename for simpler caching during dev
+                vis_dir = os.path.join(os.path.dirname(pptx_path), "visuals")
+                os.makedirs(vis_dir, exist_ok=True)
+                img_filename = f"slide_{slide_idx}_reimagined.png"
+                img_path = os.path.join(vis_dir, img_filename)
+
+                img_bytes = None
+
+                if os.path.exists(img_path) and not retry_errors: # Skip if exists and not retrying errors
+                    logger.info(f"Visual already exists for Slide {slide_idx} ({img_filename}). Skipping generation.")
+                    try:
+                        with open(img_path, "rb") as f:
+                            img_bytes = f.read()
+                        # Update Previous Image for next iteration (Style Consistency)
+                        try:
+                             previous_reimagined_image = Image.open(io.BytesIO(img_bytes))
+                        except Exception as img_err:
+                             logger.warning(f"Could not load generated image for next iteration context: {img_err}")
+                             previous_reimagined_image = None
+                    except Exception as e:
+                        logger.error(f"Failed to load existing image {img_path}: {e}")
+                        img_bytes = None # Force re-generation if load fails
+                
+                if img_bytes is None: # Only generate if not skipped or load failed
+                    logger.info(f"--- Generating Visual for Slide {slide_idx} ---")
+                    
+                    logo_instruction = ""
+                    if slide_idx == 1:
+                        logo_instruction = "You MUST prominently feature the logo/branding from IMAGE 1 (Original Draft Slide) in an appropriate corner."
+                    else:
+                        logo_instruction = "DO NOT include any logos or branding elements. Focus solely on content."
+
+                    designer_prompt_text = (
+                        f"IMAGE 1: Original Slide Image provided.\n"
+                        f"IMAGE 2: {'Style Reference (Previous Slide) provided.' if previous_reimagined_image else 'N/A'}\n"
+                        f"Speaker Notes: \"{final_response}\"\n\n"
+                        f"TASK: Generate the high-fidelity slide image now.\n"
+                        f"CONTEXT: {logo_instruction}\n"
+                    ) #
+                    
+                    designer_images = [slide_image]
+                    if previous_reimagined_image:
+                        designer_images.append(previous_reimagined_image)
+
+                    img_bytes = await run_visual_agent(
+                        designer_agent,
+                        designer_prompt_text,
+                        images=designer_images
+                    )
+                
+                if img_bytes:
+                    # Save to disk if newly generated or re-saved for consistency
+                    try:
+                        with open(img_path, "wb") as f:
+                            f.write(img_bytes)
+                        logger.info(f"Saved reimagined slide to: {img_path}")
+                        
+                        # Update Previous Image for next iteration (Style Consistency)
+                        try:
+                             previous_reimagined_image = Image.open(io.BytesIO(img_bytes))
+                        except Exception as img_err:
+                             logger.warning(f"Could not load generated image for next iteration context: {img_err}")
+                             previous_reimagined_image = None
+
+                        # Create a new slide in the presentation to embed the image and notes
+                        # Find a blank layout (usually slide_layouts[6])
+                        try:
+                            blank_slide_layout = prs.slide_layouts[6] # Usually the blank layout
+                        except IndexError:
+                            logger.warning("Could not find blank slide layout (index 6), using first available.")
+                            blank_slide_layout = prs.slide_layouts[0] # Fallback
+
+                        # Add a new slide to the presentation
+                        new_slide = prs.slides.add_slide(blank_slide_layout)
+                        
+                        from pptx.util import Inches, Pt # Import here to ensure it's available
+
+                        # Embed the generated image
+                        left = Inches(0.5)
+                        top = Inches(0.5)
+                        width = Inches(9)
+                        height = Inches(5)
+                        new_slide.shapes.add_picture(img_path, left, top, width=width, height=height)
+
+                        # Add the speaker notes as text on the new slide
+                        txBox = new_slide.shapes.add_textbox(Inches(0.5), Inches(5.7), Inches(9), Inches(1.5))
+                        tf = txBox.text_frame
+                        tf.word_wrap = True
+                        p = tf.paragraphs[0]
+                        p.text = f"Generated Notes for Slide {slide_idx}:\n{final_response}"
+                        p.font.size = Pt(10)
+
+                        logger.info(f"Added new slide with reimagined image and notes for Slide {slide_idx}.")
+
+                    except Exception as e:
+                        logger.error(f"Failed to add reimagined slide to PPTX: {e}")
                 else:
-                    logo_instruction = "DO NOT include any logos or branding elements. Focus solely on content."
-
-                designer_prompt_text = (
-                    f"IMAGE 1: Original Slide Image provided.\n"
-                    f"IMAGE 2: {'Style Reference (Previous Slide) provided.' if previous_reimagined_image else 'N/A'}\n"
-                    f"Speaker Notes: \"{final_response}\"\n\n"
-                    f"TASK: Generate the high-fidelity slide image now.\n"
-                    f"CONTEXT: {logo_instruction}\n"
-                ) #
-                
-                designer_images = [slide_image]
-                if previous_reimagined_image:
-                    designer_images.append(previous_reimagined_image)
-
-                img_bytes = await run_visual_agent(
-                    designer_agent,
-                    designer_prompt_text,
-                    images=designer_images
-                )
-            
-            if img_bytes:
-                # Save to disk if newly generated or re-saved for consistency
-                try:
-                    with open(img_path, "wb") as f:
-                        f.write(img_bytes)
-                    logger.info(f"Saved reimagined slide to: {img_path}")
-                    
-                    # Update Previous Image for next iteration (Style Consistency)
-                    try:
-                         previous_reimagined_image = Image.open(io.BytesIO(img_bytes))
-                    except Exception as img_err:
-                         logger.warning(f"Could not load generated image for next iteration context: {img_err}")
-                         previous_reimagined_image = None
-
-                    # Create a new slide in the presentation to embed the image and notes
-                    # Find a blank layout (usually slide_layouts[6])
-                    try:
-                        blank_slide_layout = prs.slide_layouts[6] # Usually the blank layout
-                    except IndexError:
-                        logger.warning("Could not find blank slide layout (index 6), using first available.")
-                        blank_slide_layout = prs.slide_layouts[0] # Fallback
-
-                    # Add a new slide to the presentation
-                    new_slide = prs.slides.add_slide(blank_slide_layout)
-                    
-                    from pptx.util import Inches, Pt # Import here to ensure it's available
-
-                    # Embed the generated image
-                    left = Inches(0.5)
-                    top = Inches(0.5)
-                    width = Inches(9)
-                    height = Inches(5)
-                    new_slide.shapes.add_picture(img_path, left, top, width=width, height=height)
-
-                    # Add the speaker notes as text on the new slide
-                    txBox = new_slide.shapes.add_textbox(Inches(0.5), Inches(5.7), Inches(9), Inches(1.5))
-                    tf = txBox.text_frame
-                    tf.word_wrap = True
-                    p = tf.paragraphs[0]
-                    p.text = f"Generated Notes for Slide {slide_idx}:\n{final_response}"
-                    p.font.size = Pt(10)
-
-                    logger.info(f"Added new slide with reimagined image and notes for Slide {slide_idx}.")
-
-                except Exception as e:
-                    logger.error(f"Failed to add reimagined slide to PPTX: {e}")
+                    logger.warning(f"No image generated for Slide {slide_idx}")
+                    previous_reimagined_image = None
             else:
-                logger.warning(f"No image generated for Slide {slide_idx}")
-                previous_reimagined_image = None
-
+                logger.info(f"Skipping visual generation for Slide {slide_idx} (--skip-visuals active).")
 
         # Update progress
         progress["slides"][skey] = {
@@ -549,6 +552,7 @@ def main():
     parser.add_argument("--progress-file", help="Override path for progress JSON file")
     parser.add_argument("--retry-errors", action="store_true", help="Retry slides previously marked as error")
     parser.add_argument("--region", help="Google Cloud Region (default: global)", default="global")
+    parser.add_argument("--skip-visuals", action="store_true", help="Skip visual generation and only update speaker notes")
 
     args = parser.parse_args()
 
@@ -567,7 +571,7 @@ def main():
     elif "GOOGLE_CLOUD_LOCATION" not in os.environ:
         os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 
-    asyncio.run(process_presentation(args.pptx, args.pdf, args.course_id))
+    asyncio.run(process_presentation(args.pptx, args.pdf, args.course_id, args.skip_visuals))
 
 if __name__ == "__main__":
     main()
