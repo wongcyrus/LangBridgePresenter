@@ -224,7 +224,11 @@ async def process_presentation(
             f"PREVIOUS_CONTEXT: {previous_context}\n"
             f"GLOBAL_CONTEXT: {global_context}\n"
         )
-        return await run_stateless_agent(writer_agent, prompt)
+        result = await run_stateless_agent(writer_agent, prompt)
+        if not result or not result.strip():
+            logger.warning("[Tool] speech_writer returned empty text. Returning fallback.")
+            return "Error: The writer agent failed to generate a script. Please try again or use a placeholder."
+        return result
     
     logger.info(f"Processing PPTX: {pptx_path}")
     logger.info(f"Region: {os.environ.get('GOOGLE_CLOUD_LOCATION')}")
