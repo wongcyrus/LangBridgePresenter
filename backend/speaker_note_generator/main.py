@@ -3,7 +3,7 @@
 Speaker Note Generator
 Enhances PowerPoint presentations by generating speaker notes using a Supervisor-Tool Multi-Agent System.
 
-Architecture: Supervisor Agent (Orchestrator) -> Tool Functions -> Worker Agents
+Refactored to use Python-based Agent definitions.
 """
 
 import argparse
@@ -11,15 +11,21 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Callable, Dict, Any
+from typing import Dict, Any
 
 import pymupdf  # fitz
 from PIL import Image
 from pptx import Presentation
 
-from google.adk.agents import config_agent_utils
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from google.adk.agents import LlmAgent
+
+# Import Agents
+# Ensure the path includes the current directory to find 'agents'
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from agents.supervisor import supervisor_agent
+from agents.analyst import analyst_agent
 
 # Setup logging
 logging.basicConfig(
@@ -29,67 +35,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global registry for images to be accessed by tools
-# This avoids passing heavy image data through string-based tool arguments
+# Global registry for images
 IMAGE_REGISTRY: Dict[str, Image.Image] = {}
 
-class WorkerAgents:
-    """Manages the specialized worker agents (Auditor, Analyst, Writer)."""
-    def __init__(self, config_dir: str):
-        self.config_dir = config_dir
-        self.auditor_runner = self._create_runner("auditor.yaml", "auditor")
-        self.analyst_runner = self._create_runner("analyst.yaml", "analyst")
-        self.writer_runner = self._create_runner("writer.yaml", "writer")
+async def run_stateless_agent(agent: LlmAgent, prompt: str, image: Image.Image = None) -> str:
+    """Helper to run a stateless single-turn agent."""
+    runner = InMemoryRunner(agent=agent, app_name=agent.name)
+    user_id = "system_user"
+    
+    parts = [types.Part.from_text(text=prompt)]
+    if image:
+        parts.append(types.Part.from_image(image=image))
 
-    def _create_runner(self, config_file: str, app_name: str) -> InMemoryRunner:
-        path = os.path.join(self.config_dir, config_file)
-        agent = config_agent_utils.from_config(path)
-        return InMemoryRunner(agent=agent, app_name=app_name)
-
-    async def run_simple_agent(self, runner: InMemoryRunner, prompt: str, image: Image.Image = None) -> str:
-        """Helper to run a stateless single-turn agent."""
-        user_id = "system_user"
-        
-        parts = [types.Part.from_text(text=prompt)]
-        if image:
-            parts.append(types.Part.from_image(image=image))
-
-        content = types.Content(role='user', parts=parts)
-        
-        # Create new session for statelessness
-        session = await runner.session_service.create_session(
-            app_name=runner.app_name,
+    content = types.Content(role='user', parts=parts)
+    
+    # Create new session for statelessness
+    session = await runner.session_service.create_session(
+        app_name=agent.name,
+        user_id=user_id,
+    )
+    
+    response_text = ""
+    try:
+        # Run agent
+        for event in runner.run(
             user_id=user_id,
-        )
+            session_id=session.session_id,
+            new_message=content,
+        ):
+            if getattr(event, "content", None) and event.content.parts:
+                part = event.content.parts[0]
+                text = getattr(part, "text", "") or ""
+                response_text += text
+    except Exception as e:
+        logger.error(f"Error running agent {agent.name}: {e}")
+        return f"Error: {e}"
         
-        response_text = ""
-        try:
-            for event in runner.run(
-                user_id=user_id,
-                session_id=session.session_id,
-                new_message=content,
-            ):
-                if getattr(event, "content", None) and event.content.parts:
-                    part = event.content.parts[0]
-                    text = getattr(part, "text", "") or ""
-                    response_text += text
-        except Exception as e:
-            logger.error(f"Error running agent {runner.app_name}: {e}")
-            return f"Error: {e}"
-            
-        return response_text.strip()
+    return response_text.strip()
 
-
-# --- Tool Functions Exposed to Supervisor ---
-
-workers: WorkerAgents = None
-
-async def call_auditor(note_text: str) -> str:
-    """Tool: Checks if existing notes are useful."""
-    logger.info(f"[Tool] call_auditor invoked. Note length: {len(note_text)}")
-    prompt = f"Existing Note: \"{note_text}\"\n\nEvaluate if this is USEFUL or USELESS. Return JSON."
-    return await workers.run_simple_agent(workers.auditor_runner, prompt)
-
+# Tool wrapper for Analyst
 async def call_analyst(image_id: str) -> str:
     """Tool: Analyzes the slide image."""
     logger.info(f"[Tool] call_analyst invoked for image_id: {image_id}")
@@ -97,22 +81,11 @@ async def call_analyst(image_id: str) -> str:
     if not image:
         return "Error: Image not found."
     
-    prompt = "Analyze this slide image."
-    return await workers.run_simple_agent(workers.analyst_runner, prompt, image=image)
-
-async def call_writer(analysis: str, previous_context: str, theme: str) -> str:
-    """Tool: Writes the script."""
-    logger.info("[Tool] call_writer invoked.")
-    prompt = (
-        f"SLIDE_ANALYSIS:\n{analysis}\n\n"
-        f"PRESENTATION_THEME: {theme}\n"
-        f"PREVIOUS_CONTEXT: {previous_context}\n"
-    )
-    return await workers.run_simple_agent(workers.writer_runner, prompt)
+    prompt_text = "Analyze this slide image."
+    return await run_stateless_agent(analyst_agent, prompt_text, image=image)
 
 
 async def process_presentation(pptx_path: str, pdf_path: str, course_id: str = None):
-    global workers
     
     logger.info(f"Processing PPTX: {pptx_path}")
     
@@ -121,36 +94,29 @@ async def process_presentation(pptx_path: str, pdf_path: str, course_id: str = N
     pdf_doc = pymupdf.open(pdf_path)
     limit = min(len(prs.slides), len(pdf_doc))
     
-    # Initialize Agents
-    config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_config")
-    workers = WorkerAgents(config_dir)
-    
-    # Initialize Supervisor
-    supervisor_agent = config_agent_utils.from_config(os.path.join(config_dir, "supervisor.yaml"))
-    
-    # Register Tools
-    tools_map = {
-        "call_auditor": call_auditor,
-        "call_analyst": call_analyst,
-        "call_writer": call_writer
-    }
-    
+    # Configure Supervisor Tools
+    # We append the function tool 'call_analyst' to the existing list of AgentTools
+    # supervisor_agent.tools is a list
+    if call_analyst not in supervisor_agent.tools:
+        supervisor_agent.tools.append(call_analyst)
+
+    # Initialize Supervisor Runner
     supervisor_runner = InMemoryRunner(
         agent=supervisor_agent, 
-        app_name="supervisor",
-        tools=tools_map
+        app_name="supervisor"
     )
 
     # Global Context
     presentation_theme = "General Presentation" 
     if course_id:
         try:
-            # Dynamically import to avoid circular imports if utils not in path
-            sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            # Dynamically import to avoid circular imports
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if project_root not in sys.path:
+                 sys.path.append(project_root)
             from presentation_preloader.utils import course_utils
             course_config = course_utils.get_course_config(course_id)
             if course_config:
-                # Prefer 'description' then 'name', fallback to ID
                 presentation_theme = course_config.get("description") or course_config.get("name") or f"Course {course_id}"
                 logger.info(f"Set Presentation Theme from Course: {presentation_theme}")
         except Exception as e:
@@ -159,7 +125,7 @@ async def process_presentation(pptx_path: str, pdf_path: str, course_id: str = N
     previous_slide_summary = "Start of presentation."
 
     user_id = "supervisor_user"
-    session_id = "supervisor_session" # Consistent session for the entire presentation
+    session_id = "supervisor_session" 
     
     # Create Supervisor Session
     await supervisor_runner.session_service.create_session(
@@ -203,32 +169,36 @@ async def process_presentation(pptx_path: str, pdf_path: str, course_id: str = N
         # 3. Run Supervisor Loop
         final_response = ""
         
-        # The runner handles tool calls internally if configured correctly with 'tools' arg
-        for event in supervisor_runner.run(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=content,
-        ):
-            if getattr(event, "content", None) and event.content.parts:
-                 part = event.content.parts[0]
-                 text = getattr(part, "text", "") or ""
-                 final_response += text
+        try:
+            for event in supervisor_runner.run(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=content,
+            ):
+                if getattr(event, "content", None) and event.content.parts:
+                     part = event.content.parts[0]
+                     text = getattr(part, "text", "") or ""
+                     final_response += text
+        except Exception as e:
+            logger.error(f"Error in supervisor loop: {e}")
 
         final_response = final_response.strip()
         logger.info(f"Final Note for Slide {slide_idx}: {final_response[:50]}...")
         
         # 4. Update PPTX
         if not slide.has_notes_slide:
-             # Force creation of notes slide if possible, otherwise skip for now
-             # In older python-pptx, accessing .notes_slide creates it.
-             pass
+             try:
+                 slide.notes_slide # This might create it in some versions or fail
+             except:
+                 pass # Handling logic depends on pptx version
+
         try:
             slide.notes_slide.notes_text_frame.text = final_response
         except Exception as e:
             logger.error(f"Could not write note: {e}")
             
         # 5. Update Context
-        previous_slide_summary = final_response[:200] # Simple summary for now
+        previous_slide_summary = final_response[:200]
 
         # Cleanup Image
         del IMAGE_REGISTRY[image_id]

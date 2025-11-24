@@ -1,0 +1,11 @@
+"""Slide Analyst Agent."""
+
+from google.adk.agents import LlmAgent
+from . import prompt
+
+analyst_agent = LlmAgent(
+    name="slide_analyst",
+    model="gemini-2.5-flash",
+    description="A multimodal analyst that extracts insights from slide images.",
+    instruction=prompt.ANALYST_PROMPT
+)
