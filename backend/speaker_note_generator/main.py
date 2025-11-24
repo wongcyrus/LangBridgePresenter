@@ -323,6 +323,8 @@ async def process_presentation(
              global_context = progress["global_context"]
 
     # 1. Pass 2: Slide Loop
+    previous_reimagined_image: Optional[Image.Image] = None
+
     for i in range(limit):
         slide_idx = i + 1
         slide = prs.slides[i]
@@ -402,20 +404,26 @@ async def process_presentation(
             # 4. VISUALIZATION STEP (New)
             # Run Designer Agent to recreate slide
             logger.info(f"--- Generating Visual for Slide {slide_idx} ---")
-            designer_prompt = (
-                f"Original Slide Image provided.\n"
+            
+            designer_prompt_text = (
+                f"IMAGE 1: Original Slide Image provided.\n"
+                f"IMAGE 2: {'Style Reference (Previous Slide) provided.' if previous_reimagined_image else 'N/A'}\n"
                 f"Speaker Notes: \"{final_response}\"\n\n"
                 f"Generate the high-fidelity slide image now."
             )
+            
+            designer_images = [slide_image]
+            if previous_reimagined_image:
+                designer_images.append(previous_reimagined_image)
+
             img_bytes = await run_visual_agent(
                 designer_agent,
-                designer_prompt,
-                images=[slide_image]
+                designer_prompt_text,
+                images=designer_images
             )
             
             if img_bytes:
                 # Save to disk
-                # Folder: output/visuals
                 vis_dir = os.path.join(os.path.dirname(pptx_path), "visuals")
                 os.makedirs(vis_dir, exist_ok=True)
                 img_filename = f"slide_{slide_idx}_reimagined.png"
@@ -424,6 +432,13 @@ async def process_presentation(
                     with open(img_path, "wb") as f:
                         f.write(img_bytes)
                     logger.info(f"Saved reimagined slide to: {img_path}")
+                    
+                    # Update Previous Image for next iteration (Style Consistency)
+                    try:
+                         previous_reimagined_image = Image.open(io.BytesIO(img_bytes))
+                    except Exception as img_err:
+                         logger.warning(f"Could not load generated image for next iteration context: {img_err}")
+                         previous_reimagined_image = None
 
                     # Create a new slide in the presentation to embed the image and notes
                     # Find a blank layout (usually slide_layouts[6])
@@ -459,6 +474,7 @@ async def process_presentation(
                     logger.error(f"Failed to add reimagined slide to PPTX: {e}")
             else:
                 logger.warning(f"No image generated for Slide {slide_idx}")
+                previous_reimagined_image = None
 
 
         # Update progress
