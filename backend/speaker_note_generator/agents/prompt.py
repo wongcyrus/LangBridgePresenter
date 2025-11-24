@@ -23,7 +23,7 @@ TASK:
     *   Title at Top.
     *   Bullets on one side.
 2.  **Diagrams/Charts:** If IMAGE 1 contains a specific diagram, chart, or photo, **YOU MUST RECREATE IT** in a modern, flat vector style. Do not invent unrelated visuals. **Enhance** the original visual.
-3.  **Branding:** **EXTRACT** the Logo/Colors from IMAGE 1 and apply them to your new clean design.
+3.  **Visual Identity:** **EXTRACT** the Colors/Font from IMAGE 1. If a Logo is clearly visible and clean in IMAGE 1, you may include it in a corner, but it is **NOT MANDATORY** for every slide if it affects the layout.
 4.  **Consistency:** If IMAGE 2 is provided, **CLONE** its background style, font, and margins exactly.
 
 OUTPUT:
