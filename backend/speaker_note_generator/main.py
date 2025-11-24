@@ -184,11 +184,13 @@ async def process_presentation(
 ):
     # Late Import to allow env var configuration
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from google.adk.tools.agent_tool import AgentTool # Import AgentTool
     from agents.supervisor import supervisor_agent
     from agents.analyst import analyst_agent
     from agents.overviewer import overviewer_agent
     from agents.designer import designer_agent
     from agents.writer import writer_agent
+    from agents.auditor import auditor_agent # Import auditor_agent
 
     # Tool wrapper for Analyst
     async def call_analyst(image_id: str) -> str:
@@ -201,14 +203,14 @@ async def process_presentation(
         prompt_text = "Analyze this slide image."
         return await run_stateless_agent(analyst_agent, prompt_text, images=[image])
 
-    async def call_writer(
+    async def speech_writer(
         analysis: str,
         previous_context: str,
         theme: str,
         global_context: str = "No global context provided." 
     ) -> str:
         """Tool: Writes the script."""
-        logger.info("[Tool] call_writer invoked.")
+        logger.info("[Tool] speech_writer invoked.")
         prompt = (
             f"SLIDE_ANALYSIS:\n{analysis}\n\n"
             f"PRESENTATION_THEME: {theme}\n"
@@ -216,7 +218,6 @@ async def process_presentation(
             f"GLOBAL_CONTEXT: {global_context}\n"
         )
         return await run_stateless_agent(writer_agent, prompt)
-
     
     logger.info(f"Processing PPTX: {pptx_path}")
     logger.info(f"Region: {os.environ.get('GOOGLE_CLOUD_LOCATION')}")
@@ -242,7 +243,11 @@ async def process_presentation(
     logger.info(f"Global Context Generated: {len(global_context)} chars")
     
     # Configure Supervisor Tools
-    supervisor_agent.tools = [call_analyst, call_writer]
+    supervisor_agent.tools = [
+        AgentTool(agent=auditor_agent), # Restore auditor tool
+        call_analyst, 
+        speech_writer # Use the renamed function
+    ]
 
     # Initialize Supervisor Runner
     supervisor_runner = InMemoryRunner(
