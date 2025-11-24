@@ -389,7 +389,11 @@ async def process_presentation(
                 status = "error"
 
             final_response = final_response.strip()
-            if not final_response: status = "error"
+            if not final_response: 
+                # Fallback: If writer was called, maybe we can extract the thought process or retry
+                # For now, let's mark as error but log heavily
+                logger.warning(f"Supervisor loop finished with empty response for Slide {slide_idx}. Tool calls might have succeeded but text was lost.")
+                status = "error"
             else: status = "success"
 
         # 3. Update Notes

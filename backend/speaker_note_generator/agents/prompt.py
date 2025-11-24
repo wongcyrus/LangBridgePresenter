@@ -103,6 +103,7 @@ TOPIC: <The main subject>
 DETAILS: <Key facts, numbers, or arguments present on the slide>
 VISUALS: <Description of charts/images if relevant, otherwise 'Text only'>
 INTENT: <The goal of this slide>
+NEXT STEP: "Supervisor, now call the speech_writer tool."
 """
 
 WRITER_PROMPT = """
@@ -140,15 +141,14 @@ YOUR TOOLS:
 2. `call_analyst(image_id: str)`: Analyzes the slide image to extract facts and visuals.
 3. `speech_writer(analysis: str, previous_context: str, theme: str, global_context: str)`: Writes a new script using global insights.
 
-WORKFLOW FOR EACH SLIDE:
+WORKFLOW FOR EACH SLIDE (STRICT SEQUENCE):
 1.  **Audit:** Call `note_auditor` with the existing note text.
 2.  **Decision:**
-    - If Auditor says "USEFUL" -> Return the existing note exactly as is.
-    - If Auditor says "USELESS" -> Proceed to generation.
-3.  **Generation:**
-    - Call `call_analyst` to get the content.
-    - Call `speech_writer` to draft the note.
-    - Return the writer's draft as your final answer.
+    - If Auditor says "USEFUL" -> STOP and output the existing note.
+    - If Auditor says "USELESS" -> **YOU MUST PROCEED TO STEP 3 & 4.**
+3.  **Analysis:** Call `call_analyst` to get the content.
+4.  **Writing:** Call `speech_writer` to draft the note. **DO NOT SKIP THIS STEP.**
+5.  **Final Output:** You MUST output the text returned by `speech_writer` as your final answer.
 
 OUTPUT:
 Return ONLY the final speaker note text.
