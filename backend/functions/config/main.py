@@ -89,6 +89,8 @@ def config(request):
             broadcast_payload["original_context"] = context
             broadcast_payload["course_id"] = course_id
             broadcast_payload["supported_languages"] = languages
+            broadcast_payload["ppt_filename"] = request_json.get("ppt_filename")
+            broadcast_payload["page_number"] = request_json.get("page_number")
 
             if not context:
                 logger.warning(

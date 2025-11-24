@@ -266,6 +266,12 @@ Public Sub SetWelcome(ByVal currentNotes As String)
         End If
     End If
     
+    Dim pptName As String
+    pptName = ""
+    If Not ActivePresentation Is Nothing Then
+        pptName = ActivePresentation.Name
+    End If
+    
     Debug.Print "Slide number: " & slideNum & ", Notes: " & currentNotes
     Debug.Print "Context/Notes content: " & currentNotes
     
@@ -289,7 +295,7 @@ Public Sub SetWelcome(ByVal currentNotes As String)
 
     ' Prepare payload with the speaker notes and course ID
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId)
+    bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId, pptName, slideNum)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -376,10 +382,16 @@ Public Sub SetPresentation(ByVal presentation As String)
     slideNotes = GetCurrentSlideNotes(slideNum)
     Debug.Print "Context/Notes content: " & slideNotes
     
+    Dim pptName As String
+    pptName = ""
+    If Not ActivePresentation Is Nothing Then
+        pptName = ActivePresentation.Name
+    End If
+    
     ' Prepare payload with just the speaker notes (no slide number)
     ' This way cache works even if slides are reordered
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId)
+    bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId, pptName, slideNum)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -773,7 +785,10 @@ End Sub
 ' =========================
 
 ' Build payload for agent-generated presentation messages
-Private Function BuildConfigPayloadWithGeneration(ByVal context As String, Optional ByVal courseId As String = "") As String
+Private Function BuildConfigPayloadWithGeneration(ByVal context As String, _
+                                                  Optional ByVal courseId As String = "", _
+                                                  Optional ByVal pptFilename As String = "", _
+                                                  Optional ByVal pageNumber As String = "") As String
     Dim json As String
     
     ' If courseId is provided, use it (backend handles languages from course config)
@@ -785,10 +800,21 @@ Private Function BuildConfigPayloadWithGeneration(ByVal context As String, Optio
         courseConfig = """languages"":[""en"",""zh""],"
     End If
     
+    ' Add pptFilename and pageNumber if provided
+    Dim extraFields As String
+    extraFields = ""
+    If pptFilename <> "" Then
+        extraFields = extraFields & """ppt_filename"":""" & JsonEscape(pptFilename) & ""","
+    End If
+    If pageNumber <> "" Then
+        extraFields = extraFields & """page_number"":""" & JsonEscape(pageNumber) & ""","
+    End If
+    
     json = _
         "{" & _
           """generate_presentation"":true," & _
           courseConfig & _
+          extraFields & _
           """context"":""" & JsonEscape(context) & """," & _
           """presentation_messages"":{}," & _
           """welcome_messages"":{}," & _

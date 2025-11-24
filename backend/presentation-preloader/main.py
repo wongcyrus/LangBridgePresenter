@@ -263,7 +263,9 @@ def cache_message(
     context: str,
     message: str,
     course_id: str = None,
-    audio_url: str = None
+    audio_url: str = None,
+    ppt_filename: str = None,
+    page_number: int = None
 ):
     """Write a cache entry for generate_presentation_message lookup."""
     cache_key = _cache_key(language_code, context)
@@ -283,6 +285,12 @@ def cache_message(
     
     if audio_url:
         data["audio_url"] = audio_url
+        
+    if ppt_filename:
+        data["ppt_filename"] = ppt_filename
+        
+    if page_number is not None:
+        data["page_number"] = page_number
         
     cache_ref.set(data, merge=True)
 
@@ -409,6 +417,7 @@ def main():
     
     prs = Presentation(args.pptx)
     total_slides = len(prs.slides)
+    ppt_filename = os.path.basename(args.pptx)
     
     # Initialize Gemini agent and runner
     logger.info("Initializing Gemini agent...")
@@ -493,7 +502,9 @@ def main():
                         lang,
                         speaker_notes,
                         generated_message,
-                        course_id=args.course_id
+                        course_id=args.course_id,
+                        ppt_filename=ppt_filename,
+                        page_number=slide_idx
                     )
                     cache_key = _cache_key(lang, speaker_notes)
                     cached_count += 1
@@ -556,7 +567,9 @@ def main():
                     speaker_notes,
                     message_results[lang],
                     course_id=args.course_id,
-                    audio_url=audio_url
+                    audio_url=audio_url,
+                    ppt_filename=ppt_filename,
+                    page_number=slide_idx
                 )
                 print(f"  [{lang}] Updated cache with audio_url")
 

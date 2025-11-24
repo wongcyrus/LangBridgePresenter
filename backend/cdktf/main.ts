@@ -138,14 +138,6 @@ class LangBridgeApiStack extends TerraformStack {
       storageClass: "REGIONAL",
       forceDestroy: true,
       uniformBucketLevelAccess: true,
-      lifecycleRule: [{
-        action: {
-          type: "Delete",
-        },
-        condition: {
-          age: 1,
-        },
-      }],
       dependsOn: [timeSleep],
     });
 

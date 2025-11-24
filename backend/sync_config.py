@@ -44,7 +44,14 @@ def get_cdktf_outputs():
             return None
 
         with open(temp_output_file, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            
+        # ALWAYS save to backend/cdktf_outputs.json for future use
+        print(f"Saving fetched outputs to {static_output_file}...")
+        with open(static_output_file, 'w') as f:
+            json.dump(data, f, indent=2)
+            
+        return data
 
     except subprocess.CalledProcessError as e:
         print(f"Error running cdktf output: {e}")

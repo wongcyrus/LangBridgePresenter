@@ -25,6 +25,9 @@ function App() {
   const [currentLang, setCurrentLang] = useState('en');
   const [messages, setMessages] = useState([]);
   const [supportedLangs, setSupportedLangs] = useState([]);
+  const [pptFilter, setPptFilter] = useState('');
+  const [currentPptFile, setCurrentPptFile] = useState('');
+  const [currentSlideNumber, setCurrentSlideNumber] = useState('');
   
   // Accessibility
   const [fontSize, setFontSize] = useState(1.1); // Default rem value
@@ -161,9 +164,17 @@ function App() {
 
       setMessages(msgs);
 
-      // Autoplay New Messages
+      // Autoplay New Messages and update current presentation info
       if (msgs.length > 0) {
           const lastMsg = msgs[msgs.length - 1];
+          
+          setCurrentPptFile(lastMsg.ppt_filename || '');
+          setCurrentSlideNumber(lastMsg.page_number || '');
+
+          // If no filter is currently applied, automatically select the current presentation
+          if (!pptFilter) {
+              setPptFilter(lastMsg.ppt_filename || '');
+          }
           
           if (latestMsgIdRef.current !== lastMsg.id) {
               latestMsgIdRef.current = lastMsg.id;
@@ -178,7 +189,14 @@ function App() {
   }, [courseId, currentLang, autoplay, isReady]); // Re-bind if params change
 
   // Display Order: Newest First
-  const displayMessages = [...messages].reverse();
+  const displayMessages = [...messages].reverse().filter(msg => {
+    if (!pptFilter) return true;
+    const pptName = (msg.ppt_filename || "");
+    return pptName === pptFilter;
+  });
+
+  // Get unique PPT filenames for dropdown
+  const uniquePptFiles = [...new Set(messages.map(m => m.ppt_filename).filter(Boolean))];
 
   if (!isReady) {
       return (
@@ -209,6 +227,24 @@ function App() {
       </header>
       
       <div className="sub-header">
+        {currentPptFile && (
+            <div className="current-presentation-info">
+                📄 {currentPptFile} {currentSlideNumber && <span>(Slide {currentSlideNumber})</span>}
+            </div>
+        )}
+        <div className="filter-controls">
+            <select 
+                value={pptFilter}
+                onChange={(e) => setPptFilter(e.target.value)}
+                className="ppt-filter-select"
+            >
+                <option value="">All Presentations</option>
+                {uniquePptFiles.map(file => (
+                    <option key={file} value={file}>{file}</option>
+                ))}
+            </select>
+        </div>
+        
         <label className="autoplay-toggle">
             <input 
             type="checkbox" 
@@ -237,25 +273,32 @@ function App() {
           return (
             <div key={msg.id} className="chat-message">
               <div 
-                className={`message-bubble ${isCurrentPlaying ? 'playing' : ''}`}
+                className={`message-bubble ${isCurrentPlaying ? 'playing' : ''} ${hasAudio ? 'has-audio' : ''}`}
                 style={{ fontSize: `${fontSize}rem` }}
+                onClick={() => {
+                    if (!hasAudio) return; // Do nothing if no audio
+                    if (isCurrentPlaying && isPlaying) {
+                        audioRef.current.pause();
+                    } else {
+                        playMessage(msg);
+                    }
+                }}
               >
-                <div className="message-content">
-                    {langData ? langData.text : <span className="missing-lang">(Translating...)</span>}
+                <div className="message-content-wrapper">
+                    <div className="message-content">
+                        {langData ? langData.text : <span className="missing-lang">(Translating...)</span>}
+                    </div>
+                    {msg.page_number && (
+                        <div className="msg-footer">
+                            Slide {msg.page_number}
+                        </div>
+                    )}
                 </div>
-                {hasAudio && (
-                    <button 
-                        className="msg-play-btn" 
-                        onClick={() => {
-                            if (isCurrentPlaying && isPlaying) {
-                                audioRef.current.pause();
-                            } else {
-                                playMessage(msg);
-                            }
-                        }}
-                    >
-                        {isCurrentPlaying && isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </button>
+                {hasAudio && isCurrentPlaying && isPlaying && (
+                    <PauseIcon />
+                )}
+                {hasAudio && (!isCurrentPlaying || !isPlaying) && (
+                    <PlayIcon />
                 )}
               </div>
 
