@@ -25,6 +25,9 @@ Following official ADK Multi-Agent best practices, the **Supervisor Agent** is t
 ### 2. Worker Agents (The Tools)
 These are specialized agents wrapped as Python tools callable by the Supervisor.
 
+*   **Overviewer Agent (`pass_1`):**
+    *   *Input:* All slide images.
+    *   *Output:* Global Context (Narrative Arc, Persona).
 *   **Auditor Tool (`call_auditor`):**
     *   *Input:* Existing note text.
     *   *Output:* `USEFUL` or `USELESS`.
@@ -32,8 +35,11 @@ These are specialized agents wrapped as Python tools callable by the Supervisor.
     *   *Input:* Slide Image ID (retrieves actual image from global registry).
     *   *Output:* Structured analysis (Topic, Details, Visuals).
 *   **Writer Tool (`call_writer`):**
-    *   *Input:* Analyst Output + Theme + Previous Context.
+    *   *Input:* Analyst Output + Theme + Previous Context + Global Context.
     *   *Output:* Drafted script.
+*   **Designer Tool (`call_designer`):**
+    *   *Input:* Original Slide Image + Final Speaker Notes.
+    *   *Output:* A high-fidelity Re-imagined Slide Image (saved to disk).
 
 ## Implementation Details
 
@@ -48,15 +54,19 @@ These are specialized agents wrapped as Python tools callable by the Supervisor.
     *   Initialize `InMemoryRunner` for the Supervisor.
     *   Initialize `InMemoryRunner` instances for Auditor, Analyst, and Writer (used internally by tools).
     *   Register Python wrapper functions (`call_auditor`, `call_analyst`, `call_writer`) as tools for the Supervisor.
-2.  **Processing Loop (Iterate Slides 1 to N):**
+2.  **Pass 1 (Global Context):**
+    *   Extract all images.
+    *   Call `Overviewer` to get the master plan.
+3.  **Pass 2 (Processing Loop):**
     *   **Image Handling:** Render PDF page to image and store in `IMAGE_REGISTRY` with a unique ID.
-    *   **Input Construction:** Create a prompt for the Supervisor: *"Here is Slide X. Image ID: 'slide_X'. Existing notes: '...'. Previous Context: '...'"*
+    *   **Input Construction:** Create a prompt for the Supervisor: *"Here is Slide X. Image ID: 'slide_X'. Existing notes: '...'. Previous Context: '...'. Global Context: '...'"*
     *   **Supervisor Execution:** The ADK Runner automatically handles the thinking loop:
         *   Supervisor -> Tool Call -> Python Function -> Worker Agent -> Result -> Supervisor.
     *   **Update:** Write the final text output to the PPTX slide.
+    *   **Visualisation (New):** Call `Designer` agent with the original slide and the new note to generate a fresh slide visual. Save as `slide_X_reimagined.png`.
     *   **Context Update:** Update `previous_slide_summary` variable for the next iteration.
     *   **Cleanup:** Remove image from registry.
-3.  **Finalization:** Save `[original_name]_enhanced.pptx`.
+4.  **Finalization:** Save `[original_name]_enhanced.pptx`.
 
 ## Usage Example
 ```bash

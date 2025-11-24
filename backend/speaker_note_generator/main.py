@@ -3,7 +3,7 @@
 Speaker Note Generator
 Enhances PowerPoint presentations by generating speaker notes using a Supervisor-Tool Multi-Agent System.
 
-Refactored to use Python-based Agent definitions.
+Refactored to use Python-based Agent definitions and support Image Generation.
 """
 
 import argparse
@@ -15,7 +15,7 @@ import io
 import json
 import hashlib
 import tempfile
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import pymupdf  # fitz
 from PIL import Image
@@ -31,6 +31,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from agents.supervisor import supervisor_agent
 from agents.analyst import analyst_agent
 from agents.overviewer import overviewer_agent
+from agents.designer import designer_agent
 
 # Setup logging
 logging.basicConfig(
@@ -67,7 +68,7 @@ async def run_stateless_agent(
     prompt: str,
     images: List[Image.Image] = None,
 ) -> str:
-    """Helper to run a stateless single-turn agent."""
+    """Helper to run a stateless single-turn agent (Text Output Only)."""
     runner = InMemoryRunner(agent=agent, app_name=agent.name)
     user_id = "system_user"
     
@@ -86,27 +87,14 @@ async def run_stateless_agent(
         app_name=agent.name,
         user_id=user_id,
     )
-    # Safely determine session id across possible ADK versions
-    def _extract_session_id(sess):
-        for attr in ("session_id", "id"):
-            if hasattr(sess, attr):
-                return getattr(sess, attr)
-        nested = getattr(sess, "session", None)
-        if nested:
-            for attr in ("session_id", "id"):
-                if hasattr(nested, attr):
-                    return getattr(nested, attr)
-        # As a last resort, look for any attribute ending with '_id'
-        for name in dir(sess):
-            if name.endswith('_id'):
-                return getattr(sess, name)
-        raise AttributeError("Could not determine session id on object: " + repr(sess))
-
+    
+    # Safely determine session id
+    resolved_session_id = f"session_{user_id}" # Default fallback
     try:
-        resolved_session_id = _extract_session_id(session)
-    except Exception as sid_err:
-        logger.error(f"Failed to extract session id: {sid_err}; falling back to generated id.")
-        resolved_session_id = f"fallback_{user_id}"
+        if hasattr(session, "session_id"): resolved_session_id = session.session_id
+        elif hasattr(session, "id"): resolved_session_id = session.id
+    except:
+        pass
 
     print(f"\n┌── [Agent: {agent.name}]")
     print(f"│ Task: {prompt.strip()[:500].replace(chr(10), ' ') + ('...' if len(prompt) > 500 else '')}")
@@ -122,15 +110,81 @@ async def run_stateless_agent(
             new_message=content,
         ):
             if getattr(event, "content", None) and event.content.parts:
-                part = event.content.parts[0]
-                text = getattr(part, "text", "") or ""
-                response_text += text
+                for part in event.content.parts:
+                     # Only extract text parts
+                     txt = getattr(part, "text", "") or ""
+                     response_text += txt
     except Exception as e:
         logger.error(f"Error running agent {agent.name}: {e}")
         return f"Error: {e}"
     
     print(f"└-> Response: {response_text.strip()[:500].replace(chr(10), ' ') + ('...' if len(response_text) > 500 else '')}")
     return response_text.strip()
+
+async def run_visual_agent(
+    agent: LlmAgent,
+    prompt: str,
+    images: List[Image.Image] = None,
+) -> Optional[bytes]:
+    """Helper to run a stateless agent and capture generated IMAGE."""
+    runner = InMemoryRunner(agent=agent, app_name=agent.name)
+    user_id = "system_user"
+    
+    parts = [types.Part.from_text(text=prompt)]
+    if images:
+        for img in images:
+            try:
+                parts.append(_create_image_part(img))
+            except Exception as e:
+                logger.error(f"Failed to attach image part: {e}")
+
+    content = types.Content(role='user', parts=parts)
+    
+    session = await runner.session_service.create_session(
+        app_name=agent.name,
+        user_id=user_id,
+    )
+    # Safely determine session id
+    resolved_session_id = f"session_{user_id}" 
+    try:
+        if hasattr(session, "session_id"): resolved_session_id = session.session_id
+        elif hasattr(session, "id"): resolved_session_id = session.id
+    except:
+        pass
+
+    print(f"\n┌── [Agent: {agent.name} (Visual)]")
+    print(f"│ Task: {prompt.strip()[:500].replace(chr(10), ' ') + ('...' if len(prompt) > 500 else '')}")
+
+    generated_image_bytes = None
+
+    try:
+        for event in runner.run(
+            user_id=user_id,
+            session_id=resolved_session_id,
+            new_message=content,
+        ):
+            if getattr(event, "content", None) and event.content.parts:
+                for part in event.content.parts:
+                    # Check for inline_data or file_data
+                    inline_data = getattr(part, "inline_data", None)
+                    if inline_data:
+                        generated_image_bytes = inline_data.data
+                        print("│ [Received Image Data]")
+                    # Some libraries might use specific image attributes
+                    elif hasattr(part, "image"):
+                        # Handle if it's already an object
+                        pass
+    except Exception as e:
+        logger.error(f"Error running visual agent {agent.name}: {e}")
+        return None
+
+    if generated_image_bytes:
+        print(f"└-> Response: [Image Generated ({len(generated_image_bytes)} bytes)]")
+    else:
+        print(f"└-> Response: [No Image Generated]")
+        
+    return generated_image_bytes
+
 
 # Tool wrapper for Analyst
 async def call_analyst(image_id: str) -> str:
@@ -177,7 +231,7 @@ async def process_presentation(
     logger.info("--- Pass 1: Generating Global Context ---")
     all_images = []
     for i in range(limit):
-        pix = pdf_doc[i].get_pixmap(dpi=75) # Lower DPI for overview to save bandwidth/tokens
+        pix = pdf_doc[i].get_pixmap(dpi=75) 
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         all_images.append(img)
     
@@ -189,7 +243,6 @@ async def process_presentation(
     logger.info(f"Global Context Generated: {len(global_context)} chars")
     
     # Configure Supervisor Tools
-    # Assign list of functions directly to override defaults and ensure new signatures are used
     supervisor_agent.tools = [call_analyst, call_writer]
 
     # Initialize Supervisor Runner
@@ -216,9 +269,6 @@ async def process_presentation(
                     or course_config.get("name")
                     or f"Course {course_id}"
                 )
-                logger.info(
-                    f"Set Presentation Theme from Course: {presentation_theme}"
-                )
         except Exception as e:
             logger.warning(f"Failed to fetch course config for {course_id}: {e}")
 
@@ -236,56 +286,37 @@ async def process_presentation(
 
     # --- Progress Tracking Setup ---
     progress_file = os.environ.get("SPEAKER_NOTE_PROGRESS_FILE") or os.getenv("SPEAKER_NOTE_PROGRESS_FILE")
-    # Allow overriding via environment; fallback default next to PPTX
     if not progress_file:
         progress_file = os.path.join(os.path.dirname(pptx_path), "speaker_note_progress.json")
     retry_errors = os.environ.get("SPEAKER_NOTE_RETRY_ERRORS", "false").lower() == "true"
 
     def load_progress(path: str) -> Dict[str, Any]:
-        if not os.path.exists(path):
-            return {"slides": {}}
+        if not os.path.exists(path): return {"slides": {}}
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Could not load progress file {path}: {e}")
-            return {"slides": {}}
+            with open(path, "r", encoding="utf-8") as f: return json.load(f)
+        except: return {"slides": {}}
 
     def save_progress(path: str, data: Dict[str, Any]):
-        """Persist progress atomically; ensure temp file created on same volume.
-
-        Windows cannot move files across different drives with os.replace; creating
-        the temporary file in the target directory avoids WinError 17.
-        """
         try:
             target_dir = os.path.dirname(path) or "."
-            tmp_fd, tmp_path = tempfile.mkstemp(
-                prefix="sn_prog_",
-                suffix=".json",
-                dir=target_dir,
-            )
+            tmp_fd, tmp_path = tempfile.mkstemp(prefix="sn_prog_", suffix=".json", dir=target_dir)
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, path)
         except Exception as e:
-            logger.error(f"Failed to save progress file {path}: {e}")
+            logger.error(f"Failed to save progress file: {e}")
 
     def slide_key(index: int, notes: str) -> str:
         h = hashlib.sha256((notes or "").encode("utf-8")).hexdigest()[:8]
         return f"slide_{index}_{h}"
 
     progress = load_progress(progress_file)
-    # Save Global Context to progress for debugging/resuming
     if "global_context" not in progress:
         progress["global_context"] = global_context
         save_progress(progress_file, progress)
     else:
-        # Use cached global context if available and valid
         if progress["global_context"] and len(progress["global_context"]) > 50:
-             logger.info("Using cached Global Context from progress file.")
              global_context = progress["global_context"]
-
-    logger.info(f"Using progress file: {progress_file} (retry_errors={retry_errors})")
 
     # 1. Pass 2: Slide Loop
     for i in range(limit):
@@ -295,7 +326,6 @@ async def process_presentation(
         
         logger.info(f"--- Processing Slide {slide_idx} ---")
         
-        # 1. Setup Slide Context
         existing_notes = ""
         if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
             existing_notes = slide.notes_slide.notes_text_frame.text.strip()
@@ -303,87 +333,131 @@ async def process_presentation(
         skey = slide_key(slide_idx, existing_notes)
         entry = progress["slides"].get(skey)
 
-        # Skip slide if already successful and not retrying errors
-        if entry and entry.get("status") == "success" and not retry_errors:
-            final_response = entry.get("note", "")
-            logger.info(f"Skipping slide {slide_idx}; already generated (progress file)")
-            # Ensure note written (in case PPTX was reverted)
-            try:
-                if not slide.has_notes_slide:
-                    slide.notes_slide  # may initialize
-                slide.notes_slide.notes_text_frame.text = final_response
-            except Exception as e:
-                logger.error(f"Could not reapply saved note: {e}")
-            previous_slide_summary = final_response[:200]
-            continue
-
         # Register Image
         image_id = f"slide_{slide_idx}"
         pix = pdf_page.get_pixmap(dpi=150)
-        IMAGE_REGISTRY[image_id] = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        slide_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        IMAGE_REGISTRY[image_id] = slide_image
 
-        # 2. Prompt Supervisor
-        # Inject GLOBAL CONTEXT here
-        supervisor_prompt = (
-            f"Here is Slide {slide_idx}.\n"
-            f"Existing Notes: \"{existing_notes}\"\n"
-            f"Image ID: \"{image_id}\"\n"
-            f"Previous Slide Summary: \"{previous_slide_summary}\"\n"
-            f"Theme: \"{presentation_theme}\"\n"
-            f"Global Context: \"{global_context}\"\n\n"
-            f"Please proceed with the workflow."
-        )
-
-        content = types.Content(
-            role='user',
-            parts=[types.Part.from_text(text=supervisor_prompt)]
-        )
-
-        # 3. Run Supervisor Loop
         final_response = ""
-        
-        try:
-            for event in supervisor_runner.run(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=content,
-            ):
-                if getattr(event, "content", None) and event.content.parts:
-                    for part in event.content.parts:
-                        # Check for Function Call
-                        fn_call = getattr(part, "function_call", None)
-                        if fn_call:
-                            print(f"\n[Supervisor] 📞 calling tool: {fn_call.name}")
-                            # print(f"             Args: {fn_call.args}") 
+        status = "pending"
 
-                        # Check for Text
-                        text = getattr(part, "text", "") or ""
-                        final_response += text
-        except Exception as e:
-            logger.error(f"Error in supervisor loop: {e}")
+        # Skip generation if done, BUT check if visual is done too?
+        # For now, assume if notes are done, we reuse them.
+        if entry and entry.get("status") == "success" and not retry_errors:
+            final_response = entry.get("note", "")
+            logger.info(f"Skipping generation for slide {slide_idx}")
+            status = "success"
+        else:
+            # 2. Prompt Supervisor
+            supervisor_prompt = (
+                f"Here is Slide {slide_idx}.\n"
+                f"Existing Notes: \"{existing_notes}\"\n"
+                f"Image ID: \"{image_id}\"\n"
+                f"Previous Slide Summary: \"{previous_slide_summary}\"\n"
+                f"Theme: \"{presentation_theme}\"\n"
+                f"Global Context: \"{global_context}\"\n\n"
+                f"Please proceed with the workflow."
+            )
 
-        final_response = final_response.strip()
-        status = "success"
-        if not final_response or final_response.lower().startswith("error:"):
-            status = "error"
-        logger.info(f"Final Note for Slide {slide_idx}: {final_response[:50]}... (status={status})")
-        
-        # 4. Update PPTX
-        if not slide.has_notes_slide:
-             try:
-                 slide.notes_slide # This might create it in some versions or fail
-             except:
-                 pass # Handling logic depends on pptx version
+            content = types.Content(
+                role='user',
+                parts=[types.Part.from_text(text=supervisor_prompt)]
+            )
 
-        try:
-            slide.notes_slide.notes_text_frame.text = final_response
-        except Exception as e:
-            logger.error(f"Could not write note: {e}")
+            try:
+                for event in supervisor_runner.run(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=content,
+                ):
+                    if getattr(event, "content", None) and event.content.parts:
+                        for part in event.content.parts:
+                            fn_call = getattr(part, "function_call", None)
+                            if fn_call:
+                                print(f"\n[Supervisor] 📞 calling tool: {fn_call.name}")
+                            text = getattr(part, "text", "") or ""
+                            final_response += text
+            except Exception as e:
+                logger.error(f"Error in supervisor loop: {e}")
+                status = "error"
+
+            final_response = final_response.strip()
+            if not final_response: status = "error"
+            else: status = "success"
+
+        # 3. Update Notes
+        if status == "success":
+            try:
+                if not slide.has_notes_slide: slide.notes_slide
+                slide.notes_slide.notes_text_frame.text = final_response
+            except: pass
             
-        # 5. Update Context
-        previous_slide_summary = final_response[:200]
+            previous_slide_summary = final_response[:200]
 
-        # Update progress entry and persist after each slide
+            # 4. VISUALIZATION STEP (New)
+            # Run Designer Agent to recreate slide
+            logger.info(f"--- Generating Visual for Slide {slide_idx} ---")
+            designer_prompt = (
+                f"Original Slide Image provided.\n"
+                f"Speaker Notes: \"{final_response}\"\n\n"
+                f"Generate the high-fidelity slide image now."
+            )
+            img_bytes = await run_visual_agent(
+                designer_agent,
+                designer_prompt,
+                images=[slide_image]
+            )
+            
+            if img_bytes:
+                # Save to disk
+                # Folder: output/visuals
+                vis_dir = os.path.join(os.path.dirname(pptx_path), "visuals")
+                os.makedirs(vis_dir, exist_ok=True)
+                img_filename = f"slide_{slide_idx}_reimagined.png"
+                img_path = os.path.join(vis_dir, img_filename)
+                try:
+                    with open(img_path, "wb") as f:
+                        f.write(img_bytes)
+                    logger.info(f"Saved reimagined slide to: {img_path}")
+
+                    # Create a new slide in the presentation to embed the image and notes
+                    # Find a blank layout (usually slide_layouts[6])
+                    try:
+                        blank_slide_layout = prs.slide_layouts[6] # Usually the blank layout
+                    except IndexError:
+                        logger.warning("Could not find blank slide layout (index 6), using first available.")
+                        blank_slide_layout = prs.slide_layouts[0] # Fallback
+
+                    # Add a new slide to the presentation
+                    new_slide = prs.slides.add_slide(blank_slide_layout)
+                    
+                    from pptx.util import Inches, Pt # Import here to ensure it's available
+
+                    # Embed the generated image
+                    left = Inches(0.5)
+                    top = Inches(0.5)
+                    width = Inches(9)
+                    height = Inches(5)
+                    new_slide.shapes.add_picture(img_path, left, top, width=width, height=height)
+
+                    # Add the speaker notes as text on the new slide
+                    txBox = new_slide.shapes.add_textbox(Inches(0.5), Inches(5.7), Inches(9), Inches(1.5))
+                    tf = txBox.text_frame
+                    tf.word_wrap = True
+                    p = tf.paragraphs[0]
+                    p.text = f"Generated Notes for Slide {slide_idx}:\n{final_response}"
+                    p.font.size = Pt(10)
+
+                    logger.info(f"Added new slide with reimagined image and notes for Slide {slide_idx}.")
+
+                except Exception as e:
+                    logger.error(f"Failed to add reimagined slide to PPTX: {e}")
+            else:
+                logger.warning(f"No image generated for Slide {slide_idx}")
+
+
+        # Update progress
         progress["slides"][skey] = {
             "slide_index": slide_idx,
             "existing_notes_hash": skey.split("_")[-1],
@@ -392,8 +466,6 @@ async def process_presentation(
             "status": status,
         }
         save_progress(progress_file, progress)
-
-        # Cleanup Image
         del IMAGE_REGISTRY[image_id]
 
     # Save
@@ -415,7 +487,6 @@ def main():
         print("Error: Input files not found.")
         return
 
-    # Allow CLI args to override environment defaults
     if args.progress_file:
         os.environ["SPEAKER_NOTE_PROGRESS_FILE"] = args.progress_file
     if args.retry_errors:
