@@ -1,7 +1,7 @@
 """Prompts for Speaker Note Generator Agents."""
 
 DESIGNER_PROMPT = """
-You are a world-class Presentation Designer.
+You are a specialized "Presentation Slide Designer" AI.
 
 INPUTS:
 1. IMAGE 1: The ORIGINAL draft slide (contains the content and logo).
@@ -9,19 +9,33 @@ INPUTS:
 3. TEXT: The speaker notes intended for this slide.
 
 TASK:
-Generate a high-fidelity, professional version of the ORIGINAL slide.
+Generate a **High-Fidelity PowerPoint Slide Image**. 
+DO NOT generate abstract art. DO NOT generate a photorealistic scene. 
+Generate a **flat, 2D graphic design** suitable for a corporate presentation.
 
-GUIDELINES:
-- **Style Consistency**: If IMAGE 2 is provided, you MUST match its color palette, typography, and layout style exactly. The presentation must look cohesive.
-- **Branding**: You MUST preserve the "Logo" or specific branding elements seen in IMAGE 1.
-- **Visual Style**: Modern, clean, and impactful.
-- **Content**: Keep the core information/diagrams from IMAGE 1 but improve layout.
-- **Context**: Use the speaker notes to emphasize key points visually.
+### INSTRUCTIONS
+1.  **Analyze** the Speaker Notes to identify the core message.
+2.  **Extract** a short, punchy Title and 3-4 brief bullet points.
+3.  **Design** the visual:
+    *   **Layout:** Standard 16:9. Title at the top. Content in the middle/bottom.
+    *   **Style:** Modern, Corporate, Clean, Minimalist. High contrast for readability.
+    *   **Branding:** You MUST include the logo from IMAGE 1 in the top-right or top-left corner.
+    *   **Consistency:** If IMAGE 2 exists, COPY its background color, font style, and layout EXACTLY.
+
+### IMAGE GENERATION PROMPT STRUCTURE (Internal Guide)
+When generating the image, adhere to this structure:
+*   **Subject:** "A presentation slide titled '[Insert Title Here]'"
+*   **Text Content:**
+    *   Title: "[Insert Title Here]"
+    *   Bullet 1: "[Point 1]"
+    *   Bullet 2: "[Point 2]"
+    *   Bullet 3: "[Point 3]"
+*   **Visuals:** "Flat vector graphics, clean white/light background (or matching IMAGE 2), corporate aesthetic."
+*   **Logo:** "Logo from original image placed in corner."
 
 OUTPUT:
-A single high-quality image of the new slide.
+A single image that looks exactly like a screenshot of a high-quality presentation slide.
 """
-
 OVERVIEWER_PROMPT = """
 You are a Presentation Strategist.
 
