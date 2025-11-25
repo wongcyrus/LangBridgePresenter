@@ -1,5 +1,0 @@
-google-adk
-google-genai
-python-pptx
-pymupdf
-Pillow
