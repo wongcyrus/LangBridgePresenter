@@ -1,7 +1,7 @@
 """Presentation processing service for speaker note generator."""
 
+import asyncio
 import logging
-import sys
 import os
 from typing import Optional, Dict, Any
 
@@ -221,9 +221,16 @@ class PresentationProcessor:
         global_context: str,
     ) -> None:
         """Process all slides in both presentations."""
-        previous_slide_summary = "Start of presentation."
         user_id = "supervisor_user"
         session_id = "supervisor_session"
+
+        # PHASE 1: Generate all speaker notes
+        logger.info("\n" + "="*60)
+        logger.info("PHASE 1: Generating speaker notes for all slides")
+        logger.info("="*60)
+        
+        slide_data = []  # Store slide data for visual processing
+        previous_slide_summary = "Start of presentation."
 
         for i in range(limit):
             slide_idx = i + 1
@@ -231,7 +238,7 @@ class PresentationProcessor:
             slide_visuals = prs_visuals.slides[i]
             pdf_page = pdf_doc[i]
 
-            logger.info(f"--- Processing Slide {slide_idx} ---")
+            logger.info(f"--- Processing Notes for Slide {slide_idx} ---")
 
             # Get existing notes (from notes presentation)
             existing_notes = self._get_existing_notes(slide_notes)
@@ -261,21 +268,6 @@ class PresentationProcessor:
                 
                 previous_slide_summary = final_response[:200]
 
-                # Generate visual and replace slide in visuals presentation
-                img_bytes = await self.visual_generator.generate_visual(
-                    slide_idx, slide_image, final_response, self.retry_errors
-                )
-
-                if img_bytes:
-                    img_path = os.path.join(
-                        self.config.visuals_dir,
-                        f"slide_{slide_idx}_reimagined.png"
-                    )
-                    # Replace the slide content with the visual
-                    self.visual_generator.replace_slide_with_visual(
-                        prs_visuals, slide_visuals, img_path, final_response
-                    )
-
             # Update progress
             progress["slides"][skey] = {
                 "slide_index": slide_idx,
@@ -286,8 +278,50 @@ class PresentationProcessor:
             }
             save_progress(self.progress_file, progress)
 
+            # Store data for visual generation phase
+            slide_data.append({
+                "slide_idx": slide_idx,
+                "slide_visuals": slide_visuals,
+                "slide_image": slide_image,
+                "speaker_notes": final_response,
+                "status": status,
+            })
+
             # Cleanup
             unregister_image(image_id)
+
+        # PHASE 2: Generate all visuals
+        logger.info("\n" + "="*60)
+        logger.info("PHASE 2: Generating visuals for all slides")
+        logger.info("="*60)
+        
+        for slide_info in slide_data:
+            slide_idx = slide_info["slide_idx"]
+            slide_visuals = slide_info["slide_visuals"]
+            slide_image = slide_info["slide_image"]
+            speaker_notes = slide_info["speaker_notes"]
+            status = slide_info["status"]
+
+            if status == "success":
+                # Generate visual and replace slide in visuals presentation
+                img_bytes = await self.visual_generator.generate_visual(
+                    slide_idx, slide_image, speaker_notes, self.retry_errors
+                )
+
+                if img_bytes:
+                    img_path = os.path.join(
+                        self.config.visuals_dir,
+                        f"slide_{slide_idx}_reimagined.png"
+                    )
+                    # Replace the slide content with the visual
+                    self.visual_generator.replace_slide_with_visual(
+                        prs_visuals, slide_visuals, img_path, speaker_notes
+                    )
+            else:
+                logger.warning(
+                    f"Skipping visual generation for Slide {slide_idx} "
+                    f"due to notes generation failure"
+                )
 
     def _get_existing_notes(self, slide) -> str:
         """Extract existing notes from a slide."""
@@ -320,7 +354,11 @@ class PresentationProcessor:
             Tuple of (final_response, status)
         """
         # Check if already done
-        if entry and entry.get("status") == "success" and not self.retry_errors:
+        if (
+            entry
+            and entry.get("status") == "success"
+            and not self.retry_errors
+        ):
             logger.info(f"Skipping generation for slide {slide_idx}")
             return entry.get("note", ""), "success"
 
@@ -336,53 +374,81 @@ class PresentationProcessor:
             parts=[types.Part.from_text(text=supervisor_prompt)]
         )
 
-        # Run supervisor
+        # Run supervisor with retry logic
         final_response = ""
         status = "pending"
+        max_retries = 3
+        retry_delay = 2  # seconds
 
-        try:
-            for event in supervisor_runner.run(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=content,
-            ):
-                if getattr(event, "content", None) and event.content.parts:
-                    for part in event.content.parts:
-                        fn_call = getattr(part, "function_call", None)
-                        if fn_call:
-                            print(
-                                f"\n[Supervisor] 📞 calling tool: {fn_call.name}"
-                            )
-                        text = getattr(part, "text", "") or ""
-                        final_response += text
-        except Exception as e:
-            logger.error(f"Error in supervisor loop: {e}")
-            status = "error"
-            return final_response, status
+        for attempt in range(max_retries):
+            try:
+                final_response = ""
+                for event in supervisor_runner.run(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=content,
+                ):
+                    if getattr(event, "content", None) and event.content.parts:
+                        for part in event.content.parts:
+                            fn_call = getattr(part, "function_call", None)
+                            if fn_call:
+                                print(
+                                    f"\n[Supervisor] 📞 calling tool: "
+                                    f"{fn_call.name}"
+                                )
+                            text = getattr(part, "text", "") or ""
+                            final_response += text
 
-        # Process result
-        final_response = final_response.strip()
+                # Check if we got a response
+                final_response = final_response.strip()
+                if final_response:
+                    status = "success"
+                    self.tool_factory.reset_writer_output()
+                    break
 
-        if not final_response:
-            # Try fallback to last writer output
-            last_output = self.tool_factory.last_writer_output
-            if last_output:
-                logger.info(
-                    f"Supervisor returned empty text, using fallback content "
-                    f"({len(last_output)} chars)."
-                )
-                final_response = last_output
-                status = "success"
-                self.tool_factory.reset_writer_output()
-            else:
-                logger.warning(
-                    f"Supervisor loop finished with empty response "
-                    f"for Slide {slide_idx}."
-                )
-                status = "error"
-        else:
-            status = "success"
-            self.tool_factory.reset_writer_output()
+                # Try fallback to last writer output
+                last_output = self.tool_factory.last_writer_output
+                if last_output:
+                    logger.info(
+                        f"Supervisor returned empty text, "
+                        f"using fallback content ({len(last_output)} chars)."
+                    )
+                    final_response = last_output
+                    status = "success"
+                    self.tool_factory.reset_writer_output()
+                    break
+
+                # No response and no fallback - retry if attempts remain
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Empty response for Slide {slide_idx}, "
+                        f"retrying in {wait_time}s (attempt {attempt + 1}/"
+                        f"{max_retries})..."
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Failed to get response for Slide {slide_idx} "
+                        f"after {max_retries} attempts."
+                    )
+                    status = "error"
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.error(
+                        f"Error in supervisor loop (attempt {attempt + 1}/"
+                        f"{max_retries}): {e}, retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Error in supervisor loop after {max_retries} "
+                        f"attempts: {e}"
+                    )
+                    status = "error"
+                    break
 
         return final_response, status
 
