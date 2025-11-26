@@ -134,6 +134,7 @@ function App() {
   // Refs
   const audioRef = useRef(new Audio());
   const latestMsgIdRef = useRef(null); 
+    const parentLastMsgIdRef = useRef(null);
 
   const LANGUAGE_NAMES = {
     "en": "English",
@@ -248,6 +249,34 @@ function App() {
     });
     return () => unsubscribe();
   }, [courseId, isReady]);
+
+    // 1b. React to parent doc's `last_message_id` changes and move that message to top
+    useEffect(() => {
+        if (!isReady) return;
+
+        const unsub = onSnapshot(doc(db, "presentation_broadcast", courseId), (docSnapshot) => {
+            if (!docSnapshot.exists()) return;
+            const data = docSnapshot.data();
+            const lastId = data && data.last_message_id;
+            if (!lastId) return;
+
+            // If last_message_id changed, reorder local messages so that the referenced
+            // message appears as the most recent (end of the chronological array).
+            if (parentLastMsgIdRef.current !== lastId) {
+                parentLastMsgIdRef.current = lastId;
+                setMessages(prev => {
+                    const idx = prev.findIndex(m => m.id === lastId);
+                    if (idx === -1) return prev; // message not yet in local cache
+                    // Move the message to the end of the array (newest)
+                    const item = prev[idx];
+                    const rest = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+                    return [...rest, item];
+                });
+            }
+        });
+
+        return () => unsub();
+    }, [courseId, isReady]);
 
   // 2. Messages
   useEffect(() => {

@@ -98,12 +98,20 @@ def load_slides_from_json(json_path):
         
         slides_data = []
         for slide in sorted_slides:
-            # Some JSONs use 'note', others might use 'original_notes' if 'note' is missing/empty?
-            # Based on provided files, 'note' seems populated.
-            note = slide.get("note", "")
+            # Changed per instruction: use original_notes as primary source as it drives the cache key
+            note = slide.get("original_notes", "")
+            source = "original_notes"
+            
             if not note:
-                 note = slide.get("original_notes", "")
-                 
+                note = slide.get("note", "")
+                source = "note (fallback)"
+            
+            if not note:
+                source = "None"
+
+            # Debug logging to trace selection
+            logger.info(f"Slide {slide.get('slide_index')}: Selected source='{source}', length={len(note)}")
+
             slides_data.append({
                 "slide_number": str(slide.get("slide_index")),
                 "speaker_notes": note
@@ -190,7 +198,8 @@ def simulate_presentation(api_url, api_key, slides_data, ppt_filename, bucket_na
         
         logger.info(f"\n--- Processing {os.path.basename(ppt_filename)}, Slide {slide_num} ---")
         logger.info(f"Notes: {notes[:60]}...")
-        
+        logger.info(f"Notes length: {len(notes)} chars")
+
         payload = {
             "generate_presentation": True,
             "courseId": DEMO_COURSE_ID,
@@ -243,6 +252,8 @@ def simulate_presentation(api_url, api_key, slides_data, ppt_filename, bucket_na
         
         if language_specific_slide_links:
             payload["language_specific_slide_links"] = language_specific_slide_links
+
+        logger.debug("Sending payload: %s", json.dumps(payload))
 
         try:
             start_time = time.time()
@@ -326,6 +337,11 @@ def main():
         return
 
     for json_path in progress_files:
+        # Skip Physics PPTs for debugging
+        if os.path.basename(json_path).startswith("Physics_"):
+            logger.info(f"Skipping Physics_ PPT for debugging: {json_path}")
+            continue
+
         logger.info(f"Found progress file: {json_path}")
         
         # Determine corresponding PPT file

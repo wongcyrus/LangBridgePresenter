@@ -1,14 +1,23 @@
 '=== Class Module: CAppEvents ===
 Option Explicit
 
-Public WithEvents PPTEvent As Application
+' Declare the application variable as Private to handle events internally
+Private WithEvents mPPTEvent As Application
 
+' Expose a Public Property to set the Application object from the Module
+Public Property Set PPTEvent(ByVal Value As Application)
+    Set mPPTEvent = Value
+End Property
+
+Public Property Get PPTEvent() As Application
+    Set PPTEvent = mPPTEvent
+End Property
 
 ' ===================================
 ' Event: SlideShowBegin
 ' FIX: Fires when the slideshow starts (i.e., when the first slide is shown).
 ' ===================================
-Private Sub PPTEvent_SlideShowBegin(ByVal Wn As SlideShowWindow)
+Private Sub mPPTEvent_SlideShowBegin(ByVal Wn As SlideShowWindow)
     On Error GoTo EH
 
     Dim currentNotes As String
@@ -39,7 +48,7 @@ End Sub
 ' Event: SlideShowNextSlide
 ' Fires when moving to the 2nd slide and every slide thereafter.
 ' ===================================
-Private Sub PPTEvent_SlideShowNextSlide(ByVal Wn As SlideShowWindow)
+Private Sub mPPTEvent_SlideShowNextSlide(ByVal Wn As SlideShowWindow)
     On Error GoTo EH
 
     Dim currentNotes As String
@@ -62,4 +71,3 @@ Private Sub PPTEvent_SlideShowNextSlide(ByVal Wn As SlideShowWindow)
 EH:
     Debug.Print "? PPTEvent_SlideShowNextSlide error: "; Err.Number; " - "; Err.Description
 End Sub
-

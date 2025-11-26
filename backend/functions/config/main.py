@@ -87,9 +87,31 @@ def config(request):
 
             # Add context to broadcast payload so clients can see original text if needed
             broadcast_payload["original_context"] = context
+            # Normalize incoming ppt filename for more robust dedupe (strip ext/suffixes, lowercase)
+            incoming_ppt = request_json.get("ppt_filename")
+            if incoming_ppt:
+                try:
+                    _ppt_norm = os.path.splitext(incoming_ppt.lower())[0]
+                    for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
+                        if _ppt_norm.endswith(_s):
+                            _ppt_norm = _ppt_norm[: -len(_s)]
+                    broadcast_payload["ppt_filename"] = incoming_ppt
+                    broadcast_payload["ppt_filename_norm"] = _ppt_norm
+                except Exception:
+                    broadcast_payload["ppt_filename"] = incoming_ppt
+            else:
+                broadcast_payload["ppt_filename"] = request_json.get("ppt_filename")
+            # Compute a normalized context hash to use as an additional dedupe signal
+            try:
+                from utils import normalize_context
+                _norm_ctx = normalize_context(context)
+                _ctx_hash = hashlib.sha256(_norm_ctx.encode("utf-8")).hexdigest()[:12]
+                broadcast_payload["context_hash"] = _ctx_hash
+            except Exception:
+                # If normalization fails for any reason, continue without context hash
+                _ctx_hash = None
             broadcast_payload["course_id"] = course_id
             broadcast_payload["supported_languages"] = languages
-            broadcast_payload["ppt_filename"] = request_json.get("ppt_filename")
             broadcast_payload["page_number"] = request_json.get("page_number")
 
             if not context:
@@ -269,41 +291,112 @@ def config(request):
                     broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
                     
                     # Read current state for robust deduplication
+                    # Diagnostic: log incoming identifiers so we can debug intermittent misses
+                    logger.info("[BROADCAST] Incoming ppt_filename=%s page_number=%s course_id=%s",
+                                request_json.get('ppt_filename'), request_json.get('page_number'), course_id)
+
                     doc_snap = broadcast_ref.get()
                     last_message_id = None
                     prev_ppt = None
+                    prev_ppt_norm = None
                     prev_page = None
-                    
+                    prev_ctx_hash = None
+
                     if doc_snap.exists:
                         data = doc_snap.to_dict()
                         prev_ppt = data.get('ppt_filename')
+                        prev_ppt_norm = data.get('ppt_filename_norm')
                         prev_page = str(data.get('page_number', ''))
                         last_message_id = data.get('last_message_id')
+                        prev_ctx_hash = data.get('context_hash')
+                        logger.info("[BROADCAST] Existing parent doc state: ppt_filename=%s page_number=%s last_message_id=%s",
+                                    prev_ppt, prev_page, last_message_id)
+                    else:
+                        logger.info("[BROADCAST] No existing parent doc for doc_id=%s", doc_id)
                     
                     curr_ppt = broadcast_payload.get('ppt_filename')
+                    curr_ppt_norm = broadcast_payload.get('ppt_filename_norm')
                     curr_page = str(broadcast_payload.get('page_number', ''))
-                    
+                    curr_ctx_hash = broadcast_payload.get('context_hash')
+
                     # Check for duplicate
-                    # Only treat as duplicate if both fields are present and match
+                    # Primary: same ppt_filename + page_number
+                    # Secondary: same normalized context hash (covers cases where filenames differ)
                     is_duplicate = False
                     if curr_ppt and prev_ppt and curr_page and prev_page:
-                        if curr_ppt == prev_ppt and curr_page == prev_page:
+                        # Prefer normalized comparison when available
+                        if curr_ppt_norm and prev_ppt_norm:
+                            if curr_ppt_norm == prev_ppt_norm and curr_page == prev_page:
+                                is_duplicate = True
+                        else:
+                            if curr_ppt == prev_ppt and curr_page == prev_page:
+                                is_duplicate = True
+                    # Fallback: if both have context hashes and they match, treat as duplicate
+                    if not is_duplicate and curr_ctx_hash and prev_ctx_hash:
+                        if curr_ctx_hash == prev_ctx_hash:
                             is_duplicate = True
                             
-                    if is_duplicate and last_message_id:
-                        logger.info(f"Duplicate slide detected. Updating existing message: {last_message_id}")
-                        # Update existing history doc
-                        broadcast_ref.collection('messages').document(last_message_id).set(broadcast_payload, merge=True)
-                        
-                        # Keep the same ID for the parent doc update
-                        broadcast_payload['last_message_id'] = last_message_id
+                    if is_duplicate:
+                        # If parent doc provides last_message_id, update it directly
+                        if last_message_id:
+                            logger.info("Duplicate slide detected. Updating existing message: %s", last_message_id)
+                            broadcast_ref.collection('messages').document(last_message_id).set(broadcast_payload, merge=True)
+                            broadcast_payload['last_message_id'] = last_message_id
+                        else:
+                            # Parent doc doesn't have last_message_id; attempt to find the matching
+                            # child message by context_hash first, then by normalized ppt+page.
+                            found_id = None
+                            try:
+                                msgs_col = broadcast_ref.collection('messages')
+
+                                # Prefer deterministic doc id when we have a context hash or normalized ppt+page
+                                det_id = None
+                                if curr_ctx_hash:
+                                    det_id = f"ctx_{curr_ctx_hash}"
+                                elif curr_ppt_norm and curr_page:
+                                    det_id = f"ppt_{curr_ppt_norm}_{curr_page}"
+
+                                # Check deterministic doc first (cheap get)
+                                if det_id:
+                                    det_doc = msgs_col.document(det_id).get()
+                                    if det_doc.exists:
+                                        found_id = det_id
+
+                                # Fallback: query by context_hash or ppt+page
+                                if not found_id:
+                                    if curr_ctx_hash:
+                                        q = msgs_col.where('context_hash', '==', curr_ctx_hash).limit(1)
+                                        docs = q.get()
+                                        if docs:
+                                            found_id = docs[0].id
+                                if not found_id and curr_ppt_norm and curr_page:
+                                    q = msgs_col.where('ppt_filename_norm', '==', curr_ppt_norm).where('page_number', '==', curr_page).limit(1)
+                                    docs = q.get()
+                                    if docs:
+                                        found_id = docs[0].id
+                            except Exception as lookup_e:
+                                logger.warning("Failed to lookup existing message for dedupe: %s", lookup_e)
+
+                            if found_id:
+                                logger.info("Found existing message by lookup. Updating message: %s", found_id)
+                                broadcast_ref.collection('messages').document(found_id).set(broadcast_payload, merge=True)
+                                broadcast_payload['last_message_id'] = found_id
+                            else:
+                                # No existing message found; create or overwrite deterministic doc if available
+                                if det_id:
+                                    msgs_col.document(det_id).set(broadcast_payload)
+                                    logger.info("Created/Updated deterministic message: %s", det_id)
+                                    broadcast_payload['last_message_id'] = det_id
+                                else:
+                                    new_msg_ref = msgs_col.document()
+                                    new_msg_ref.set(broadcast_payload)
+                                    logger.info("New slide. Created message: %s", new_msg_ref.id)
+                                    broadcast_payload['last_message_id'] = new_msg_ref.id
                     else:
-                        # Create new history doc
+                        # Create new history doc when not duplicate
                         new_msg_ref = broadcast_ref.collection('messages').document()
                         new_msg_ref.set(broadcast_payload)
-                        
-                        logger.info(f"New slide. Created message: {new_msg_ref.id}")
-                        # Save new ID to parent doc
+                        logger.info("New slide. Created message: %s", new_msg_ref.id)
                         broadcast_payload['last_message_id'] = new_msg_ref.id
 
                     # Update the parent document (current state)

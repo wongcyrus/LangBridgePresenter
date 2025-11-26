@@ -146,6 +146,29 @@ Public Function GetNotesText(ByVal sld As Slide) As String
     Dim notesText As String
     notesText = ""
 
+    ' Strategy 1: Look for the specific "Body" placeholder (type 2)
+    ' This matches how python-pptx extracts notes and ensures we don't grab
+    ' page numbers, headers, or other artifacts.
+    On Error Resume Next
+    For Each shp In sld.NotesPage.Shapes
+        ' check for msoPlaceholder (14)
+        If shp.Type = 14 Then
+            ' check for ppPlaceholderBody (2)
+            If shp.PlaceholderFormat.Type = 2 Then
+                If shp.HasTextFrame Then
+                    If shp.TextFrame.HasText Then
+                        notesText = shp.TextFrame.TextRange.Text
+                        ' Found the official notes body, return immediately
+                        GetNotesText = notesText
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+    Next shp
+    On Error GoTo 0
+
+    ' Strategy 2: Fallback (if no body placeholder found)
     ' Loop all shapes on the Notes Page, collecting text
     For Each shp In sld.NotesPage.Shapes
         If shp.HasTextFrame Then
@@ -904,7 +927,9 @@ Private Function ToUtf8Bytes(ByVal s As String) As Byte()
     idx = -1
 
     For i = 1 To Len(s)
-        ch = AscW(Mid$(s, i, 1))
+        ' AscW returns a signed Integer. Mask with 0xFFFF to get the unsigned code point (Long).
+        ch = AscW(Mid$(s, i, 1)) And &HFFFF&
+        
         If ch < &H80 Then
             ' 1-byte ASCII
             idx = idx + 1: ReDim Preserve bytes(0 To idx)
