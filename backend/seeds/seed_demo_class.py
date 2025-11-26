@@ -4,8 +4,8 @@ import logging
 import os
 import sys
 import time
+import glob
 import requests
-from pptx import Presentation
 from google.cloud import storage
 
 # Add backend root to sys.path to allow imports
@@ -77,13 +77,6 @@ def upload_to_bucket(bucket_name, source_file_path, destination_blob_name):
         blob.upload_from_filename(source_file_path)
         
         # Construct public URL (assuming the bucket allows public access or we use the media link)
-        # For private buckets, we might need a signed URL, but here we'll try the public media link style
-        # or the storage.googleapis.com style if the object is public.
-        # Given the requirement "send the slide url", and this is likely for a demo/dev environment:
-        
-        # Attempt to make it public (optional, depending on bucket settings)
-        # blob.make_public() 
-        
         url = blob.public_url
         logger.info(f"✅ Uploaded {source_file_path} to {destination_blob_name}. URL: {url}")
         return url
@@ -91,10 +84,40 @@ def upload_to_bucket(bucket_name, source_file_path, destination_blob_name):
         logger.error(f"❌ Failed to upload {source_file_path} to bucket: {e}")
         return None
 
+def load_slides_from_json(json_path):
+    """
+    Parses the progress JSON to extract slide notes.
+    Returns a list of dicts with 'slide_number' and 'speaker_notes'.
+    """
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        slides_dict = data.get("slides", {})
+        sorted_slides = sorted(slides_dict.values(), key=lambda x: x.get("slide_index", 0))
+        
+        slides_data = []
+        for slide in sorted_slides:
+            # Some JSONs use 'note', others might use 'original_notes' if 'note' is missing/empty?
+            # Based on provided files, 'note' seems populated.
+            note = slide.get("note", "")
+            if not note:
+                 note = slide.get("original_notes", "")
+                 
+            slides_data.append({
+                "slide_number": str(slide.get("slide_index")),
+                "speaker_notes": note
+            })
+            
+        return slides_data
+    except Exception as e:
+        logger.error(f"Failed to load slides from {json_path}: {e}")
+        return []
+
 # --- DEMO DATA ---
 
-DEMO_COURSE_ID = "physics-101-demo"
-DEMO_COURSE_TITLE = "Introduction to Physics: Motion and Forces"
+DEMO_COURSE_ID = "showcase"
+DEMO_COURSE_TITLE = "Showcase"
 DEMO_LANGUAGES = ["en-US", "zh-CN", "yue-HK"]
 
 # Mapping for visual folder suffixes
@@ -104,90 +127,7 @@ LANG_VISUAL_SUFFIX_MAP = {
     "yue-HK": "yue-HK"
 }
 
-LECTURE_1_PPT_FILENAME = "Physics_101_Lecture_1.pptx"
-LECTURE_1_SLIDES = [
-    {
-        "slide_number": "1",
-        "speaker_notes": "Welcome everyone to Physics 101. Today we are going to talk about the fundamental laws of motion. Specifically, we will look at Newton's Three Laws of Motion and how they govern the world around us."
-    },
-    {
-        "slide_number": "2",
-        "speaker_notes": "First, let's define 'Force'. A force is simply a push or a pull upon an object resulting from the object's interaction with another object. Whenever there is an interaction between two objects, there is a force upon each of the objects."
-    },
-    {
-        "slide_number": "3",
-        "speaker_notes": "Newton's First Law, also known as the Law of Inertia, states that an object at rest stays at rest and an object in motion stays in motion with the same speed and in the same direction unless acted upon by an unbalanced force."
-    },
-    {
-        "slide_number": "4",
-        "speaker_notes": "Newton's Second Law provides the calculation for force. It states that Force equals mass times acceleration. F equals m a. This means that the heavier an object is, the more force is needed to move it."
-    },
-    {
-        "slide_number": "5",
-        "speaker_notes": "Finally, Newton's Third Law: For every action, there is an equal and opposite reaction. This means that in every interaction, there is a pair of forces acting on the two interacting objects."
-    },
-    {
-        "slide_number": "6",
-        "speaker_notes": "That concludes our brief introduction. Please review Chapter 1 in your textbooks for next week's lab session. Thank you for listening!"
-    }
-]
-
-LECTURE_2_PPT_FILENAME = "Physics_101_Lecture_2.pptx"
-LECTURE_2_SLIDES = [
-    {
-        "slide_number": "1",
-        "speaker_notes": "Good morning class! In our previous lecture, we covered Newton's Laws of Motion. Today, we will expand on these concepts by introducing work, energy, and power. These concepts are crucial for understanding how forces affect objects over distances and time."
-    },
-    {
-        "slide_number": "2",
-        "speaker_notes": "Work, in physics, is defined as a force causing displacement. A force does work on an object if it causes a displacement of the object. The amount of work done is calculated as Force times Distance, specifically the component of force in the direction of displacement."
-    },
-    {
-        "slide_number": "3",
-        "speaker_notes": "Energy is the capacity to do work. There are various forms of energy, such as kinetic energy (energy of motion) and potential energy (stored energy). The Law of Conservation of Energy states that energy cannot be created or destroyed, only transformed from one form to another."
-    },
-    {
-        "slide_number": "4",
-        "speaker_notes": "Kinetic energy is the energy an object possesses due to its motion. It is directly proportional to the mass of the object and the square of its velocity. So, a faster or heavier object has more kinetic energy."
-    },
-    {
-        "slide_number": "5",
-        "speaker_notes": "Potential energy is stored energy. Gravitational potential energy depends on an object's mass, height, and the acceleration due to gravity. Elastic potential energy is stored in stretched or compressed elastic materials."
-    },
-    {
-        "slide_number": "6",
-        "speaker_notes": "Finally, power is the rate at which work is done or energy is transferred. It tells us how quickly work is performed. Power is calculated as Work divided by Time, or Force times Velocity. This concludes our lecture on work, energy, and power. Please prepare for a short quiz next session."
-    }
-]
-
 # -----------------
-
-def generate_pptx(filename, slides_data):
-    """Generates a dummy PPTX file with speaker notes."""
-    prs = Presentation()
-    
-    # Use 'Title Only' layout (index 5) which definitely has a title placeholder
-    slide_layout = prs.slide_layouts[5] 
-    
-    for slide_info in slides_data:
-        slide = prs.slides.add_slide(slide_layout)
-        
-        # Set title
-        if slide.shapes.title:
-            slide.shapes.title.text = f"Slide {slide_info['slide_number']}"
-        
-        # Add notes
-        notes_slide = slide.notes_slide
-        text_frame = notes_slide.notes_text_frame
-        text_frame.text = slide_info['speaker_notes']
-        
-    # Ensure seeds directory exists
-    seeds_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(seeds_dir, filename)
-    
-    prs.save(file_path)
-    logger.info(f"✅ Generated PPTX: {file_path}")
-    return file_path
 
 def create_demo_course():
     """Creates the demo course in Firestore using admin tools."""
@@ -226,42 +166,80 @@ def simulate_presentation(api_url, api_key, slides_data, ppt_filename, bucket_na
 
     # Determine visuals directory
     seeds_dir = os.path.dirname(os.path.abspath(__file__))
-    ppt_basename = os.path.splitext(ppt_filename)[0]
-    # Assuming 'en' visuals for the simulation
-    visuals_dir = os.path.join(seeds_dir, "generate", f"{ppt_basename}_en_visuals")
+    
+    # Attempt to guess the visuals directory based on the ppt_filename
+    # Assuming ppt_filename comes from backend/seeds/generate/
+    # and visuals might be in backend/seeds/generate/ or similar.
+    # However, original code logic was: backend/seeds/generate/{ppt_basename}_en_visuals
+    # We will try to stick to a similar convention or look in the same dir.
+    
+    # If ppt_filename is a full path, get basename.
+    ppt_basename = os.path.splitext(os.path.basename(ppt_filename))[0]
+    
+    # Clean up basename if it has suffixes like _with_visuals
+    # Original logic was: ppt_basename of "Physics_101_Lecture_1.pptx" -> "Physics_101_Lecture_1"
+    # Folder: "Physics_101_Lecture_1_en_visuals"
+    
+    # New files: "Physics_101_Lecture_1_en_with_visuals.pptx" -> basename "Physics_101_Lecture_1_en_with_visuals"
+    # This might complicate finding the visuals folder if the naming isn't exact.
+    # We'll do a best effort search for the visual file.
 
     for slide in slides_data:
         slide_num = slide["slide_number"]
         notes = slide["speaker_notes"]
         
-        logger.info(f"\n--- Processing {ppt_filename}, Slide {slide_num} ---")
+        logger.info(f"\n--- Processing {os.path.basename(ppt_filename)}, Slide {slide_num} ---")
         logger.info(f"Notes: {notes[:60]}...")
         
         payload = {
             "generate_presentation": True,
             "courseId": DEMO_COURSE_ID,
             "context": notes,
-            "ppt_filename": ppt_filename,
+            "ppt_filename": os.path.basename(ppt_filename), # Send just the filename
             "page_number": slide_num
         }
 
         language_specific_slide_links = {}
         if bucket_name:
+            # Try to find visuals. 
+            # We'll look in 'generate' folder for folders matching expected patterns
+            # or just assume the visuals are not critical for this seed script if not found.
+            
+            # Heuristic: Try to find a folder that looks like it belongs to this PPT
+            # Base prefix: e.g. "Physics_101_Lecture_1"
+            
+            # For now, let's try the direct pattern if it exists
+            base_search_name = ppt_basename.replace("_with_visuals", "").replace("_with_notes", "").replace("_en", "").replace("_zh-CN", "").replace("_yue-HK", "")
+            
             for lang_code, suffix in LANG_VISUAL_SUFFIX_MAP.items():
-                visuals_dir = os.path.join(seeds_dir, "generate", f"{ppt_basename}_{suffix}_visuals")
-                image_filename = f"slide_{slide_num}_reimagined.png"
-                image_path = os.path.join(visuals_dir, image_filename)
+                # Construct potential visual directory paths
+                # 1. Try {base}_{suffix}_visuals (original style)
+                visuals_dir_candidates = [
+                    os.path.join(seeds_dir, "generate", f"{base_search_name}_{suffix}_visuals"),
+                    os.path.join(seeds_dir, "generate", f"{ppt_basename}_{suffix}_visuals"),
+                    os.path.join(seeds_dir, "generate", f"{ppt_basename}_visuals"),
+                ]
                 
-                if os.path.exists(image_path):
+                image_filename = f"slide_{slide_num}_reimagined.png"
+                
+                found_image = None
+                for v_dir in visuals_dir_candidates:
+                    candidate_path = os.path.join(v_dir, image_filename)
+                    if os.path.exists(candidate_path):
+                        found_image = candidate_path
+                        break
+                
+                if found_image:
                     logger.info(f"Found visual for {lang_code}: {image_filename}. Uploading to bucket...")
-                    blob_name = f"generated_visuals/{ppt_basename}/{lang_code}/{image_filename}" # Include lang_code in blob path
+                    # Blob name: generated_visuals/{clean_basename}/{lang_code}/{filename}
+                    blob_name = f"generated_visuals/{base_search_name}/{lang_code}/{image_filename}"
                     
-                    image_url = upload_to_bucket(bucket_name, image_path, blob_name)
+                    image_url = upload_to_bucket(bucket_name, found_image, blob_name)
                     if image_url:
                         language_specific_slide_links[lang_code] = image_url
                         logger.info(f"Added slide_link for {lang_code}: {image_url}")
-                else:
-                    logger.warning(f"Visual image not found for {lang_code} at {image_path}")
+                # else:
+                #     logger.warning(f"Visual image not found for {lang_code} (checked multiple paths)")
         
         if language_specific_slide_links:
             payload["language_specific_slide_links"] = language_specific_slide_links
@@ -278,7 +256,7 @@ def simulate_presentation(api_url, api_key, slides_data, ppt_filename, bucket_na
         except Exception as e:
             logger.error(f"❌ Request Failed: {e}")
             
-        # Wait a bit between slides to simulate real pacing, or just to let logs settle
+        # Wait a bit between slides
         logger.info("Waiting 2 seconds before next slide...")
         time.sleep(2)
 
@@ -333,14 +311,55 @@ def main():
     else:
         logger.info("Skipping course creation as requested.")
         
-    # Generate PPTX files
-    # generate_pptx(LECTURE_1_PPT_FILENAME, LECTURE_1_SLIDES)
-    # generate_pptx(LECTURE_2_PPT_FILENAME, LECTURE_2_SLIDES)
+    # Find and process presentations from backend/seeds/generate/
+    seeds_dir = os.path.dirname(os.path.abspath(__file__))
+    generate_dir = os.path.join(seeds_dir, "generate")
+    
+    # Pattern to match English progress files: *_en_progress.json
+    progress_files = glob.glob(os.path.join(generate_dir, "*_en_progress.json"))
+    
+    # Sort for consistent order
+    progress_files.sort()
+    
+    if not progress_files:
+        logger.warning(f"No *_en_progress.json files found in {generate_dir}")
+        return
+
+    for json_path in progress_files:
+        logger.info(f"Found progress file: {json_path}")
         
-    simulate_presentation(final_api_url, final_api_key, LECTURE_1_SLIDES, LECTURE_1_PPT_FILENAME, bucket_name)
-    logger.info("\n--- Starting Second Lecture ---")
-    time.sleep(5) # Pause between lectures
-    simulate_presentation(final_api_url, final_api_key, LECTURE_2_SLIDES, LECTURE_2_PPT_FILENAME, bucket_name)
+        # Determine corresponding PPT file
+        # Assume naming convention: {base}_progress.json -> {base}_with_visuals.pptm/.pptx or {base}_with_notes.pptm/.pptx
+        base_name = os.path.basename(json_path).replace("_progress.json", "")
+        
+        # Candidates for PPT file
+        ppt_candidates = [
+            f"{base_name}_with_visuals.pptm",
+            f"{base_name}_with_visuals.pptx"
+        ]
+        
+        ppt_path = None
+        for cand in ppt_candidates:
+            cand_path = os.path.join(generate_dir, cand)
+            if os.path.exists(cand_path):
+                ppt_path = cand_path
+                break
+        
+        if not ppt_path:
+            logger.warning(f"Could not find matching PPT file for {json_path}. Skipping.")
+            continue
+            
+        logger.info(f"Using PPT file: {ppt_path}")
+        
+        slides_data = load_slides_from_json(json_path)
+        if not slides_data:
+            logger.warning("No slides loaded from JSON. Skipping.")
+            continue
+            
+        simulate_presentation(final_api_url, final_api_key, slides_data, ppt_path, bucket_name)
+        
+        logger.info("\n--- Pausing between presentations ---")
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()
