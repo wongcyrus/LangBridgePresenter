@@ -168,11 +168,26 @@ function App() {
         if (data.current_presentation_id) setLivePptId(data.current_presentation_id);
         if (data.current_slide_id) setLiveSlideId(data.current_slide_id);
         
-        // Update Live Data (for audio)
+        // 2. Update Live Content (Audio/Text)
         if (data.latest_languages) {
             setLiveData(data.latest_languages);
+            
+            // Update supported languages list and sync currentLang
             const langs = Object.keys(data.latest_languages);
-            if (langs.length > 0) setSupportedLangs(langs);
+            if (langs.length > 0) {
+                setSupportedLangs(langs);
+                
+                // Logic to auto-select a valid language if current one is invalid
+                // We do this inside the effect to react to the first data load
+                setCurrentLang(prevLang => {
+                    if (langs.includes(prevLang)) return prevLang;
+                    // Fuzzy match (e.g. 'en' -> 'en-US')
+                    const match = langs.find(l => l.startsWith(prevLang) || prevLang.startsWith(l));
+                    if (match) return match;
+                    // Fallback to first available
+                    return langs[0];
+                });
+            }
         }
       } else {
           setStatus({ text: "🟡 Waiting for Class...", color: "orange" });
@@ -302,8 +317,9 @@ function App() {
   if (!isReady) {
       return (
           <div className="splash-screen">
-              <h1>LangBridge Student Client</h1>
+              <h1>LangBride</h1>
               <button onClick={() => setIsReady(true)}>Join Class</button>
+              <p className="attribution">Developed by Higher Diploma in Cloud and Data Centre Administration at HKIIT</p>
           </div>
       );
   }

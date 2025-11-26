@@ -395,3 +395,45 @@ select {
     justify-content: center;
     z-index: 1000;
 }
+
+.splash-screen h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+    color: #1a73e8;
+    font-weight: 700;
+}
+
+.splash-screen .attribution {
+    font-size: 1rem;
+    color: #5f6368;
+    margin-top: 1.5rem; /* Space above attribution */
+    margin-bottom: 2.5rem; /* Space below attribution, before button */
+    text-align: center;
+    max-width: 80%;
+    line-height: 1.5;
+}
+
+.splash-screen button {
+    background-color: #1a73e8; /* Google Blue */
+    color: white;
+    border: none;
+    padding: 14px 40px; /* More padding */
+    font-size: 1.3rem; /* Larger font */
+    border-radius: 30px; /* Pill shape */
+    cursor: pointer;
+    box-shadow: 0 6px 15px rgba(26, 115, 232, 0.3); /* Softer, larger shadow */
+    transition: all 0.3s ease; /* Smooth transitions */
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.splash-screen button:hover {
+    background-color: #1557b0;
+    transform: translateY(-3px); /* Lift effect */
+    box-shadow: 0 9px 20px rgba(26, 115, 232, 0.4);
+}
+
+.splash-screen button:active {
+    transform: translateY(0); /* Press down effect */
+    box-shadow: 0 4px 10px rgba(26, 115, 232, 0.2);
+}
