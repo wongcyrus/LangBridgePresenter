@@ -183,7 +183,7 @@ def config(request):
                         logger.info("[MP3-%s] ✅ Using cached audio_url: %s", lang, cached_audio_url)
                         return (lang, {"text": generated, "audio_url": cached_audio_url}, None)
                     
-                    logger.info("[MP3-START] Processing %s: '%s...'", lang, generated[:50])
+                    logger.info("[MP3-START] Processing %s: '%s...", lang, generated[:50])
                     lang_data = {"text": generated}
                     try:
                         # Generate filename from CONTEXT hash (not message content)
@@ -275,8 +275,8 @@ def config(request):
                         broadcast_payload["languages"][lang] = lang_data
                         if error:
                             logger.warning("MP3 generation had error for %s: %s", lang, error)
-                
-                logger.info("Completed MP3 generation for %d languages", len(broadcast_payload["languages"]))
+                    
+                    logger.info("Completed MP3 generation for %d languages", len(broadcast_payload["languages"]))
             
             # Broadcast the updates to a dedicated collection for listeners
             if broadcast_payload.get("languages"):
@@ -290,7 +290,8 @@ def config(request):
                     doc_id = course_id if course_id else 'current'
                     broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
                     
-                    ppt_filename = broadcast_payload.get('ppt_filename')
+                    # Use normalized filename if available to allow merging multiple language uploads into one presentation
+                    ppt_filename = broadcast_payload.get('ppt_filename_norm') or broadcast_payload.get('ppt_filename')
                     page_number = str(broadcast_payload.get('page_number', '0'))
                     
                     # 1. Prepare the "Live State" update (Always happens)

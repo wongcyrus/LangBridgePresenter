@@ -233,18 +233,35 @@ function App() {
       if (!isReady || !viewingPptId) return;
       
       const basePath = `presentation_broadcast/${courseId}/presentations`;
+      console.log("Fetching slide list from:", basePath, viewingPptId);
           
       const slidesCol = collection(db, basePath, viewingPptId, "slides");
       
-      getDocs(slidesCol).then(snapshot => {
+      const unsubscribe = onSnapshot(slidesCol, (snapshot) => {
+          console.log("Slide list snapshot size:", snapshot.size);
           // Assuming ids are numeric strings "1", "2", etc.
           const ids = snapshot.docs
               .map(d => parseInt(d.id, 10))
               .filter(n => !isNaN(n))
               .sort((a, b) => a - b);
           setSlideList(ids);
-      }).catch(console.error);
+      }, (error) => {
+          console.error("Error fetching slide list:", error);
+      });
+
+      return () => unsubscribe();
   }, [courseId, viewingPptId, isReady, isLiveMode]);
+
+  // --- 3b. Auto-select first slide when switching presentations ---
+  useEffect(() => {
+      if (slideList.length > 0) {
+          // If viewingSlideId is null, or not in the new list, default to first
+          const current = parseInt(viewingSlideId, 10);
+          if (isNaN(current) || !slideList.includes(current)) {
+              setViewingSlideId(String(slideList[0]));
+          }
+      }
+  }, [slideList, viewingSlideId]);
 
   // --- 4. Listen/Fetch Viewing Slide Data ---
   useEffect(() => {
@@ -253,10 +270,12 @@ function App() {
           return;
       }
 
+      console.log("Fetching slide:", viewingPptId, viewingSlideId);
       const basePath = `presentation_broadcast/${courseId}/presentations`;
 
       const slideRef = doc(db, basePath, viewingPptId, "slides", String(viewingSlideId));
       const unsubscribe = onSnapshot(slideRef, (docSnapshot) => {
+          console.log("Slide snapshot:", docSnapshot.exists(), docSnapshot.data());
           if (docSnapshot.exists()) {
               setSlideData(docSnapshot.data());
           } else {
@@ -343,10 +362,14 @@ function App() {
       }
   };
 
-  const handleGoLive = () => {
-      setViewingPptId(livePptId);
-      setViewingSlideId(liveSlideId);
-      setIsLiveMode(true);
+  const toggleLiveMode = () => {
+      if (isLiveMode) {
+          setIsLiveMode(false);
+      } else {
+          setViewingPptId(livePptId);
+          setViewingSlideId(liveSlideId);
+          setIsLiveMode(true);
+      }
   };
 
   if (!isReady) {
@@ -471,7 +494,7 @@ function App() {
             </select>
 
             <button 
-                onClick={handleGoLive} 
+                onClick={toggleLiveMode} 
                 className={`live-badge ${isLiveMode ? 'active' : 'inactive'}`}
                 style={{
                     display: 'flex', 
