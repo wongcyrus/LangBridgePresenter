@@ -115,7 +115,8 @@ function App() {
   const courseId = searchParams.get('class') || searchParams.get('courseId') || 'current';
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
-  const [currentLang, setCurrentLang] = useState('en');
+  const [viewLang, setViewLang] = useState('en');
+  const [listenLang, setListenLang] = useState('en');
   const [supportedLangs, setSupportedLangs] = useState([]);
   
   // -- State for Live/Nav Logic --
@@ -153,12 +154,12 @@ function App() {
 
   const getLangName = (code) => LANGUAGE_NAMES[code] || code;
 
-  // Helper to extract data for current language
-  const getLangContent = (languagesMap) => {
+  // Helper to extract data for specific language
+  const getLangContent = (languagesMap, langCode) => {
     if (!languagesMap) return null;
-    let content = languagesMap[currentLang];
+    let content = languagesMap[langCode];
     if (!content) {
-        const match = Object.keys(languagesMap).find(k => k.startsWith(currentLang));
+        const match = Object.keys(languagesMap).find(k => k.startsWith(langCode) || langCode.startsWith(k));
         if (match) content = languagesMap[match];
     }
     return content;
@@ -177,25 +178,25 @@ function App() {
         if (data.current_presentation_id) setLivePptId(data.current_presentation_id);
         if (data.current_slide_id) setLiveSlideId(data.current_slide_id);
         
-        // 2. Update Live Content (Audio/Text)
+        // Update Live Content (Audio/Text)
         if (data.latest_languages) {
             setLiveData(data.latest_languages);
             
-            // Update supported languages list and sync currentLang
+            // Update supported languages list and sync selection
             const langs = Object.keys(data.latest_languages);
             if (langs.length > 0) {
                 setSupportedLangs(langs);
                 
-                // Logic to auto-select a valid language if current one is invalid
-                // We do this inside the effect to react to the first data load
-                setCurrentLang(prevLang => {
-                    if (langs.includes(prevLang)) return prevLang;
-                    // Fuzzy match (e.g. 'en' -> 'en-US')
-                    const match = langs.find(l => l.startsWith(prevLang) || prevLang.startsWith(l));
+                // Auto-select valid language helper
+                const initLang = (current, available) => {
+                    if (available.includes(current)) return current;
+                    const match = available.find(l => l.startsWith(current) || current.startsWith(l));
                     if (match) return match;
-                    // Fallback to first available
-                    return langs[0];
-                });
+                    return available[0];
+                };
+
+                setViewLang(prev => initLang(prev, langs));
+                setListenLang(prev => initLang(prev, langs));
             }
         }
       } else {
@@ -252,14 +253,19 @@ function App() {
   }, [courseId, isReady, livePptId, viewingSlideId, liveSlideId, liveData]); // Re-run if liveData updates and we are live
 
   // --- Render Logic Pre-calculation ---
-  const liveContent = getLangContent(liveData);
-  const viewingContent = getLangContent(slideData?.languages);
+  // For Visuals/Text (View Language)
+  const liveContentView = getLangContent(liveData, viewLang);
+  const viewingContentView = getLangContent(slideData?.languages, viewLang);
+  
+  // For Audio (Listen Language)
+  const liveContentAudio = getLangContent(liveData, listenLang);
+  const viewingContentAudio = getLangContent(slideData?.languages, listenLang);
   
   // Audio Source Decision
-  // If Sync is ON: Play whatever comes down the Live pipe.
-  // If Sync is OFF: Play whatever is attached to the Viewing Slide.
-  const activeContent = isLiveMode ? liveContent : viewingContent;
-  const activeAudioUrl = activeContent?.audio_url;
+  // If Sync is ON: Play LIVE audio (from listenLang)
+  // If Sync is OFF: Play Viewing Slide audio (from listenLang)
+  const activeAudioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
+  const activeAudioUrl = activeAudioContent?.audio_url;
 
   // --- 5. Audio Player Logic ---
   useEffect(() => {
@@ -334,11 +340,11 @@ function App() {
   }
 
   // Priority: Viewing Slide Registry > Live Data (fallback if visual matches)
-  const visualUrl = viewingContent?.slide_link || (String(viewingSlideId) === String(liveSlideId) ? liveContent?.slide_link : null);
+  const visualUrl = viewingContentView?.slide_link || (String(viewingSlideId) === String(liveSlideId) ? liveContentView?.slide_link : null);
   
   // Text priority: Viewing Slide text (if browsing) -> Live text (if live)
-  // This ensures text matches the visual slide
-  const displayText = (isLiveMode ? liveContent?.text : viewingContent?.text) || "(Translating...)";
+  // This ensures text matches the visual slide and View Language
+  const displayText = (isLiveMode ? liveContentView?.text : viewingContentView?.text) || "(Translating...)";
 
   const currentNum = parseInt(viewingSlideId, 10);
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
@@ -364,9 +370,30 @@ function App() {
         <h1>🎓 LangBridge</h1>
         <div className="controls">
             <div className="status" style={{ color: status.color }}>{status.text}</div>
-            <select value={currentLang} onChange={(e) => setCurrentLang(e.target.value)}>
-                {supportedLangs.map(lang => <option key={lang} value={lang}>{getLangName(lang)}</option>)}
-            </select>
+            <div style={{display: 'flex', gap: '8px'}}>
+                {/* View Language */}
+                <div style={{position: 'relative'}} title="Text Language">
+                    <span style={{position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', pointerEvents: 'none'}}>👁️</span>
+                    <select 
+                        value={viewLang} 
+                        onChange={(e) => setViewLang(e.target.value)}
+                        style={{paddingLeft: '28px'}}
+                    >
+                        {supportedLangs.map(lang => <option key={lang} value={lang}>{getLangName(lang)}</option>)}
+                    </select>
+                </div>
+                {/* Listen Language */}
+                <div style={{position: 'relative'}} title="Audio Language">
+                    <span style={{position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', pointerEvents: 'none'}}>🔊</span>
+                    <select 
+                        value={listenLang} 
+                        onChange={(e) => setListenLang(e.target.value)}
+                        style={{paddingLeft: '28px'}}
+                    >
+                        {supportedLangs.map(lang => <option key={lang} value={lang}>{getLangName(lang)}</option>)}
+                    </select>
+                </div>
+            </div>
         </div>
       </header>
       
