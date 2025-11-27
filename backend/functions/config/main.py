@@ -317,7 +317,11 @@ def config(request):
                                 break
                         
                         if has_slides:
-                            slide_ref = broadcast_ref.collection('presentations').document(safe_ppt_id).collection('slides').document(page_number)
+                            # Ensure parent presentation doc exists so it can be listed
+                            ppt_ref = broadcast_ref.collection('presentations').document(safe_ppt_id)
+                            ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+
+                            slide_ref = ppt_ref.collection('slides').document(page_number)
                             # Use merge=True to preserve any existing fields in case of re-broadcasts or partial updates
                             slide_ref.set(broadcast_payload, merge=True)
                             logger.info(f"Updated slide registry: {safe_ppt_id} / {page_number}")

@@ -6,10 +6,15 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
       
-      // Explicitly allow reading from the new slide registry structure
-      match /presentations/{pptId}/slides/{slideId} {
-         allow read: if true;
-         allow write: if false;
+      // Allow reading the presentation list
+      match /presentations/{pptId} {
+        allow read: if true;
+        
+        // Explicitly allow reading from the new slide registry structure
+        match /slides/{slideId} {
+           allow read: if true;
+           allow write: if false;
+        }
       }
     }
     

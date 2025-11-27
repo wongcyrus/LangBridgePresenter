@@ -123,9 +123,11 @@ function App() {
   const [livePptId, setLivePptId] = useState(null);
   const [liveSlideId, setLiveSlideId] = useState(null);
   
+  const [viewingPptId, setViewingPptId] = useState(null);
   const [viewingSlideId, setViewingSlideId] = useState(null);
   const [isLiveMode, setIsLiveMode] = useState(true); // Start in sync
   
+  const [presentationList, setPresentationList] = useState([]); // List of presentation IDs
   const [slideList, setSlideList] = useState([]); // List of integers
   
   const [slideData, setSlideData] = useState(null); // Content of Viewing Slide
@@ -206,19 +208,34 @@ function App() {
     return () => unsubscribe();
   }, [courseId, isReady]);
 
-  // --- 2. Sync Logic: Keep viewingSlideId in sync with liveSlideId if isLiveMode ---
+  // --- 1b. Fetch Presentation List ---
   useEffect(() => {
-      if (isLiveMode && liveSlideId) {
-          setViewingSlideId(liveSlideId);
+      if (!isReady) return;
+      
+      const pptCollection = collection(db, "presentation_broadcast", courseId, "presentations");
+      const unsubscribe = onSnapshot(pptCollection, (snapshot) => {
+          const ppts = snapshot.docs.map(doc => doc.id);
+          setPresentationList(ppts);
+      });
+      return () => unsubscribe();
+  }, [courseId, isReady]);
+
+  // --- 2. Sync Logic: Keep viewing pointers in sync with live if isLiveMode ---
+  useEffect(() => {
+      if (isLiveMode) {
+          if (livePptId) setViewingPptId(livePptId);
+          if (liveSlideId) setViewingSlideId(liveSlideId);
       }
-  }, [liveSlideId, isLiveMode]);
+  }, [livePptId, liveSlideId, isLiveMode]);
 
   // --- 3. Fetch Slide List for Navigation ---
   useEffect(() => {
-      if (!isReady || !livePptId) return;
+      if (!isReady || !viewingPptId) return;
       
-      // Fetch list of slides to know what previous/next exist
-      const slidesCol = collection(db, "presentation_broadcast", courseId, "presentations", livePptId, "slides");
+      const basePath = `presentation_broadcast/${courseId}/presentations`;
+          
+      const slidesCol = collection(db, basePath, viewingPptId, "slides");
+      
       getDocs(slidesCol).then(snapshot => {
           // Assuming ids are numeric strings "1", "2", etc.
           const ids = snapshot.docs
@@ -227,22 +244,24 @@ function App() {
               .sort((a, b) => a - b);
           setSlideList(ids);
       }).catch(console.error);
-  }, [courseId, livePptId, isReady]);
+  }, [courseId, viewingPptId, isReady, isLiveMode]);
 
   // --- 4. Listen/Fetch Viewing Slide Data ---
   useEffect(() => {
-      if (!isReady || !livePptId || !viewingSlideId) {
+      if (!isReady || !viewingPptId || !viewingSlideId) {
           if (viewingSlideId === null) setSlideData(null);
           return;
       }
 
-      const slideRef = doc(db, "presentation_broadcast", courseId, "presentations", livePptId, "slides", String(viewingSlideId));
+      const basePath = `presentation_broadcast/${courseId}/presentations`;
+
+      const slideRef = doc(db, basePath, viewingPptId, "slides", String(viewingSlideId));
       const unsubscribe = onSnapshot(slideRef, (docSnapshot) => {
           if (docSnapshot.exists()) {
               setSlideData(docSnapshot.data());
           } else {
               // If doc missing (maybe audio only update?), try to fallback to liveData if we are live
-              if (String(viewingSlideId) === String(liveSlideId)) {
+              if (isLiveMode && String(viewingSlideId) === String(liveSlideId)) {
                   setSlideData({ languages: liveData }); 
               } else {
                   setSlideData(null);
@@ -250,7 +269,7 @@ function App() {
           }
       });
       return () => unsubscribe();
-  }, [courseId, isReady, livePptId, viewingSlideId, liveSlideId, liveData]); // Re-run if liveData updates and we are live
+  }, [courseId, isReady, viewingPptId, viewingSlideId, liveSlideId, liveData, isLiveMode]);
 
   // --- Render Logic Pre-calculation ---
   // For Visuals/Text (View Language)
@@ -325,6 +344,7 @@ function App() {
   };
 
   const handleGoLive = () => {
+      setViewingPptId(livePptId);
       setViewingSlideId(liveSlideId);
       setIsLiveMode(true);
   };
@@ -340,7 +360,7 @@ function App() {
   }
 
   // Priority: Viewing Slide Registry > Live Data (fallback if visual matches)
-  const visualUrl = viewingContentView?.slide_link || (String(viewingSlideId) === String(liveSlideId) ? liveContentView?.slide_link : null);
+  const visualUrl = viewingContentView?.slide_link || (isLiveMode && String(viewingSlideId) === String(liveSlideId) ? liveContentView?.slide_link : null);
   
   // Text priority: Viewing Slide text (if browsing) -> Live text (if live)
   // This ensures text matches the visual slide and View Language
@@ -399,6 +419,28 @@ function App() {
       
       <div className="sub-header">
         <div className="nav-controls" style={{display:'flex', alignItems:'center', gap:'10px'}}>
+            {/* Presentation Selector */}
+            <select 
+                value={viewingPptId || ''} 
+                onChange={(e) => {
+                    setViewingPptId(e.target.value);
+                    setIsLiveMode(false);
+                }}
+                style={{
+                    padding: '6px 10px',
+                    borderRadius: '20px',
+                    border: '1px solid #ddd',
+                    fontSize: '0.9rem',
+                    maxWidth: '160px',
+                    backgroundColor: '#fff'
+                }}
+            >
+                {presentationList.length === 0 && <option value="">No presentations found</option>}
+                {presentationList.map(ppt => (
+                    <option key={ppt} value={ppt}>{ppt}</option>
+                ))}
+            </select>
+
             <button disabled={!hasPrev} onClick={handlePrev} className="nav-btn-mini">
                 <ChevronLeftIcon />
             </button>
