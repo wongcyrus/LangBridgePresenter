@@ -132,8 +132,6 @@ def load_notes_for_language(json_path, lang_code):
             # Priority: original_notes (often English source) -> note (generated translation)
             # For non-English files, 'note' usually contains the translated text.
             note = slide.get("note", "")
-            if not note and lang_code == "en":
-                 note = slide.get("original_notes", "")
             
             idx = str(slide.get("slide_index"))
             if note:
