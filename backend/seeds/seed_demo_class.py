@@ -476,10 +476,6 @@ def main():
         return
 
     for json_path in progress_files:
-        if os.path.basename(json_path).startswith("Physics_"):
-            logger.info(f"Skipping Physics_ PPT: {json_path}")
-            continue
-
         logger.info(f"Found base progress file: {json_path}")
         
         # Determine Base Name

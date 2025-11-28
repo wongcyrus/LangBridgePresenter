@@ -42,6 +42,31 @@ def welcome(request):
     userParams = request_json.get("userParams", {})
     logger.debug("userParams: %s", userParams)
 
+    presenter_id = None
+    if isinstance(userParams, dict):
+        presenter_id = userParams.get("presenterId")
+    elif isinstance(userParams, str):
+        # Handle string format like "summer-presentation" or just "summer"
+        if "-" in userParams:
+            parts = userParams.split("-")
+            # Heuristic: assume the first part is the ID if the second is 'presentation'
+            # or just take the first part as a best guess.
+            if len(parts) > 0:
+                presenter_id = parts[0]
+        else:
+            presenter_id = userParams
+            
+    logger.debug(f"Extracted presenter_id: {presenter_id}")
+
+    presenter = None
+    if presenter_id:
+        from firestore_utils import get_document
+        presenter = get_document("presenters", presenter_id)
+        logger.debug(f"Fetched presenter: {presenter}")
+        if presenter and "language" in presenter:
+            language_code = presenter["language"]
+            logger.debug(f"Using presenter language: {language_code}")
+
     # Check if this is a presentation context
     is_presentation = False
     if isinstance(userParams, str):
@@ -49,38 +74,44 @@ def welcome(request):
     
     config = get_config()
     
-    def get_message_for_language(messages_map, lang_code, default_msg):
-        if not messages_map:
-            return default_msg
-            
-        # 1. Try exact match
-        if lang_code in messages_map:
-            return messages_map[lang_code]
-            
-        # 2. Try prefix match (e.g. "en" matches "en-US")
-        for key in messages_map:
-            if key.startswith(lang_code) or lang_code.startswith(key):
-                return messages_map[key]
-                
-        # 3. Fallback to "en" or any english variant
-        if "en" in messages_map:
-            return messages_map["en"]
-        for key in messages_map:
-            if key.startswith("en"):
-                return messages_map[key]
-                
-        return default_msg
-    
     # Use presentation_messages if presentation context,
     # otherwise welcome_messages
     if is_presentation:
-        messages = config.get("presentation_messages", {})       
-        logger.debug("Using presentation_messages")
-        reply = get_message_for_language(messages, language_code, "Hello")
+        logger.debug("Using presentation_messages logic")
+        
+        # Map simple language codes to full codes used in the configuration
+        LANG_CODE_MAP = {
+            "en": "en-US",
+            "zh": "zh-CN",
+            "yue": "yue-HK",
+            "yue-HK": "yue-HK",
+            "zh-CN": "zh-CN",
+            "en-US": "en-US"
+        }
+        target_lang = LANG_CODE_MAP.get(language_code, "en-US")
+        logger.debug(f"Targeting language: {target_lang} for code: {language_code}")
+
+        presentation_messages = config.get("presentation_messages", {})
+        message_data = presentation_messages.get(target_lang)
+
+        if message_data and isinstance(message_data, dict) and "text" in message_data:
+            reply = message_data["text"]
+        elif isinstance(message_data, str):
+            reply = message_data
+        else:
+            # Fallback to English if target lang not found
+            logger.warning(f"No presentation message found for {target_lang}, falling back to en-US")
+            fallback_data = presentation_messages.get("en-US", {})
+            if isinstance(fallback_data, dict):
+                reply = fallback_data.get("text", "Hello")
+            elif isinstance(fallback_data, str):
+                reply = fallback_data
+            else:
+                reply = "Hello"
     else:
         messages = config.get("welcome_messages", {})        
         logger.debug("Using welcome_messages")    
-        reply = get_message_for_language(messages, language_code, "Welcome!")
+        reply = messages.get(language_code, messages.get("en", "Welcome!"))
         
     logger.debug("reply_text: %s", reply)
     response = {

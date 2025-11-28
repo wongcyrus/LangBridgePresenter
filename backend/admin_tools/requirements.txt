@@ -10,5 +10,4 @@ google-adk
 python-pptx
 pandas
 openpyxl
-pandas
-openpyxl
+PyYAML

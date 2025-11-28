@@ -1,11 +1,33 @@
 #!/bin/bash
 
 VENV_DIR=".venv"
+PYTHON_CMD="python3"
+
+# Prefer Python 3.12
+if [ -f "/usr/local/bin/python3.12" ]; then
+    PYTHON_CMD="/usr/local/bin/python3.12"
+elif command -v python3.12 &>/dev/null; then
+    PYTHON_CMD="python3.12"
+fi
+
+echo "Using Python: $PYTHON_CMD"
+
+# Check if venv exists and check its version
+if [ -d "$VENV_DIR" ]; then
+    VENV_VER=$("$VENV_DIR/bin/python" --version 2>&1 | awk '{print $2}')
+    TARGET_VER=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
+    
+    if [ "$VENV_VER" != "$TARGET_VER" ]; then
+        echo "Virtual environment version ($VENV_VER) does not match target version ($TARGET_VER)."
+        echo "Recreating virtual environment..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment in $VENV_DIR..."
-    python3 -m venv "$VENV_DIR"
+    echo "Creating virtual environment in $VENV_DIR using $PYTHON_CMD..."
+    $PYTHON_CMD -m venv "$VENV_DIR"
 fi
 
 # Activate virtual environment

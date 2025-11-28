@@ -67,16 +67,11 @@ def config(request):
             
             # Fallback if cache completely empty (at least provide English context)
             if not latest_languages:
-                 latest_languages = {"en": {"text": context}}
-        
-        # Update general config in Backend Firestore (langbridge_config)
-        # If presentation_messages is not provided but context is, use context for 'en'
-        backend_presentation_messages = request_json.get("presentation_messages", {})
-        if not backend_presentation_messages and context:
-            backend_presentation_messages = {"en": context}
+                 latest_languages = {"en-US": {"text": context}}       
+
 
         config_data = {
-            "presentation_messages": backend_presentation_messages,
+            "presentation_messages": latest_languages,
             "welcome_messages": request_json.get("welcome_messages", {}),
             "goodbye_messages": request_json.get("goodbye_messages", {}),
             "recommended_questions": request_json.get(
