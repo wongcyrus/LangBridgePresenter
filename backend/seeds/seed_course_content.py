@@ -156,7 +156,7 @@ def load_slides_structure(json_path):
         
         slides_data = []
         for slide in sorted_slides:
-            note = slide.get("original_notes", "") or slide.get("note", "")
+            note = slide.get("note", "") or slide.get("original_notes", "")
             slides_data.append({
                 "slide_number": str(slide.get("slide_index")),
                 "context": note 
