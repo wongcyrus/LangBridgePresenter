@@ -91,7 +91,7 @@ def talk_stream(request):
             presenter_id = userParams
     # presenter_id is now extracted consistently
 
-    # Read presenter context from Firestore
+    # Read presenter context from Firestore (lazy load all_slides)
     presenter_context = {}
     if presenter_id:
         try:
@@ -101,7 +101,34 @@ def talk_stream(request):
             doc = presenter_ref.get()
             if doc.exists:
                 presenter_context = doc.to_dict()
-                logger.info(f"Loaded presenter context for {presenter_id}: {presenter_context}")
+                logger.info(f"Loaded presenter context for {presenter_id}")
+                
+                # Lazy load all_slides from client Firestore if needed
+                course_id = presenter_context.get("current_course_id")
+                presentation_id = presenter_context.get("current_presentation_id")
+                
+                if course_id and presentation_id:
+                    try:
+                        client_project_id = os.environ.get("CLIENT_FIRESTORE_PROJECT_ID", "ai-presenter-client")
+                        client_db = firestore.Client(
+                            project=client_project_id,
+                            database=os.environ.get("CLIENT_FIRESTORE_DATABASE_ID", "(default)")
+                        )
+                        
+                        slides_ref = client_db.collection('presentation_broadcast').document(course_id)\
+                                              .collection('presentations').document(presentation_id)\
+                                              .collection('slides')
+                        
+                        all_slides = {}
+                        slides_docs = slides_ref.stream()
+                        for slide_doc in slides_docs:
+                            slide_data = slide_doc.to_dict()
+                            all_slides[slide_doc.id] = slide_data
+                        
+                        presenter_context["all_slides"] = all_slides
+                        logger.info(f"Lazy loaded {len(all_slides)} slides for presentation {presentation_id}")
+                    except Exception as slides_e:
+                        logger.warning(f"Failed to lazy load slides: {slides_e}")
             else:
                 logger.info(f"No presenter context found for {presenter_id}")
         except Exception as e:

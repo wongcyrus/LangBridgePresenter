@@ -209,37 +209,22 @@ def config(request):
                 f"Successfully broadcasted live slide updates to client project {client_project_id}.")
 
             # C. Update Presenter Context (Backend DB)
-            # Save current course, presentation, slide, and ALL slides from the presentation
-            # This context will be loaded by talk-stream to provide the agent with full presentation context
+            # Save current course, presentation, slide pointers for lazy loading
+            # talk-stream will fetch all_slides on-demand when needed
             # REQUIRES both course_id and presenter_id
             logger.debug(f"Before presenter context update - course_id: {course_id}, presenter_id: {presenter_id}")
             if presenter_id and course_id:
                 try:
-                    # Load all slides from the presentation
-                    slides_ref = client_db.collection('presentation_broadcast').document(course_id)\
-                                          .collection('presentations').document(safe_ppt_id)\
-                                          .collection('slides')
-                    
-                    all_slides = {}
-                    slides_docs = slides_ref.stream()
-                    for slide_doc in slides_docs:
-                        slide_data = slide_doc.to_dict()
-                        slide_id = slide_doc.id
-                        all_slides[slide_id] = slide_data
-                    
-                    logger.info(f"Loaded {len(all_slides)} slides for presentation {safe_ppt_id}")
-                    
                     presenter_update = {
                         "current_course_id": course_id,
                         "current_presentation_id": safe_ppt_id,
                         "current_slide_id": str(page_number),
                         "current_slide_languages": latest_languages,
-                        "all_slides": all_slides,
                         "updated_at": firestore.SERVER_TIMESTAMP
                     }
                     presenter_ref = db.collection('presenters').document(presenter_id)
                     presenter_ref.set(presenter_update, merge=True)
-                    logger.info(f"Updated presenter {presenter_id} context with {len(all_slides)} slides, current slide: {page_number}")
+                    logger.info(f"Updated presenter {presenter_id} context - current slide: {page_number}")
                 except Exception as presenter_e:
                     logger.error(f"Failed to update presenter context: {presenter_e}", exc_info=True)
             elif presenter_id and not course_id:
