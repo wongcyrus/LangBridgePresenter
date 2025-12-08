@@ -49,40 +49,61 @@ def config(request):
         latest_languages = request_json.get("latest_languages")
         context = request_json.get("context")
 
-        # Extract presenter_id using the same logic as in talk-stream
+        # Extract presenter_id from userParams
         userParams = request_json.get("userParams", {})
-        presenter_id = None
-        if isinstance(userParams, dict):
-            presenter_id = userParams.get("presenterId")
-        elif isinstance(userParams, str):
-            if "-" in userParams:
-                parts = userParams.split("-")
-                if len(parts) > 0:
-                    presenter_id = parts[0]
-            else:
-                presenter_id = userParams
-
+        logger.debug(f"Raw userParams received: {userParams} (type: {type(userParams)})")
+        presenter_id = userParams.get("presenterId") if isinstance(userParams, dict) else None
         logger.debug(f"Extracted presenter_id: {presenter_id}")
 
-        # If latest_languages is missing but we have context (e.g. from VBA client),
-        # attempt to rehydrate from cache.
-        if not latest_languages and context:
-            latest_languages = {}
-            # Use default languages for rehydration
-            target_langs = ["en-US", "zh-CN", "yue-HK"]
+        # If latest_languages is missing, try to fetch from broadcast document first
+        if not latest_languages:
+            if course_id and ppt_filename and page_number is not None:
+                try:
+                    # Try to fetch from client broadcast document
+                    client_project_id = os.environ.get("CLIENT_PROJECT_ID")
+                    if client_project_id:
+                        client_db = firestore.Client(project=client_project_id, database="(default)")
+                        
+                        # Normalize ppt filename
+                        safe_ppt_id = ppt_filename
+                        try:
+                            _ppt_norm = os.path.splitext(ppt_filename.lower())[0]
+                            for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
+                                if _ppt_norm.endswith(_s):
+                                    _ppt_norm = _ppt_norm[: -len(_s)]
+                            safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_')
+                        except:
+                            safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_')
+                        
+                        slide_ref = client_db.collection('presentation_broadcast').document(course_id)\
+                                             .collection('presentations').document(safe_ppt_id)\
+                                             .collection('slides').document(str(page_number))
+                        slide_doc = slide_ref.get()
+                        
+                        if slide_doc.exists:
+                            slide_data = slide_doc.to_dict()
+                            latest_languages = slide_data.get("languages", {})
+                            logger.info(f"✅ Fetched languages from broadcast: {list(latest_languages.keys())}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch from broadcast document: {e}")
             
-            logger.info(f"Rehydrating from cache for languages: {target_langs}")
-            for lang in target_langs:
-                msg, audio_url = get_cached_presentation_message(lang, context)
-                if msg:
-                    lang_data = {"text": msg}
-                    if audio_url:
-                        lang_data["audio_url"] = audio_url
-                    latest_languages[lang] = lang_data
-            
-            # Fallback if cache completely empty (at least provide English context)
-            if not latest_languages:
-                 latest_languages = {"en-US": {"text": context}}       
+            # Fallback to cache rehydration if broadcast fetch failed
+            if not latest_languages and context:
+                latest_languages = {}
+                target_langs = ["en-US", "zh-CN", "yue-HK"]
+                
+                logger.info(f"Rehydrating from cache for languages: {target_langs}")
+                for lang in target_langs:
+                    msg, audio_url = get_cached_presentation_message(lang, context)
+                    if msg:
+                        lang_data = {"text": msg}
+                        if audio_url:
+                            lang_data["audio_url"] = audio_url
+                        latest_languages[lang] = lang_data
+                
+                # Final fallback if cache completely empty
+                if not latest_languages:
+                     latest_languages = {"en-US": {"text": context}}       
 
 
         config_data = {
@@ -146,13 +167,34 @@ def config(request):
             ppt_ref = client_db.collection('presentation_broadcast').document(course_id)\
                                .collection('presentations').document(safe_ppt_id)
 
-            # Batch the registry updates if possible, or just sequential
+            # Update presentation timestamp
             ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
-            ppt_ref.collection('slides').document(str(page_number)).set({
-                "languages": latest_languages,
-                "page_number": page_number
-            }, merge=True)
-            logger.info("Updated slide registry.")
+            
+            # Only update slide if it doesn't exist or if context has changed
+            slide_ref = ppt_ref.collection('slides').document(str(page_number))
+            existing_slide = slide_ref.get()
+            
+            should_update = False
+            if not existing_slide.exists:
+                logger.info(f"Slide {page_number} doesn't exist, creating it")
+                should_update = True
+            else:
+                # Check if context has changed
+                existing_data = existing_slide.to_dict()
+                existing_context = existing_data.get("source_context", "")
+                if existing_context != context:
+                    logger.info(f"Slide {page_number} context changed, updating")
+                    should_update = True
+                else:
+                    logger.info(f"Slide {page_number} unchanged, skipping update")
+            
+            if should_update:
+                slide_ref.set({
+                    "languages": latest_languages,
+                    "page_number": page_number,
+                    "source_context": context  # Store context to detect changes
+                }, merge=True)
+                logger.info("Updated slide registry.")
 
             # B. Update Live Pointer (The "Current State")
             # This tells all connected clients where to look
@@ -170,6 +212,7 @@ def config(request):
             # Save current course, presentation, slide, and ALL slides from the presentation
             # This context will be loaded by talk-stream to provide the agent with full presentation context
             # REQUIRES both course_id and presenter_id
+            logger.debug(f"Before presenter context update - course_id: {course_id}, presenter_id: {presenter_id}")
             if presenter_id and course_id:
                 try:
                     # Load all slides from the presentation

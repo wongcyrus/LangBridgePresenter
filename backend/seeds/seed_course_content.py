@@ -97,17 +97,21 @@ def load_cdktf_outputs():
 def upload_to_bucket(bucket_name, source_file_path, destination_blob_name):
     """
     Uploads a file to the bucket and returns the public URL.
+    Skips upload if file already exists.
     """
     try:
         storage_client = storage.Client()
         bucket = storage_client.bucket(bucket_name)
         blob = bucket.blob(destination_blob_name)
 
-        blob.upload_from_filename(source_file_path)
+        if blob.exists():
+            url = blob.public_url
+            logger.info(f"✅ Image already exists: {destination_blob_name}, skipping upload")
+            return url
         
-        # Construct public URL (assuming the bucket allows public access or we use the media link)
+        blob.upload_from_filename(source_file_path)
         url = blob.public_url
-        logger.info(f"✅ Uploaded {source_file_path} to {destination_blob_name}. URL: {url}")
+        logger.info(f"✅ Uploaded {source_file_path} to {destination_blob_name}")
         return url
     except Exception as e:
         logger.error(f"❌ Failed to upload {source_file_path} to bucket: {e}")
@@ -299,7 +303,9 @@ def process_slide_locally(
                 bucket = storage_client.bucket(bucket_name)
                 blob = bucket.blob(filename)
                 
-                if not blob.exists():
+                if blob.exists():
+                    logger.info(f"[{lang}] ✅ MP3 already exists: {filename}, skipping generation")
+                else:
                     logger.info(f"[{lang}] Generating TTS...")
                     tts_client = texttospeech.TextToSpeechClient()
                     voice = course_utils.get_voice_params(course_id, lang)
@@ -575,20 +581,17 @@ def main():
             # Get pre-generated messages for this slide
             pre_gen = slide_notes_map.get(slide_num, {})
             
-            # Prepare visual links
+            # Prepare visual links (parallel upload)
             visual_links = {}
             if bucket_name:
-                # Clean up basename for visual folder search
-                # e.g. "cloudtech_en_with_visuals" -> "cloudtech"
                 base_search_name = base_name
                 image_filename = f"slide_{slide_num}_reimagined.png"
                 
-                for lang_code in args.languages:
+                def upload_visual_for_language(lang_code):
                     suffix = LANG_VISUAL_SUFFIX_MAP.get(lang_code, lang_code)
                     visuals_dir_candidates = [
                         os.path.join(generate_dir, f"{base_search_name}_{suffix}_visuals"),
                         os.path.join(generate_dir, f"{base_search_name}_visuals"),
-                        # Try common variations
                         os.path.join(generate_dir, f"{base_search_name}_en_visuals"), 
                     ]
                     
@@ -602,6 +605,13 @@ def main():
                     if found_image:
                         blob_name = f"generated_visuals/{base_search_name}/{lang_code}/{image_filename}"
                         url = upload_to_bucket(bucket_name, found_image, blob_name)
+                        return (lang_code, url)
+                    return (lang_code, None)
+                
+                with ThreadPoolExecutor(max_workers=min(len(args.languages), 5)) as executor:
+                    futures = {executor.submit(upload_visual_for_language, lang): lang for lang in args.languages}
+                    for future in as_completed(futures):
+                        lang_code, url = future.result()
                         if url:
                             visual_links[lang_code] = url
 

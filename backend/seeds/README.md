@@ -42,10 +42,10 @@ You can customize the seeding process for different courses or data sets:
 
 ```bash
 python seeds/seed_course_content.py \
-  --course-id "physics-101" \
-  --course-title "Physics 101" \
-  --data-dir "physics_data" \
-  --languages "en-US" "es-ES"
+  --course-id "showcase" \
+  --course-title "Showcase" \
+  --data-dir "generate" \
+  --languages "en-US" "yue-HK" "zh-CN"
 ```
 
 **Example: Seeding the IT523504Q Course**

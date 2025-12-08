@@ -310,6 +310,9 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     courseId = GetCourseId()
     presenterId = GetPresenterId()
     
+    Debug.Print "[SetWelcome] Course ID: '" & courseId & "'"
+    Debug.Print "[SetWelcome] Presenter ID: '" & presenterId & "'"
+    
     ' Validate API key
     If apiKey = "" Then
         Exit Sub
@@ -321,6 +324,7 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     ' Prepare payload with the speaker notes, course ID, and presenter ID
     Dim bodyString As String
     bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId, pptName, slideNum, presenterId)
+    Debug.Print "[SetWelcome] Payload (first 500 chars): " & Left$(bodyString, 500)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -409,6 +413,9 @@ Public Sub SetPresentation(ByVal presentation As String)
     slideNotes = GetCurrentSlideNotes(slideNum)
     Debug.Print "Context/Notes content: " & slideNotes
     
+    Debug.Print "[SetPresentation] Course ID: '" & courseId & "'"
+    Debug.Print "[SetPresentation] Presenter ID: '" & presenterId & "'"
+    
     Dim pptName As String
     pptName = ""
     If Not ActivePresentation Is Nothing Then
@@ -418,6 +425,7 @@ Public Sub SetPresentation(ByVal presentation As String)
     ' Prepare payload with the speaker notes, course ID, and presenter ID
     Dim bodyString As String
     bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId, pptName, slideNum, presenterId)
+    Debug.Print "[SetPresentation] Payload (first 500 chars): " & Left$(bodyString, 500)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
