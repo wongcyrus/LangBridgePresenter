@@ -20,6 +20,7 @@ Detailed documentation for each component can be found in the `docs/` directory:
 - **Course-level configuration**: Manage languages, voices, and content caching per course.
   - See [Admin Tools & Caching](docs/ADMIN_TOOLS.md) for how to set up courses.
   - See [VBA PowerPoint Client](docs/CLIENT_VBA.md) for how to configure your presentations with a `CourseID`.
+- **Multiple Presenter Support**: Specify comma-separated presenter IDs to enable collaborative presentations with multiple AI agents sharing the same context.
 
 ## 🎬 Demo
 
@@ -59,6 +60,9 @@ cd backend/admin_tools
 
 # Create a demo course
 python manage_courses.py update --id "demo" --title "Demo Course" --langs "en-US,zh-CN,yue-HK"
+
+# Create a presenter
+python manage_presenters.py create --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
 
 # Create an API key for a digital human
 python create_api_key.py 12345678 "Cyrus"

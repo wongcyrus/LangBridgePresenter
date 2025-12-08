@@ -11,13 +11,16 @@ The VBA Client integrates directly into Microsoft PowerPoint to provide real-tim
 
 ## Configuration
 
-### API Key, Base URL, and Course ID Setup
+### API Key, Base URL, Course ID, and Presenter ID Setup
 The client loads configuration from `api_config.txt` or the Windows Registry.
 
 **`api_config.txt` Format:**
 - **Line 1**: API Key (Required)
 - **Line 2**: Base URL (Optional, defaults to registry/prompt)
 - **Line 3**: Course ID (Optional, enables Course-specific content/languages)
+- **Line 4**: Presenter ID (Optional, enables presenter context for AI agent)
+  - Single presenter: `summer`
+  - Multiple presenters: `cyber,honey,summer` (comma-separated, no spaces)
 
 **Search Order:**
 1. **`api_config.txt`** in the presentation's folder.
@@ -26,7 +29,10 @@ The client loads configuration from `api_config.txt` or the Windows Registry.
     - `HKCU\Software\LangBridge\ApiKey`
     - `HKCU\Software\LangBridge\BaseUrl`
     - `HKCU\Software\LangBridge\CourseId`
+    - `HKCU\Software\LangBridge\PresenterId`
 4. **User Prompt**: If Key/URL not found, asks the user.
+
+**Multiple Presenters**: When multiple presenter IDs are specified (comma-separated), all presenters receive slide context updates, enabling collaborative presentations with multiple AI agents.
 
 ### Macros
 The integration relies on a Class Module (`CAppEvents`) to handle application events.

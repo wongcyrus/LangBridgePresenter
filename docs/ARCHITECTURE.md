@@ -71,6 +71,7 @@ graph TD
 1. **Context Update**:
    - **PowerPoint**: When a slide changes, the VBA macro extracts speaker notes and sends them to the `/config` endpoint.
    - **Monitor**: When screen text changes, the Python monitor sends the new text to the backend.
+   - **Presenter Context**: The `/config` endpoint updates presenter documents in Firestore with current slide information.
    
 2. **Caching (Optimization)**:
    - The backend checks if a response for the specific content (hash of notes/text) already exists in Firestore.
@@ -80,7 +81,20 @@ graph TD
 3. **Interaction**:
    - Users ask questions via the chat interface.
    - The `talk-stream` function retrieves the current context (set by clients).
+   - It loads presenter context from Firestore, including all slides in the presentation.
    - It appends the user question and streams the AI's response back.
+
+## Presenter System
+
+The system supports multiple AI presenters that can share presentation context:
+
+- **Presenter Configuration**: Each presenter has a unique ID, name, language preference, and background.
+- **Multiple Presenters**: Clients can specify comma-separated presenter IDs (e.g., `cyber,honey,summer`) to enable collaborative presentations.
+- **Context Sharing**: When multiple presenters are specified:
+  - All presenters receive slide context updates
+  - The first presenter's language and settings are used for welcome messages
+  - The AI agent has access to all presenters' contexts
+- **Lazy Loading**: The `talk-stream` function lazy-loads all slides from the presentation on-demand, providing full context to the AI agent.
 
 ## Security
 - **API Keys**: All client requests must be authenticated with a valid API key.

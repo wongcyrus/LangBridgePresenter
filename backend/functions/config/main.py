@@ -49,11 +49,16 @@ def config(request):
         latest_languages = request_json.get("latest_languages")
         context = request_json.get("context")
 
-        # Extract presenter_id from userParams
+        # Extract presenter_id from userParams (supports comma-separated IDs)
         userParams = request_json.get("userParams", {})
         logger.debug(f"Raw userParams received: {userParams} (type: {type(userParams)})")
-        presenter_id = userParams.get("presenterId") if isinstance(userParams, dict) else None
-        logger.debug(f"Extracted presenter_id: {presenter_id}")
+        presenter_id_raw = userParams.get("presenterId") if isinstance(userParams, dict) else None
+        
+        # Parse comma-separated presenter IDs
+        presenter_ids = []
+        if presenter_id_raw:
+            presenter_ids = [pid.strip() for pid in presenter_id_raw.split(",") if pid.strip()]
+        logger.debug(f"Extracted presenter_ids: {presenter_ids}")
 
         # If latest_languages is missing, try to fetch from broadcast document first
         if not latest_languages:
@@ -211,26 +216,29 @@ def config(request):
             # C. Update Presenter Context (Backend DB)
             # Save current course, presentation, slide pointers for lazy loading
             # talk-stream will fetch all_slides on-demand when needed
-            # REQUIRES both course_id and presenter_id
-            logger.debug(f"Before presenter context update - course_id: {course_id}, presenter_id: {presenter_id}")
-            if presenter_id and course_id:
-                try:
-                    presenter_update = {
-                        "current_course_id": course_id,
-                        "current_presentation_id": safe_ppt_id,
-                        "current_slide_id": str(page_number),
-                        "current_slide_languages": latest_languages,
-                        "updated_at": firestore.SERVER_TIMESTAMP
-                    }
-                    presenter_ref = db.collection('presenters').document(presenter_id)
-                    presenter_ref.set(presenter_update, merge=True)
-                    logger.info(f"Updated presenter {presenter_id} context - current slide: {page_number}")
-                except Exception as presenter_e:
-                    logger.error(f"Failed to update presenter context: {presenter_e}", exc_info=True)
-            elif presenter_id and not course_id:
-                logger.warning(f"Presenter ID provided ({presenter_id}) but missing Course ID - skipping presenter context update")
-            elif course_id and not presenter_id:
-                logger.warning(f"Course ID provided ({course_id}) but missing Presenter ID - skipping presenter context update")
+            # REQUIRES both course_id and presenter_ids
+            logger.debug(f"Before presenter context update - course_id: {course_id}, presenter_ids: {presenter_ids}")
+            if presenter_ids and course_id:
+                presenter_update = {
+                    "current_course_id": course_id,
+                    "current_presentation_id": safe_ppt_id,
+                    "current_slide_id": str(page_number),
+                    "current_slide_languages": latest_languages,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                }
+                
+                # Update all presenters in the list
+                for presenter_id in presenter_ids:
+                    try:
+                        presenter_ref = db.collection('presenters').document(presenter_id)
+                        presenter_ref.set(presenter_update, merge=True)
+                        logger.info(f"Updated presenter {presenter_id} context - current slide: {page_number}")
+                    except Exception as presenter_e:
+                        logger.error(f"Failed to update presenter {presenter_id} context: {presenter_e}", exc_info=True)
+            elif presenter_ids and not course_id:
+                logger.warning(f"Presenter IDs provided ({presenter_ids}) but missing Course ID - skipping presenter context update")
+            elif course_id and not presenter_ids:
+                logger.warning(f"Course ID provided ({course_id}) but missing Presenter IDs - skipping presenter context update")
 
         except Exception as b_e:
             logger.error(

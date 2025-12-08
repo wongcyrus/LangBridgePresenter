@@ -7,4 +7,6 @@ your-presenter-id-here
 # Line 2: Base URL (required)
 # Line 3: Course ID (required for presenter context)
 # Line 4: Presenter ID (required for presenter context)
+#         - Single presenter: cyber, honey, ice, summer, tune
+#         - Multiple presenters (comma-separated): cyber,honey or summer,ice,tune
 # Both Course ID and Presenter ID must be provided for the AI agent to have full presentation context

@@ -106,7 +106,38 @@ python main.py --pptx /path/to/deck.pptx --languages "en-US,zh-CN,yue-HK"
 5. Saves the result to Firestore (tagged with `course_id`).
 6. Generates and uploads TTS audio (using course-specific voice settings).
 
-### 4. `create_api_key.py` / `delete_api_key.py`
+### 4. `manage_presenters.py`
+
+Manages Presenter Configurations (name, language, background).
+
+**Usage:**
+
+```bash
+# Create or Update a presenter
+python manage_presenters.py create --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
+
+# Batch import from JSON files
+python manage_presenters.py batch-import --dir ./presenters/
+
+# List all presenters
+python manage_presenters.py list
+```
+
+**Multiple Presenters in Presentations:**
+
+When configuring your VBA client or Python client, you can specify multiple presenters using comma-separated IDs:
+
+```
+# In api_config.txt (Line 4)
+cyber,honey,summer
+```
+
+This allows:
+- Multiple AI agents to share the same presentation context
+- All specified presenters receive slide updates
+- Collaborative presentations with different AI personalities
+
+### 5. `create_api_key.py` / `delete_api_key.py`
 
 **Purpose**: Manage API keys for the API Gateway.
 
