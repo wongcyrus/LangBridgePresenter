@@ -310,17 +310,14 @@ def process_slide_locally(
                     tts_client = texttospeech.TextToSpeechClient()
                     voice = course_utils.get_voice_params(course_id, lang)
                     
-                    clean_text = utils.sanitize_text_for_tts(generated)
-                    synthesis_input = texttospeech.SynthesisInput(text=clean_text)
                     audio_config = texttospeech.AudioConfig(
                         audio_encoding=texttospeech.AudioEncoding.MP3,
                         speaking_rate=1.0
                     )
                     
-                    tts_response = tts_client.synthesize_speech(
-                        input=synthesis_input,
-                        voice=voice,
-                        audio_config=audio_config
+                    # Use retry logic for TTS synthesis
+                    tts_response = utils.synthesize_speech_with_retry(
+                        tts_client, generated, voice, audio_config
                     )
                     
                     blob.upload_from_string(

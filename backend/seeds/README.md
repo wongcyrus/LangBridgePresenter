@@ -41,7 +41,7 @@ You can customize the seeding process for different courses or data sets:
 **Example: Seeding a Physics Course (with /notes as data-dir)**
 
 ```bash
-python seeds/seed_course_content.py \
+python seed_course_content.py \
   --course-id "showcase" \
   --course-title "Showcase" \
   --data-dir "generate" \
@@ -51,7 +51,7 @@ python seeds/seed_course_content.py \
 **Example: Seeding the IT523504Q Course**
 
 ```bash
-python seeds/seed_course_content.py \
+python seed_course_content.py \
   --course-id "IT523504Q" \
   --course-title "Certificate in Data Centre Management and Operations Foundation for Public Sector" \
   --data-dir "/home/developer/Documents/data-disk/gemini-powerpoint-sage/notes/generate"
