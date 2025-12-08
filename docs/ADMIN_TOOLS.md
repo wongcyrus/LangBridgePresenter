@@ -1,61 +1,68 @@
-# Admin Tools & Caching
+# Admin Tools & Content Management
 
-The `backend/admin_tools` directory contains scripts for managing the system's cache, courses, and configuration.
+The `backend/admin_tools` directory contains scripts for managing courses, presenters, and system configuration.
 
-## Content-Based Caching Logic
+## Content Delivery Architecture
 
-The system uses a robust caching strategy to ensure fast response times during presentations.
+The system uses a **registry-based architecture** for presentation content delivery.
 
-### The Problem
-Using slide numbers as keys is brittle. Reordering slides invalidates the cache.
+### How It Works
+1. **Seeding Phase**: All presentation content (text, audio, visuals) is pre-generated and stored in the Firestore registry
+2. **Live Presentation**: VBA client sends slide changes → Backend fetches complete data from registry → Broadcasts to web clients
+3. **Web Client**: Receives live updates or browses the registry for slide content
 
-### The Solution
-Use the **content** of the speaker notes to generate the cache key.
-
-**Key Formula**: `v1:{language}:{hash(speaker_notes_content)}`
+**Registry Structure**: `presentation_broadcast/{courseId}/presentations/{pptId}/slides/{slideNum}`
 
 This ensures:
-- **Reorder-Proof**: Content determines identity, not position.
-- **Insert-Proof**: New slides don't shift existing IDs.
-- **De-duplication**: Identical notes share the same cache.
+- **Instant Delivery**: No runtime AI generation needed
+- **Consistent Quality**: All content is pre-reviewed and refined
+- **Reliable Audio**: Audio URLs are guaranteed to exist
+- **Simple Architecture**: Single source of truth in the registry
 
 ## Tools
 
-### 1. Excel Cache Editor (NEW)
+### 1. Content Seeding (`seed_course_content.py`)
 
-Easily view and edit cached presentation messages using Excel. This allows content creators to refine AI-generated text without touching the database directly.
+Pre-generates all presentation content and populates the Firestore registry.
 
-**Location**: `backend/admin_tools/`
+**Location**: `backend/seeds/`
 
-#### Export to Excel
-Export the current cache for a specific course to an `.xlsx` file.
+**Purpose**: Converts pre-translated slide notes and visuals into a complete presentation registry with text, audio, and visual links.
 
+**Input Requirements**:
+- Progress JSON files with slide notes (e.g., `{basename}_en_progress.json`, `{basename}_zh-CN_progress.json`)
+- Visual images in folders (e.g., `{basename}_en_visuals/slide_0_reimagined.png`)
+- PowerPoint files (for metadata)
+
+**Usage**:
 ```bash
-# From backend/admin_tools/
-python export_cache_to_excel.py --course-id "course_101" --output my_cache.xlsx
+cd backend/seeds
+
+# Seed a presentation
+python seed_course_content.py \
+  --course-id showcase \
+  --course-title "Showcase" \
+  --data-dir generate \
+  --languages en-US zh-CN yue-HK
+
+# Skip course creation if it already exists
+python seed_course_content.py --skip-create --course-id showcase --data-dir generate
 ```
 
-**Columns**:
-- `Cache Key` (Do Not Edit): Unique ID.
-- `Language`: The target language (e.g., `en`, `zh`).
-- `Speaker Notes`: Context for reference.
-- `Generated Message`: **Edit this column** to change what the AI says.
+**What it does**:
+1. Creates/updates the course in Firestore
+2. Loads pre-translated text from progress JSON files
+3. Generates TTS audio for each language (or uses existing)
+4. Uploads audio files to Cloud Storage
+5. Uploads visual images to Cloud Storage
+6. Writes complete slide data to the registry
+7. Sets the live pointer to the first slide
 
-#### Import from Excel
-Import the modified Excel file back into the system.
-
-```bash
-# From backend/admin_tools/
-python import_cache_from_excel.py --course-id "course_101" --file my_cache.xlsx
-```
-
-**What happens on import?**
-1. The script compares the Excel message with the database.
-2. If the text has changed:
-   - Updates the message in Firestore.
-   - **Automatically regenerates** the TTS audio (MP3).
-   - Uploads the new audio to Cloud Storage.
-   - Updates the `audio_url` in the cache.
+**Features**:
+- Parallel processing for speed
+- Idempotent (skips existing files)
+- Supports refined progress files (`*_progress_refined.json`)
+- Automatic audio URL generation
 
 ### 2. `manage_courses.py`
 
@@ -73,38 +80,37 @@ python manage_courses.py update --id "course_101" --title "Intro to AI" --langs 
 python manage_courses.py list
 ```
 
-### 3. `preload_presentation_messages` (Presentation Preloader)
+### 3. Content Preparation Workflow
 
-**Location**: `backend/presentation-preloader/`
+Before seeding, you need to prepare the content files:
 
-Pre-generates AI presentation messages from a PowerPoint file and caches them.
+**Step 1: Extract Slide Notes**
+- Export speaker notes from PowerPoint to text files
+- Organize by language (e.g., `presentation_en.txt`, `presentation_zh-CN.txt`)
 
-**Usage:**
-
-```bash
-cd backend/presentation-preloader
-
-# Install dependencies (first time)
-pip install -r requirements.txt
-
-# Update configuration (if infrastructure changed)
-./update_config.sh
-
-# Run the tool
-# Using Course Config (Recommended)
-python main.py --pptx /path/to/deck.pptx --course-id "course_101"
-
-# Manual Language Selection
-python main.py --pptx /path/to/deck.pptx --languages "en-US,zh-CN,yue-HK"
+**Step 2: Generate Progress Files**
+- Use translation tools or AI to create progress JSON files
+- Format: `{basename}_{lang}_progress.json`
+- Structure:
+```json
+{
+  "slides": {
+    "0": {
+      "slide_index": 0,
+      "note": "Translated slide text here"
+    }
+  }
+}
 ```
 
-**Process**:
-1. Reads the `.pptx` file.
-2. Extracts speaker notes from every slide.
-3. Computes the hash of the notes.
-4. Checks Firestore (`langbridge_presentation_cache`). If missing, calls the AI to generate a "presentation script" or summary.
-5. Saves the result to Firestore (tagged with `course_id`).
-6. Generates and uploads TTS audio (using course-specific voice settings).
+**Step 3: Prepare Visuals**
+- Create or generate slide images
+- Organize in folders: `{basename}_{lang}_visuals/`
+- Naming: `slide_{num}_reimagined.png`
+
+**Step 4: Run Seeding**
+- Place all files in the `backend/seeds/generate/` directory
+- Run `seed_course_content.py` as shown above
 
 ### 4. `manage_presenters.py`
 

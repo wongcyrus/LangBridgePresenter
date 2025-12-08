@@ -65,13 +65,12 @@ Located in `backend/functions/`.
 
 ## Data Model (Firestore)
 
-The backend uses Firestore for persistence.
+The backend uses two Firestore databases:
 
-- **Collection**: `langbridge_presentation_cache`
-    - Stores pre-generated messages for slide content.
-    - **Key Format**: `v1:{language}:{hash(content)}`
+### Backend Database (`langbridge`)
 - **Collection**: `courses`
     - Stores course-specific configurations (languages, voices).
+    - **Fields**: `id`, `title`, `supported_languages`, `voice_configs`
 - **Collection**: `presenters`
     - Stores presenter-specific context and state.
     - **Fields**:
@@ -84,8 +83,65 @@ The backend uses Firestore for persistence.
         - `current_slide_id`: Current slide number
         - `current_slide_languages`: Current slide content in all languages
     - **Multiple Presenters**: The system supports comma-separated presenter IDs, allowing multiple AI agents to share the same presentation context.
+- **Collection**: `langbridge_config`
+    - Stores system configuration and messages.
 - **Collection**: `sessions` (implied)
     - Stores active conversation state.
+
+### Client Database (`default`)
+- **Collection**: `presentation_broadcast`
+    - **Document**: `{courseId}` - Live pointer to current slide
+        - **Fields**: `current_presentation_id`, `current_slide_id`, `latest_languages`, `updated_at`
+    - **Subcollection**: `presentations/{pptId}` - Presentation registry
+        - **Subcollection**: `slides/{slideNum}` - Individual slide data
+            - **Fields**:
+                - `languages`: Map of language codes to content
+                    - `{lang}`: `{text, audio_url, slide_link}`
+                - `page_number`: Slide number
+                - `source_context`: Original slide notes
+                - `updated_at`: Timestamp
+
+### Data Flow
+1. **Seeding**: Pre-generates all content and populates the registry
+2. **Live Presentation**: VBA sends slide changes → Backend fetches from registry → Updates live pointer
+3. **Web Client**: Listens to live pointer or browses registry for slide content
+
+## Content Seeding
+
+Before using the system, presentation content must be pre-generated and seeded into the registry.
+
+### Seeding Process
+
+Located in `backend/seeds/seed_course_content.py`.
+
+**Purpose**: Pre-generates all presentation content (text translations, audio files, visual links) and populates the Firestore registry.
+
+**Input**: 
+- Progress JSON files with pre-translated slide notes (e.g., `{basename}_en_progress.json`, `{basename}_zh-CN_progress.json`)
+- Visual images (e.g., `slide_0_reimagined.png`)
+- PowerPoint files (for metadata)
+
+**Output**:
+- Text content stored in Firestore registry
+- Audio files (MP3) uploaded to Cloud Storage
+- Visual images uploaded to Cloud Storage
+- Complete slide data in `presentation_broadcast/{courseId}/presentations/{pptId}/slides/{slideNum}`
+
+**Usage**:
+```bash
+cd backend/seeds
+python seed_course_content.py \
+  --course-id showcase \
+  --course-title "Showcase" \
+  --data-dir generate \
+  --languages en-US zh-CN yue-HK
+```
+
+**Features**:
+- Parallel processing for faster seeding
+- Skips existing audio/visual files (idempotent)
+- Supports refined progress files (`*_progress_refined.json`)
+- Sets live pointer to first slide after seeding
 
 ## Deployment
 

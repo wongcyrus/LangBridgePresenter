@@ -62,8 +62,9 @@ graph TD
     - Sends text changes to the backend to keep the AI aware of the visual context.
 
 ### 3. Admin Tools
-- **Preloader**: Scripts to pre-generate AI responses for presentation slides.
-- **Excel Cache Editor**: Tools to export cache to Excel for manual editing and re-importing.
+- **Seeding Script**: Pre-generates all presentation content (text, audio, visuals) and populates the registry.
+- **Course Management**: Tools to create and configure courses with language and voice settings.
+- **Presenter Management**: Tools to create and manage AI presenter profiles.
 - **Key Management**: Tools to generate and revoke API keys.
 
 ## Data Flow
@@ -73,10 +74,11 @@ graph TD
    - **Monitor**: When screen text changes, the Python monitor sends the new text to the backend.
    - **Presenter Context**: The `/config` endpoint updates presenter documents in Firestore with current slide information.
    
-2. **Caching (Optimization)**:
-   - The backend checks if a response for the specific content (hash of notes/text) already exists in Firestore.
-   - If yes, it returns the cached response (low latency).
-   - If no, it triggers the AI to generate a new response.
+2. **Registry-Based Content Delivery**:
+   - All presentation content (text, audio, visuals) is pre-generated during seeding.
+   - Content is stored in the presentation registry in Firestore.
+   - The backend fetches complete slide data from the registry when needed.
+   - No runtime AI generation for presentation slides (instant delivery).
 
 3. **Interaction**:
    - Users ask questions via the chat interface.

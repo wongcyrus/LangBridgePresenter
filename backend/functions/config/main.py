@@ -4,7 +4,6 @@ import os
 import sys
 import functions_framework
 from google.cloud import firestore
-from firestore_utils import get_cached_presentation_message
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -22,9 +21,16 @@ logger = logging.getLogger(__name__)
 logger.setLevel(_level)
 
 
+
+
+
 @functions_framework.http
 def config(request):
-    logger.debug("config invoked: method=%s", request.method)
+    logger.info("=" * 80)
+    logger.info("📥 CONFIG ENDPOINT INVOKED")
+    logger.info("=" * 80)
+    logger.debug(f"Request method: {request.method}")
+    logger.debug(f"Request headers: {dict(request.headers)}")
 
     if request.method != 'POST':
         logger.warning("method not allowed: %s", request.method)
@@ -39,6 +45,8 @@ def config(request):
             "Content-Type": "application/json"
         }
 
+    logger.debug(f"📦 Request payload keys: {list(request_json.keys())} ")
+
     try:
         db = firestore.Client(database="langbridge")
 
@@ -46,8 +54,28 @@ def config(request):
         course_id = request_json.get("courseId")
         ppt_filename = request_json.get("ppt_filename")
         page_number = request_json.get("page_number")
-        latest_languages = request_json.get("latest_languages")
         context = request_json.get("context")
+        
+        # slide_content: Map of language codes to content
+        # Format: {"en-US": {"text": "...", "audio_url": "...", "slide_link": "..."}}
+        # Accept both 'latest_languages' (new) and 'presentation_messages' (VBA legacy)
+        slide_content = request_json.get("latest_languages") or request_json.get("presentation_messages")
+        
+        logger.info(f"📋 Extracted Fields:")
+        logger.info(f"   courseId: {course_id}")
+        logger.info(f"   ppt_filename: {ppt_filename}")
+        logger.info(f"   page_number: {page_number}")
+        logger.info(f"   context length: {len(context) if context else 0} chars")
+        logger.info(f"   slide_content type: {type(slide_content)}")
+        logger.info(f"   slide_content value: {slide_content}")
+        logger.info(f"   slide_content bool: {bool(slide_content)}")
+        if slide_content:
+            logger.info(f"   slide_content languages: {list(slide_content.keys())}")
+            for lang, data in slide_content.items():
+                has_text = "text" in data if isinstance(data, dict) else False
+                has_audio = "audio_url" in data if isinstance(data, dict) else False
+                has_visual = "slide_link" in data if isinstance(data, dict) else False
+                logger.debug(f"      [{lang}] text={has_text}, audio={has_audio}, visual={has_visual}")
 
         # Extract presenter_id from userParams (supports comma-separated IDs)
         userParams = request_json.get("userParams", {})
@@ -60,12 +88,20 @@ def config(request):
             presenter_ids = [pid.strip() for pid in presenter_id_raw.split(",") if pid.strip()]
         logger.debug(f"Extracted presenter_ids: {presenter_ids}")
 
-        # If latest_languages is missing, try to fetch from broadcast document first
-        if not latest_languages:
+        # If slide_content not provided by VBA or is empty, fetch from registry
+        # This happens when VBA sends slide changes without pre-loaded content
+        # Check for None, empty dict, empty string, etc.
+        if not slide_content or (isinstance(slide_content, dict) and len(slide_content) == 0):
+            logger.info("🔍 Slide content not provided by VBA, fetching from registry...")
+            
             if course_id and ppt_filename and page_number is not None:
+                logger.debug(f"   Attempting registry fetch with: course={course_id}, ppt={ppt_filename}, page={page_number}")
                 try:
-                    # Try to fetch from client broadcast document
-                    client_project_id = os.environ.get("CLIENT_PROJECT_ID")
+                    # Fetch from client broadcast registry (seeded data)
+                    # Use the same env var name as set in CDKTF
+                    client_project_id = os.environ.get("CLIENT_FIRESTORE_PROJECT_ID", "ai-presenter-client")
+                    logger.debug(f"   Client project ID: {client_project_id}")
+                    
                     if client_project_id:
                         client_db = firestore.Client(project=client_project_id, database="(default)")
                         
@@ -76,43 +112,52 @@ def config(request):
                             for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
                                 if _ppt_norm.endswith(_s):
                                     _ppt_norm = _ppt_norm[: -len(_s)]
-                            safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_')
-                        except:
-                            safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_')
+                            # Normalize: replace slashes, backslashes, and spaces with underscores
+                            safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
+                            logger.debug(f"   Normalized PPT ID: {ppt_filename} → {safe_ppt_id}")
+                        except Exception as norm_e:
+                            safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_').replace(' ', '_')
+                            logger.warning(f"   Normalization failed: {norm_e}, using: {safe_ppt_id}")
+                        
+                        registry_path = f"presentation_broadcast/{course_id}/presentations/{safe_ppt_id}/slides/{page_number}"
+                        logger.info(f"   📂 Registry lookup:")
+                        logger.info(f"      Original filename: {ppt_filename}")
+                        logger.info(f"      Normalized ID: {safe_ppt_id}")
+                        logger.info(f"      Full path: {registry_path}")
                         
                         slide_ref = client_db.collection('presentation_broadcast').document(course_id)\
                                              .collection('presentations').document(safe_ppt_id)\
                                              .collection('slides').document(str(page_number))
                         slide_doc = slide_ref.get()
+                        logger.info(f"      Exists: {slide_doc.exists}")
                         
                         if slide_doc.exists:
                             slide_data = slide_doc.to_dict()
-                            latest_languages = slide_data.get("languages", {})
-                            logger.info(f"✅ Fetched languages from broadcast: {list(latest_languages.keys())}")
+                            slide_content = slide_data.get("languages", {})
+                            logger.info(f"✅ Fetched complete slide data from registry")
+                            logger.info(f"   Languages: {list(slide_content.keys())}")
+                            for lang, data in slide_content.items():
+                                has_audio = "audio_url" in data if isinstance(data, dict) else False
+                                logger.debug(f"      [{lang}] has_audio={has_audio}")
+                        else:
+                            logger.warning(f"⚠️  Slide not found in registry. Please run seeding first.")
+                            logger.warning(f"    Path: {registry_path}")
+                            logger.warning(f"    Skipping broadcast for unseeded slide.")
+                            # Don't create fallback - let it remain None so broadcast is skipped
+                            slide_content = None
                 except Exception as e:
-                    logger.warning(f"Failed to fetch from broadcast document: {e}")
-            
-            # Fallback to cache rehydration if broadcast fetch failed
-            if not latest_languages and context:
-                latest_languages = {}
-                target_langs = ["en-US", "zh-CN", "yue-HK"]
-                
-                logger.info(f"Rehydrating from cache for languages: {target_langs}")
-                for lang in target_langs:
-                    msg, audio_url = get_cached_presentation_message(lang, context)
-                    if msg:
-                        lang_data = {"text": msg}
-                        if audio_url:
-                            lang_data["audio_url"] = audio_url
-                        latest_languages[lang] = lang_data
-                
-                # Final fallback if cache completely empty
-                if not latest_languages:
-                     latest_languages = {"en-US": {"text": context}}       
+                    logger.error(f"Failed to fetch from broadcast registry: {e}", exc_info=True)
+                    logger.warning(f"Skipping broadcast due to registry fetch error.")
+                    slide_content = None
+            else:
+                logger.warning(f"Cannot fetch from registry - missing fields: courseId={course_id}, ppt={ppt_filename}, page={page_number}")
+                logger.warning(f"Skipping broadcast for incomplete request.")
+                slide_content = None       
 
 
+        # Update backend config (for legacy compatibility)
         config_data = {
-            "presentation_messages": latest_languages,
+            "presentation_messages": slide_content,
             "welcome_messages": request_json.get("welcome_messages", {}),
             "goodbye_messages": request_json.get("goodbye_messages", {}),
             "recommended_questions": request_json.get(
@@ -126,16 +171,20 @@ def config(request):
         doc_ref.set(config_data)
         logger.info("Backend config updated in Firestore")
 
-        # --- Restore Client Broadcast Logic for Live Slide ---
-        # This part ensures the web-student client can still track the live slide
-        # based on data sent to this endpoint.
+        # --- Client Broadcast Logic for Live Slide ---
+        # This updates the live pointer so web clients know what's currently being presented
 
-        if not (course_id and ppt_filename and page_number is not None and latest_languages):
-            logger.info(
-                "Skipping client broadcast: Missing required fields (courseId, ppt_filename, page_number, or latest_languages).")
+        if not (course_id and ppt_filename and page_number is not None and slide_content):
+            logger.warning(
+                f"⚠️  Skipping client broadcast - Missing required fields:")
+            logger.warning(f"    courseId: {course_id}")
+            logger.warning(f"    ppt_filename: {ppt_filename}")
+            logger.warning(f"    page_number: {page_number}")
+            logger.warning(f"    slide_content: {'Present' if slide_content else 'Missing'}")
             return json.dumps({"success": True}), 200, {"Content-Type": "application/json"}
 
         # 2. Data Preparation / Normalization
+        logger.info("🔧 Normalizing PPT filename for broadcast...")
         # Normalize ppt_filename -> safe_ppt_id
         ppt_norm = ppt_filename
         try:
@@ -143,14 +192,18 @@ def config(request):
             for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-HK"):
                 if ppt_norm.endswith(_s):
                     ppt_norm = ppt_norm[: -len(_s)]
-        except Exception:
-            logger.warning(
-                f"Normalization failed for {ppt_filename}, using raw value.")
+            logger.debug(f"   Normalized: {ppt_filename} → {ppt_norm}")
+        except Exception as e:
+            logger.warning(f"   Normalization failed for {ppt_filename}: {e}")
 
-        safe_ppt_id = ppt_norm.replace('/', '_').replace('\\', '_')
+        # Normalize: replace slashes, backslashes, and spaces with underscores
+        safe_ppt_id = ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
+        logger.debug(f"   Safe ID: {safe_ppt_id}")
 
-        logger.info(
-            f"Broadcasting live slide update for course: {course_id} / PPT: {safe_ppt_id} / Slide: {page_number}")
+        logger.info(f"📡 Broadcasting live slide update:")
+        logger.info(f"   Course: {course_id}")
+        logger.info(f"   PPT: {safe_ppt_id}")
+        logger.info(f"   Slide: {page_number}")
 
         # 3. Database Operations
         try:
@@ -167,51 +220,106 @@ def config(request):
             broadcast_ref = client_db.collection(
                 'presentation_broadcast').document(doc_id)
 
-            # A. Update Registry
-            # This preserves the "history" or "catalog" of the presentation
+            # A. Fetch existing registry data and enrich latest_languages
             ppt_ref = client_db.collection('presentation_broadcast').document(course_id)\
                                .collection('presentations').document(safe_ppt_id)
-
-            # Update presentation timestamp
-            ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
-            
-            # Only update slide if it doesn't exist or if context has changed
             slide_ref = ppt_ref.collection('slides').document(str(page_number))
             existing_slide = slide_ref.get()
             
+            # Enrich slide_content with audio_url from existing registry
+            logger.info("🎨 Enriching slide content with audio URLs from registry...")
+            logger.debug(f"   Existing slide in registry: {existing_slide.exists}")
+            
+            enriched_languages = {}
+            for lang, content in slide_content.items():
+                enriched_languages[lang] = content.copy() if isinstance(content, dict) else {"text": content}
+                
+                # Log what we received
+                has_audio = "audio_url" in enriched_languages[lang]
+                has_visual = "slide_link" in enriched_languages[lang]
+                logger.debug(f"   [{lang}] Input: audio={has_audio}, visual={has_visual}")
+                
+                # If audio_url missing, try to fetch from existing registry
+                if "audio_url" not in enriched_languages[lang]:
+                    if existing_slide.exists:
+                        try:
+                            existing_data = existing_slide.to_dict()
+                            registry_langs = existing_data.get("languages", {})
+                            if lang in registry_langs and "audio_url" in registry_langs[lang]:
+                                audio_url = registry_langs[lang]["audio_url"]
+                                enriched_languages[lang]["audio_url"] = audio_url
+                                logger.info(f"   ✅ [{lang}] Enriched with audio_url: {audio_url[:60]}...")
+                            else:
+                                logger.warning(f"   ⚠️  [{lang}] Not found in registry or missing audio_url")
+                                if lang in registry_langs:
+                                    logger.debug(f"      Registry has: {list(registry_langs[lang].keys())}")
+                        except Exception as e:
+                            logger.warning(f"   ❌ [{lang}] Failed to fetch audio_url: {e}")
+                    else:
+                        logger.warning(f"   ⚠️  [{lang}] Cannot enrich: slide doesn't exist in registry yet")
+                else:
+                    logger.debug(f"   ✓ [{lang}] Already has audio_url")
+            
+            # Update presentation timestamp
+            ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+            
+            # Determine if we should update the slide registry
             should_update = False
             if not existing_slide.exists:
                 logger.info(f"Slide {page_number} doesn't exist, creating it")
                 should_update = True
             else:
-                # Check if context has changed
+                # Check if context has changed OR if we have new data to add
                 existing_data = existing_slide.to_dict()
                 existing_context = existing_data.get("source_context", "")
+                existing_langs = existing_data.get("languages", {})
+                
+                # Check if any language is missing audio_url in registry but we have it now
+                has_new_audio = any(
+                    "audio_url" in enriched_languages.get(lang, {}) and 
+                    "audio_url" not in existing_langs.get(lang, {})
+                    for lang in enriched_languages.keys()
+                )
+                
                 if existing_context != context:
                     logger.info(f"Slide {page_number} context changed, updating")
                     should_update = True
+                elif has_new_audio:
+                    logger.info(f"Slide {page_number} has new audio URLs, updating")
+                    should_update = True
                 else:
-                    logger.info(f"Slide {page_number} unchanged, skipping update")
+                    logger.info(f"Slide {page_number} unchanged, skipping registry update")
             
+            # Update registry with enriched data (preserves audio_url)
             if should_update:
                 slide_ref.set({
-                    "languages": latest_languages,
+                    "languages": enriched_languages,
                     "page_number": page_number,
-                    "source_context": context  # Store context to detect changes
+                    "source_context": context
                 }, merge=True)
-                logger.info("Updated slide registry.")
+                logger.info("Updated slide registry with enriched data.")
 
             # B. Update Live Pointer (The "Current State")
             # This tells all connected clients where to look
+            logger.info("📍 Updating live pointer...")
+            
             live_update = {
-                "latest_languages": latest_languages,
+                "latest_languages": enriched_languages,
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "current_presentation_id": safe_ppt_id,
                 "current_slide_id": str(page_number)
             }
+            
+            logger.debug(f"   Live pointer data:")
+            logger.debug(f"      current_presentation_id: {safe_ppt_id}")
+            logger.debug(f"      current_slide_id: {page_number}")
+            logger.debug(f"      latest_languages keys: {list(enriched_languages.keys())}")
+            for lang, data in enriched_languages.items():
+                has_audio = "audio_url" in data if isinstance(data, dict) else False
+                logger.debug(f"         [{lang}] has_audio={has_audio}")
+            
             broadcast_ref.set(live_update, merge=True)
-            logger.info(
-                f"Successfully broadcasted live slide updates to client project {client_project_id}.")
+            logger.info(f"   ✅ Live pointer updated in client project {client_project_id}")
 
             # C. Update Presenter Context (Backend DB)
             # Save current course, presentation, slide pointers for lazy loading
@@ -223,7 +331,7 @@ def config(request):
                     "current_course_id": course_id,
                     "current_presentation_id": safe_ppt_id,
                     "current_slide_id": str(page_number),
-                    "current_slide_languages": latest_languages,
+                    "current_slide_languages": enriched_languages,
                     "updated_at": firestore.SERVER_TIMESTAMP
                 }
                 
@@ -241,14 +349,20 @@ def config(request):
                 logger.warning(f"Course ID provided ({course_id}) but missing Presenter IDs - skipping presenter context update")
 
         except Exception as b_e:
-            logger.error(
-                f"❌ Failed to broadcast live slide updates: {b_e}", exc_info=True)
+            logger.error(f"❌ Failed to broadcast live slide updates: {b_e}", exc_info=True)
 
+        logger.info("=" * 80)
+        logger.info("✅ CONFIG ENDPOINT COMPLETED SUCCESSFULLY")
+        logger.info("=" * 80)
+        
         return json.dumps({"success": True}), 200, {
             "Content-Type": "application/json"
         }
 
     except Exception as e:
+        logger.error("=" * 80)
+        logger.error("❌ CONFIG ENDPOINT FAILED")
+        logger.error("=" * 80)
         logger.exception("Failed to update config or broadcast: %s", e)
         return json.dumps({"error": str(e)}), 500, {
             "Content-Type": "application/json"

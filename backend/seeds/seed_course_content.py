@@ -213,17 +213,9 @@ def process_slide_locally(
         "page_number": slide_number
     }
 
-    # Normalize ppt filename
+    # Store original ppt filename for reference
     if ppt_filename:
-        try:
-            _ppt_norm = os.path.splitext(ppt_filename.lower())[0]
-            for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
-                if _ppt_norm.endswith(_s):
-                    _ppt_norm = _ppt_norm[: -len(_s)]
-            broadcast_payload["ppt_filename"] = ppt_filename
-            broadcast_payload["ppt_filename_norm"] = _ppt_norm
-        except Exception:
-            broadcast_payload["ppt_filename"] = ppt_filename
+        broadcast_payload["ppt_filename"] = ppt_filename
     
     # Compute context hash
     try:
@@ -329,10 +321,6 @@ def process_slide_locally(
                 speech_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
                 lang_data["audio_url"] = speech_url
                 
-                # Update cache
-                firestore_utils.cache_presentation_message(
-                    lang, generated, context, course_id=course_id, audio_url=speech_url
-                )
                 return (lang, lang_data, None)
                 
             except Exception as tts_e:
@@ -367,11 +355,20 @@ def process_slide_locally(
             doc_id = course_id if course_id else 'current'
             broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
             
-            ppt_fname = broadcast_payload.get('ppt_filename_norm') or broadcast_payload.get('ppt_filename')
+            ppt_fname = broadcast_payload.get('ppt_filename')
 
             # Registry Update (Always happens for seeding)
             if ppt_fname and slide_number is not None:
-                safe_ppt_id = ppt_fname.replace('/', '_').replace('\\', '_')
+                # Normalize filename to create safe document ID
+                try:
+                    _ppt_norm = os.path.splitext(ppt_fname.lower())[0]
+                    for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
+                        if _ppt_norm.endswith(_s):
+                            _ppt_norm = _ppt_norm[: -len(_s)]
+                    # Replace slashes, backslashes, and spaces with underscores
+                    safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
+                except Exception:
+                    safe_ppt_id = ppt_fname.replace('/', '_').replace('\\', '_').replace(' ', '_')
 
                 ppt_ref = broadcast_ref.collection('presentations').document(safe_ppt_id)
                 ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
@@ -450,6 +447,7 @@ def main():
     parser.add_argument("--course-title", default=DEFAULT_COURSE_TITLE, help=f"Course Title (default: {DEFAULT_COURSE_TITLE})")
     parser.add_argument("--data-dir", default="generate", help="Directory containing generated content (relative to script or absolute)")
     parser.add_argument("--languages", nargs="+", default=DEFAULT_LANGUAGES, help=f"List of languages (default: {' '.join(DEFAULT_LANGUAGES)})")
+    parser.add_argument("--max-workers", type=int, default=10, help="Maximum number of parallel slide processing workers (default: 10)")
     
     args = parser.parse_args()
     
@@ -570,10 +568,13 @@ def main():
                 else:
                     logger.info(f"No progress file found for {lang} ({original_lang_path})")
 
-        # Process slides
-        for slide in slides_structure:
+        # Process slides in parallel for speed
+        logger.info(f"Processing {len(slides_structure)} slides in parallel...")
+        
+        def process_single_slide(slide):
+            """Wrapper function for parallel slide processing"""
             slide_num = slide["slide_number"]
-            context = slide["context"] # Original EN notes
+            context = slide["context"]
             
             # Get pre-generated messages for this slide
             pre_gen = slide_notes_map.get(slide_num, {})
@@ -625,9 +626,17 @@ def main():
                 visual_links=visual_links,
                 pre_generated_messages=pre_gen
             )
-            
-            logger.info("Waiting 1s...")
-            time.sleep(1)
+            return slide_num
+        
+        # Process all slides in parallel
+        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            futures = {executor.submit(process_single_slide, slide): slide for slide in slides_structure}
+            for future in as_completed(futures):
+                try:
+                    slide_num = future.result()
+                    logger.info(f"✅ Completed slide {slide_num}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to process slide: {e}", exc_info=True)
 
     # Final Step: Set Live Pointer to the first slide of the last processed presentation
     # to ensure the client app shows something immediately.
@@ -648,9 +657,10 @@ def main():
                 for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
                     if _ppt_norm.endswith(_s):
                         _ppt_norm = _ppt_norm[: -len(_s)]
-                safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_')
+                # Normalize: replace slashes, backslashes, and spaces with underscores
+                safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
             except:
-                safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_')
+                safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_').replace(' ', '_')
 
             # Find first slide number
             first_slide = "0"
