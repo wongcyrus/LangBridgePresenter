@@ -49,6 +49,21 @@ def config(request):
         latest_languages = request_json.get("latest_languages")
         context = request_json.get("context")
 
+        # Extract presenter_id using the same logic as in talk-stream
+        userParams = request_json.get("userParams", {})
+        presenter_id = None
+        if isinstance(userParams, dict):
+            presenter_id = userParams.get("presenterId")
+        elif isinstance(userParams, str):
+            if "-" in userParams:
+                parts = userParams.split("-")
+                if len(parts) > 0:
+                    presenter_id = parts[0]
+            else:
+                presenter_id = userParams
+
+        logger.debug(f"Extracted presenter_id: {presenter_id}")
+
         # If latest_languages is missing but we have context (e.g. from VBA client),
         # attempt to rehydrate from cache.
         if not latest_languages and context:
@@ -150,6 +165,44 @@ def config(request):
             broadcast_ref.set(live_update, merge=True)
             logger.info(
                 f"Successfully broadcasted live slide updates to client project {client_project_id}.")
+
+            # C. Update Presenter Context (Backend DB)
+            # Save current course, presentation, slide, and ALL slides from the presentation
+            # This context will be loaded by talk-stream to provide the agent with full presentation context
+            # REQUIRES both course_id and presenter_id
+            if presenter_id and course_id:
+                try:
+                    # Load all slides from the presentation
+                    slides_ref = client_db.collection('presentation_broadcast').document(course_id)\
+                                          .collection('presentations').document(safe_ppt_id)\
+                                          .collection('slides')
+                    
+                    all_slides = {}
+                    slides_docs = slides_ref.stream()
+                    for slide_doc in slides_docs:
+                        slide_data = slide_doc.to_dict()
+                        slide_id = slide_doc.id
+                        all_slides[slide_id] = slide_data
+                    
+                    logger.info(f"Loaded {len(all_slides)} slides for presentation {safe_ppt_id}")
+                    
+                    presenter_update = {
+                        "current_course_id": course_id,
+                        "current_presentation_id": safe_ppt_id,
+                        "current_slide_id": str(page_number),
+                        "current_slide_languages": latest_languages,
+                        "all_slides": all_slides,
+                        "updated_at": firestore.SERVER_TIMESTAMP
+                    }
+                    presenter_ref = db.collection('presenters').document(presenter_id)
+                    presenter_ref.set(presenter_update, merge=True)
+                    logger.info(f"Updated presenter {presenter_id} context with {len(all_slides)} slides, current slide: {page_number}")
+                except Exception as presenter_e:
+                    logger.error(f"Failed to update presenter context: {presenter_e}", exc_info=True)
+            elif presenter_id and not course_id:
+                logger.warning(f"Presenter ID provided ({presenter_id}) but missing Course ID - skipping presenter context update")
+            elif course_id and not presenter_id:
+                logger.warning(f"Course ID provided ({course_id}) but missing Presenter ID - skipping presenter context update")
 
         except Exception as b_e:
             logger.error(

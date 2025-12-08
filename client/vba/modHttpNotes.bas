@@ -304,9 +304,11 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     Dim baseUrl As String
     baseUrl = GetBaseUrl(apiKey)
     
-    ' Get Course ID if available
+    ' Get Course ID and Presenter ID if available
     Dim courseId As String
+    Dim presenterId As String
     courseId = GetCourseId()
+    presenterId = GetPresenterId()
     
     ' Validate API key
     If apiKey = "" Then
@@ -316,9 +318,9 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     Dim url As String
     url = baseUrl & "/api/config?key=" & apiKey
 
-    ' Prepare payload with the speaker notes and course ID
+    ' Prepare payload with the speaker notes, course ID, and presenter ID
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId, pptName, slideNum)
+    bodyString = BuildConfigPayloadWithGeneration(currentNotes, courseId, pptName, slideNum, presenterId)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -382,9 +384,11 @@ Public Sub SetPresentation(ByVal presentation As String)
     Dim baseUrl As String
     baseUrl = GetBaseUrl(apiKey)
     
-    ' Get Course ID if available
+    ' Get Course ID and Presenter ID if available
     Dim courseId As String
+    Dim presenterId As String
     courseId = GetCourseId()
+    presenterId = GetPresenterId()
     
     ' Validate API key
     If apiKey = "" Then
@@ -411,10 +415,9 @@ Public Sub SetPresentation(ByVal presentation As String)
         pptName = ActivePresentation.Name
     End If
     
-    ' Prepare payload with just the speaker notes (no slide number)
-    ' This way cache works even if slides are reordered
+    ' Prepare payload with the speaker notes, course ID, and presenter ID
     Dim bodyString As String
-    bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId, pptName, slideNum)
+    bodyString = BuildConfigPayloadWithGeneration(slideNotes, courseId, pptName, slideNum, presenterId)
 
     ' Attempt HTTP request with fallback methods
     Dim statusCode As Long
@@ -682,6 +685,76 @@ Private Function GetCourseId() As String
 End Function
 
 ' =========================
+' Presenter ID Configuration loader (similar pattern)
+' =========================
+Private Function GetPresenterId() As String
+    On Error Resume Next
+    
+    Dim presenterId As String
+    Dim configPath As String
+    Dim fso As Object
+    Dim ts As Object
+    Dim wsh As Object
+    Dim locations() As String
+    Dim i As Integer
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set wsh = CreateObject("WScript.Shell")
+    
+    ' Try multiple locations (same order as GetApiKey)
+    ReDim locations(0 To 3)
+    If Not ActivePresentation Is Nothing Then
+        If ActivePresentation.Path <> "" Then
+            If Left$(ActivePresentation.Path, 7) <> "http://" And Left$(ActivePresentation.Path, 8) <> "https://" Then
+                locations(0) = ActivePresentation.Path & "\api_config.txt"
+            End If
+        End If
+    End If
+    locations(1) = wsh.SpecialFolders("MyDocuments") & "\LangBridge\api_config.txt"
+    locations(2) = wsh.ExpandEnvironmentStrings("%APPDATA%") & "\LangBridge\api_config.txt"
+    locations(3) = wsh.ExpandEnvironmentStrings("%TEMP%") & "\api_config.txt"
+    
+    ' Read fourth line (Key, URL, CourseID, PresenterID)
+    For i = 0 To 3
+        If locations(i) <> "" Then
+            If fso.FileExists(locations(i)) Then
+                Set ts = fso.OpenTextFile(locations(i), 1)
+                ' Skip line 1 (Key)
+                If Not ts.AtEndOfStream Then ts.SkipLine
+                ' Skip line 2 (URL)
+                If Not ts.AtEndOfStream Then ts.SkipLine
+                ' Skip line 3 (CourseID)
+                If Not ts.AtEndOfStream Then ts.SkipLine
+                ' Read line 4 (PresenterID)
+                If Not ts.AtEndOfStream Then
+                    presenterId = Trim(ts.ReadLine)
+                End If
+                ts.Close
+                Set ts = Nothing
+                If presenterId <> "" Then Exit For
+            End If
+        End If
+    Next i
+    
+    Set fso = Nothing
+    
+    ' Registry fallback
+    If presenterId = "" Then
+        On Error Resume Next
+        presenterId = wsh.RegRead("HKCU\Software\LangBridge\PresenterId")
+        If Err.Number <> 0 Then
+            presenterId = ""
+            Err.Clear
+        End If
+        On Error GoTo 0
+    End If
+    
+    Set wsh = Nothing
+    GetPresenterId = presenterId
+    If Err.Number <> 0 Then Err.Clear
+End Function
+
+' =========================
 ' HTTP helpers
 ' =========================
 
@@ -811,7 +884,8 @@ End Sub
 Private Function BuildConfigPayloadWithGeneration(ByVal context As String, _
                                                   Optional ByVal courseId As String = "", _
                                                   Optional ByVal pptFilename As String = "", _
-                                                  Optional ByVal pageNumber As String = "") As String
+                                                  Optional ByVal pageNumber As String = "", _
+                                                  Optional ByVal presenterId As String = "") As String
     Dim json As String
     
     ' If courseId is provided, use it (backend handles languages from course config)
@@ -833,11 +907,19 @@ Private Function BuildConfigPayloadWithGeneration(ByVal context As String, _
         extraFields = extraFields & """page_number"":""" & JsonEscape(pageNumber) & ""","
     End If
     
+    ' Add userParams with presenterId if provided
+    Dim userParamsField As String
+    userParamsField = ""
+    If presenterId <> "" Then
+        userParamsField = """userParams"":{""presenterId"":""" & JsonEscape(presenterId) & """},"
+    End If
+    
     json = _
         "{" & _
           """generate_presentation"":true," & _
           courseConfig & _
           extraFields & _
+          userParamsField & _
           """context"":""" & JsonEscape(context) & """," & _
           """presentation_messages"":{}," & _
           """welcome_messages"":{}," & _

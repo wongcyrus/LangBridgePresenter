@@ -74,14 +74,85 @@ def talk_stream(request):
     language_code = request_json.get("languageCode", "en")
     extra = request_json.get("extra", {})
 
+    # Consistent presenter_id extraction logic (copied from welcome/main.py)
+    userParams = request_json.get("userParams", {})
+    presenter_id = None
+    if isinstance(userParams, dict):
+        presenter_id = userParams.get("presenterId")
+    elif isinstance(userParams, str):
+        # Handle string format like "summer-presentation" or just "summer"
+        if "-" in userParams:
+            parts = userParams.split("-")
+            # Heuristic: assume the first part is the ID if the second is 'presentation'
+            # or just take the first part as a best guess.
+            if len(parts) > 0:
+                presenter_id = parts[0]
+        else:
+            presenter_id = userParams
+    # presenter_id is now extracted consistently
+
+    # Read presenter context from Firestore
+    presenter_context = {}
+    if presenter_id:
+        try:
+            from google.cloud import firestore
+            db = firestore.Client(database="langbridge")
+            presenter_ref = db.collection('presenters').document(presenter_id)
+            doc = presenter_ref.get()
+            if doc.exists:
+                presenter_context = doc.to_dict()
+                logger.info(f"Loaded presenter context for {presenter_id}: {presenter_context}")
+            else:
+                logger.info(f"No presenter context found for {presenter_id}")
+        except Exception as e:
+            logger.error(f"Error loading presenter context for {presenter_id}: {e}")
+
     def sse_format(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     def stream_response():
-        # Prepare the prompt with language context
+        # Prepare the prompt with language context and presenter context
         prompt = ask_text
+        
+        # Add full presenter context to the prompt for the agent
+        if presenter_context:
+            # Format the context in a more readable way for the agent
+            context_parts = []
+            
+            current_course = presenter_context.get("current_course_id")
+            current_presentation = presenter_context.get("current_presentation_id")
+            current_slide_id = presenter_context.get("current_slide_id")
+            all_slides = presenter_context.get("all_slides", {})
+            
+            if current_course:
+                context_parts.append(f"Course: {current_course}")
+            if current_presentation:
+                context_parts.append(f"Presentation: {current_presentation}")
+            
+            # Add all slides with current slide highlighted
+            if all_slides:
+                context_parts.append(f"\nPresentation Slides (Total: {len(all_slides)}):")
+                for slide_id, slide_data in sorted(all_slides.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+                    is_current = slide_id == current_slide_id
+                    marker = ">>> CURRENT SLIDE <<<" if is_current else ""
+                    languages = slide_data.get("languages", {})
+                    
+                    # Extract text from each language
+                    slide_texts = []
+                    for lang, lang_data in languages.items():
+                        text = lang_data.get("text", "") if isinstance(lang_data, dict) else ""
+                        if text:
+                            slide_texts.append(f"  [{lang}]: {text}")
+                    
+                    context_parts.append(f"\nSlide {slide_id} {marker}")
+                    context_parts.extend(slide_texts)
+            
+            formatted_context = "\n".join(context_parts)
+            prompt = f"=== Presentation Context ===\n{formatted_context}\n=== End Context ===\n\n{ask_text}"
+            logger.debug(f"Adding formatted presenter context to prompt")
+        
         if language_code and language_code != "en":
-            prompt = f"Please respond in {language_code}: {ask_text}"
+            prompt = f"Please respond in {language_code}: {prompt}"
 
         try:
             # Reuse an existing session if present; otherwise create one
