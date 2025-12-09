@@ -333,7 +333,7 @@ Public Sub SetWelcome(ByVal currentNotes As String)
     responseText = ""
     
     ' Try WinHTTP (most reliable in Office)
-    Debug.Print "[SetWelcome] Attempting HTTP POST to: " & url
+    Debug.Print "[SetWelcome] Attempting HTTP POST to: " & baseUrl & "/api/config?key=***REDACTED***"
     PostJsonWinHttp url, bodyString, statusCode, responseText
     If Err.Number <> 0 Then
         Debug.Print "[SetWelcome] WinHTTP error: " & Err.Description
@@ -434,7 +434,7 @@ Public Sub SetPresentation(ByVal presentation As String)
     responseText = ""
     
     ' Try WinHTTP (most reliable in Office)
-    Debug.Print "[SetPresentation] Attempting HTTP POST to: " & url
+    Debug.Print "[SetPresentation] Attempting HTTP POST to: " & baseUrl & "/api/config?key=***REDACTED***"
     PostJsonWinHttp url, bodyString, statusCode, responseText
     If Err.Number <> 0 Then
         Debug.Print "[SetPresentation] WinHTTP error: " & Err.Description
