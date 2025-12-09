@@ -32,8 +32,8 @@ logger.setLevel(_level)
 
 
 # Initialize the ADK agent from YAML configuration
-def create_agent():
-    """Create and return an ADK agent from YAML config."""
+def create_agent(presenter_background=None):
+    """Create and return an ADK agent from YAML config with optional presenter background."""
     # Get the directory where this script is located
     current_dir = os.path.dirname(os.path.abspath(__file__))
     config_file_path = os.path.join(
@@ -41,15 +41,19 @@ def create_agent():
     )
     
     # Load the agent from the config file using utility function
-    return config_agent_utils.from_config(config_file_path)
+    agent = config_agent_utils.from_config(config_file_path)
+    
+    # If presenter background is provided, replace the agent's description
+    if presenter_background:
+        agent.description = presenter_background
+        logger.debug(f"Updated agent description with presenter background")
+    
+    return agent
 
 
-# Create runner (reusable across requests)
-agent = create_agent()
-runner = InMemoryRunner(
-    agent=agent,
-    app_name='langbridge_classroom_assistant',
-)
+# Global agent cache - will be recreated per presenter
+_agent_cache = {}
+_runner_cache = {}
 
 
 @functions_framework.http
@@ -90,9 +94,11 @@ def talk_stream(request):
         else:
             presenter_id = userParams
     # presenter_id is now extracted consistently
+    logger.info(f"presenter_id {presenter_id}")
 
     # Read presenter context from Firestore (lazy load all_slides)
     presenter_context = {}
+    presenter_background = None
     if presenter_id:
         try:
             from google.cloud import firestore
@@ -101,6 +107,7 @@ def talk_stream(request):
             doc = presenter_ref.get()
             if doc.exists:
                 presenter_context = doc.to_dict()
+                presenter_background = presenter_context.get("background")
                 logger.info(f"Loaded presenter context for {presenter_id}")
                 
                 # Lazy load all_slides from client Firestore if needed
@@ -133,6 +140,21 @@ def talk_stream(request):
                 logger.info(f"No presenter context found for {presenter_id}")
         except Exception as e:
             logger.error(f"Error loading presenter context for {presenter_id}: {e}")
+    
+    # Get or create agent with presenter background
+    cache_key = presenter_id or "default"
+    if cache_key not in _agent_cache:
+        agent = create_agent(presenter_background)
+        runner = InMemoryRunner(
+            agent=agent,
+            app_name='langbridge_classroom_assistant',
+        )
+        _agent_cache[cache_key] = agent
+        _runner_cache[cache_key] = runner
+        logger.info(f"Created new agent/runner for presenter: {cache_key}")
+    else:
+        runner = _runner_cache[cache_key]
+        logger.debug(f"Reusing cached agent/runner for presenter: {cache_key}")
 
     def sse_format(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
@@ -141,7 +163,7 @@ def talk_stream(request):
         # Prepare the prompt with language context and presenter context
         prompt = ask_text
         
-        # Add full presenter context to the prompt for the agent
+        # Add presentation context to the prompt (slides info)
         if presenter_context:
             # Format the context in a more readable way for the agent
             context_parts = []
@@ -174,9 +196,10 @@ def talk_stream(request):
                     context_parts.append(f"\nSlide {slide_id} {marker}")
                     context_parts.extend(slide_texts)
             
-            formatted_context = "\n".join(context_parts)
-            prompt = f"=== Presentation Context ===\n{formatted_context}\n=== End Context ===\n\n{ask_text}"
-            logger.debug(f"Adding formatted presenter context to prompt")
+            if context_parts:
+                formatted_context = "\n".join(context_parts)
+                prompt = f"=== Presentation Context ===\n{formatted_context}\n=== End Context ===\n\n{ask_text}"
+                logger.debug(f"Adding formatted presentation context to prompt")
         
         if language_code and language_code != "en":
             prompt = f"Please respond in {language_code}: {prompt}"
