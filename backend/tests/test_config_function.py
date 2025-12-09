@@ -3,6 +3,9 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 import json
+import pytest
+
+pytestmark = pytest.mark.unit
 
 # 1. Mock functions_framework before importing main
 mock_ff = MagicMock()
@@ -82,32 +85,38 @@ class TestConfigFunction(unittest.TestCase):
         }
         self.assertEqual(config_data['presentation_messages'], expected_messages)
 
-    @patch('main.get_cached_presentation_message')
     @patch('main.firestore.Client')
-    def test_fallback_to_context(self, mock_firestore_client, mock_get_cached_presentation_message):
-        # Setup
+    def test_fallback_to_context(self, mock_firestore_client):
+        # Setup - when no slide content is provided and no registry data exists
         request_json = {
             "presentation_messages": {},
-            "latest_languages": {}, # Empty
-            "context": "Fallback Context"
+            "latest_languages": {},  # Empty
+            "context": "Fallback Context",
+            "courseId": "test_course",
+            "ppt_filename": "test.pptx",
+            "page_number": 1
         }
         self.mock_request.get_json.return_value = request_json
-
-        mock_get_cached_presentation_message.return_value = (None, None)
 
         mock_db = MagicMock()
         mock_firestore_client.return_value = mock_db
         mock_doc_ref = MagicMock()
         mock_db.collection.return_value.document.return_value = mock_doc_ref
+        
+        # Mock registry lookup to return no data
+        mock_slide_doc = MagicMock()
+        mock_slide_doc.exists = False
+        mock_db.collection.return_value.document.return_value.collection.return_value.document.return_value.collection.return_value.document.return_value.get.return_value = mock_slide_doc
 
         # Execute
         config(self.mock_request)
 
-        # Verify
+        # Verify - when registry returns nothing, slide_content should be None
+        # and broadcast should be skipped
         args, _ = mock_doc_ref.set.call_args
         config_data = args[0]
-        expected_messages = {"en-US": {"text": "Fallback Context"}}
-        self.assertEqual(config_data['presentation_messages'], expected_messages)
+        # Should be None since registry had no data
+        self.assertIsNone(config_data['presentation_messages'])
 
     @patch('main.firestore.Client')
     def test_existing_presentation_messages_not_overwritten(self, mock_firestore_client):
