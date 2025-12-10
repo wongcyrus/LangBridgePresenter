@@ -1,17 +1,16 @@
 import logging
 import os
 from google.cloud import firestore
-from google.cloud import texttospeech
 
 logger = logging.getLogger(__name__)
 
 # Default configuration if no course is specified or found
 DEFAULT_LANGUAGES = ["en-US", "zh-CN"]
 DEFAULT_VOICES = {
-    "en-US": {"name": "en-US-Neural2-F", "gender": texttospeech.SsmlVoiceGender.FEMALE},
-    "zh-CN": {"name": "cmn-CN-Chirp3-HD-Achernar", "gender": texttospeech.SsmlVoiceGender.FEMALE},
-    "yue-HK": {"name": "yue-HK-Standard-A", "gender": texttospeech.SsmlVoiceGender.FEMALE},
-    "zh-TW": {"name": "zh-TW-Standard-A", "gender": texttospeech.SsmlVoiceGender.FEMALE}
+    "en-US": {"name": "en-US-Neural2-F", "gender": "FEMALE"},
+    "zh-CN": {"name": "cmn-CN-Chirp3-HD-Achernar", "gender": "FEMALE"},
+    "yue-HK": {"name": "yue-HK-Standard-A", "gender": "FEMALE"},
+    "zh-TW": {"name": "zh-TW-Standard-A", "gender": "FEMALE"}
 }
 
 def _get_db():
@@ -47,6 +46,12 @@ def get_course_languages(course_id: str):
 
 def get_voice_params(course_id: str, language_code: str):
     """Resolve Google TTS VoiceSelectionParams for a given course and language."""
+    # Import TTS only when needed
+    try:
+        from google.cloud import texttospeech
+    except ImportError:
+        logger.error("google-cloud-texttospeech not available. Please install it.")
+        raise
     
     # Defaults
     voice_name = None
@@ -66,7 +71,8 @@ def get_voice_params(course_id: str, language_code: str):
         default_cfg = DEFAULT_VOICES.get(language_code)
         if default_cfg:
             voice_name = default_cfg["name"]
-            ssml_gender = default_cfg["gender"]
+            gender_str = default_cfg["gender"].upper()
+            ssml_gender = getattr(texttospeech.SsmlVoiceGender, gender_str, texttospeech.SsmlVoiceGender.FEMALE)
         else:
             # Ultimate fallback
             logger.warning(f"No voice configuration found for {language_code}. Using system default.")

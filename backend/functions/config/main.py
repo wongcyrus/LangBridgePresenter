@@ -4,6 +4,8 @@ import os
 import sys
 import functions_framework
 from google.cloud import firestore
+from firestore_utils import _get_db, _get_client_db
+from course_utils import get_course_config
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -48,7 +50,7 @@ def config(request):
     logger.debug(f"📦 Request payload keys: {list(request_json.keys())} ")
 
     try:
-        db = firestore.Client(database="langbridge")
+        db = _get_db()
 
         # 1. Extract & Validate Inputs
         course_id = request_json.get("courseId")
@@ -103,7 +105,7 @@ def config(request):
                     logger.debug(f"   Client project ID: {client_project_id}")
                     
                     if client_project_id:
-                        client_db = firestore.Client(project=client_project_id, database="(default)")
+                        client_db = _get_client_db()
                         
                         # Normalize ppt filename
                         safe_ppt_id = ppt_filename
@@ -183,6 +185,25 @@ def config(request):
             logger.warning(f"    slide_content: {'Present' if slide_content else 'Missing'}")
             return json.dumps({"success": True}), 200, {"Content-Type": "application/json"}
 
+        # Check if this course has multiple styles - if so, broadcast to all style variants
+        broadcast_course_ids = [course_id]  # Always include the main course
+        
+        try:
+            course_config = get_course_config(course_id)
+            if course_config:
+                available_styles = course_config.get('available_styles', [])
+                if available_styles:
+                    logger.info(f"Course {course_id} has multiple styles: {available_styles}")
+                    # Add style-specific course IDs
+                    for style in available_styles:
+                        if style != 'professional':  # professional is the base course
+                            style_course_id = f"{course_id}-{style}"
+                            broadcast_course_ids.append(style_course_id)
+                    logger.info(f"Broadcasting to course IDs: {broadcast_course_ids}")
+        except Exception as e:
+            logger.warning(f"Failed to check course styles: {e}")
+            # Continue with just the main course_id
+
         # 2. Data Preparation / Normalization
         logger.info("🔧 Normalizing PPT filename for broadcast...")
         # Normalize ppt_filename -> safe_ppt_id
@@ -208,120 +229,126 @@ def config(request):
         # 3. Database Operations
         try:
             # TARGET THE CLIENT PROJECT
-            client_project_id = os.environ.get(
-                "CLIENT_FIRESTORE_PROJECT_ID", "ai-presenter-client")
-            client_db = firestore.Client(
-                project=client_project_id,
-                database=os.environ.get(
-                    "CLIENT_FIRESTORE_DATABASE_ID", "(default)")
-            )
+            client_db = _get_client_db()
 
-            doc_id = course_id  # Always use course_id for broadcast doc
-            broadcast_ref = client_db.collection(
-                'presentation_broadcast').document(doc_id)
+            # Broadcast to all relevant course IDs (main course + style variants)
+            for broadcast_course_id in broadcast_course_ids:
+                logger.info(f"📡 Broadcasting to course: {broadcast_course_id}")
+                
+                broadcast_ref = client_db.collection(
+                    'presentation_broadcast').document(broadcast_course_id)
 
-            # A. Fetch existing registry data and enrich latest_languages
-            ppt_ref = client_db.collection('presentation_broadcast').document(course_id)\
-                               .collection('presentations').document(safe_ppt_id)
-            slide_ref = ppt_ref.collection('slides').document(str(page_number))
-            existing_slide = slide_ref.get()
+                # A. Fetch existing registry data for this specific course
+                ppt_ref = client_db.collection('presentation_broadcast').document(broadcast_course_id)\
+                                   .collection('presentations').document(safe_ppt_id)
+                slide_ref = ppt_ref.collection('slides').document(str(page_number))
+                existing_slide = slide_ref.get()
             
-            # Enrich slide_content with audio_url from existing registry
-            logger.info("🎨 Enriching slide content with audio URLs from registry...")
-            logger.debug(f"   Existing slide in registry: {existing_slide.exists}")
-            
-            enriched_languages = {}
-            for lang, content in slide_content.items():
-                enriched_languages[lang] = content.copy() if isinstance(content, dict) else {"text": content}
+                # Use style-specific content if available, otherwise use the input content
+                logger.info(f"🎨 Preparing slide content for {broadcast_course_id}...")
+                logger.debug(f"   Existing slide in registry: {existing_slide.exists}")
                 
-                # Log what we received
-                has_audio = "audio_url" in enriched_languages[lang]
-                has_visual = "slide_link" in enriched_languages[lang]
-                logger.debug(f"   [{lang}] Input: audio={has_audio}, visual={has_visual}")
-                
-                # If audio_url missing, try to fetch from existing registry
-                if "audio_url" not in enriched_languages[lang]:
-                    if existing_slide.exists:
-                        try:
-                            existing_data = existing_slide.to_dict()
-                            registry_langs = existing_data.get("languages", {})
-                            if lang in registry_langs and "audio_url" in registry_langs[lang]:
-                                audio_url = registry_langs[lang]["audio_url"]
-                                enriched_languages[lang]["audio_url"] = audio_url
-                                logger.info(f"   ✅ [{lang}] Enriched with audio_url: {audio_url[:60]}...")
+                # If this is a style variant and we have seeded content, use that instead
+                if broadcast_course_id != course_id and existing_slide.exists:
+                    # Use the seeded style-specific content
+                    existing_data = existing_slide.to_dict()
+                    enriched_languages = existing_data.get("languages", {})
+                    logger.info(f"   ✅ Using seeded style-specific content for {broadcast_course_id}")
+                    logger.info(f"   Languages: {list(enriched_languages.keys())}")
+                else:
+                    # Use the input content and enrich with audio URLs
+                    enriched_languages = {}
+                    for lang, content in slide_content.items():
+                        enriched_languages[lang] = content.copy() if isinstance(content, dict) else {"text": content}
+                        
+                        # Log what we received
+                        has_audio = "audio_url" in enriched_languages[lang]
+                        has_visual = "slide_link" in enriched_languages[lang]
+                        logger.debug(f"   [{lang}] Input: audio={has_audio}, visual={has_visual}")
+                        
+                        # If audio_url missing, try to fetch from existing registry
+                        if "audio_url" not in enriched_languages[lang]:
+                            if existing_slide.exists:
+                                try:
+                                    existing_data = existing_slide.to_dict()
+                                    registry_langs = existing_data.get("languages", {})
+                                    if lang in registry_langs and "audio_url" in registry_langs[lang]:
+                                        audio_url = registry_langs[lang]["audio_url"]
+                                        enriched_languages[lang]["audio_url"] = audio_url
+                                        logger.info(f"   ✅ [{lang}] Enriched with audio_url: {audio_url[:60]}...")
+                                    else:
+                                        logger.warning(f"   ⚠️  [{lang}] Not found in registry or missing audio_url")
+                                        if lang in registry_langs:
+                                            logger.debug(f"      Registry has: {list(registry_langs[lang].keys())}")
+                                except Exception as e:
+                                    logger.warning(f"   ❌ [{lang}] Failed to fetch audio_url: {e}")
                             else:
-                                logger.warning(f"   ⚠️  [{lang}] Not found in registry or missing audio_url")
-                                if lang in registry_langs:
-                                    logger.debug(f"      Registry has: {list(registry_langs[lang].keys())}")
-                        except Exception as e:
-                            logger.warning(f"   ❌ [{lang}] Failed to fetch audio_url: {e}")
+                                logger.warning(f"   ⚠️  [{lang}] Cannot enrich: slide doesn't exist in registry yet")
+                        else:
+                            logger.debug(f"   ✓ [{lang}] Already has audio_url")
+            
+                # Update presentation timestamp
+                ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+                
+                # Determine if we should update the slide registry
+                should_update = False
+                if not existing_slide.exists:
+                    logger.info(f"Slide {page_number} doesn't exist for {broadcast_course_id}, creating it")
+                    should_update = True
+                else:
+                    # Check if context has changed OR if we have new data to add
+                    existing_data = existing_slide.to_dict()
+                    existing_context = existing_data.get("source_context", "")
+                    existing_langs = existing_data.get("languages", {})
+                    
+                    # Check if any language is missing audio_url in registry but we have it now
+                    has_new_audio = any(
+                        "audio_url" in enriched_languages.get(lang, {}) and 
+                        "audio_url" not in existing_langs.get(lang, {})
+                        for lang in enriched_languages.keys()
+                    )
+                    
+                    if existing_context != context:
+                        logger.info(f"Slide {page_number} context changed for {broadcast_course_id}, updating")
+                        should_update = True
+                    elif has_new_audio:
+                        logger.info(f"Slide {page_number} has new audio URLs for {broadcast_course_id}, updating")
+                        should_update = True
                     else:
-                        logger.warning(f"   ⚠️  [{lang}] Cannot enrich: slide doesn't exist in registry yet")
-                else:
-                    logger.debug(f"   ✓ [{lang}] Already has audio_url")
-            
-            # Update presentation timestamp
-            ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
-            
-            # Determine if we should update the slide registry
-            should_update = False
-            if not existing_slide.exists:
-                logger.info(f"Slide {page_number} doesn't exist, creating it")
-                should_update = True
-            else:
-                # Check if context has changed OR if we have new data to add
-                existing_data = existing_slide.to_dict()
-                existing_context = existing_data.get("source_context", "")
-                existing_langs = existing_data.get("languages", {})
+                        logger.info(f"Slide {page_number} unchanged for {broadcast_course_id}, skipping registry update")
                 
-                # Check if any language is missing audio_url in registry but we have it now
-                has_new_audio = any(
-                    "audio_url" in enriched_languages.get(lang, {}) and 
-                    "audio_url" not in existing_langs.get(lang, {})
-                    for lang in enriched_languages.keys()
-                )
+                # Update registry with enriched data (preserves audio_url)
+                if should_update:
+                    slide_ref.set({
+                        "languages": enriched_languages,
+                        "page_number": page_number,
+                        "source_context": context
+                    }, merge=True)
+                    logger.info(f"Updated slide registry for {broadcast_course_id}.")
+
+                # B. Update Live Pointer (The "Current State")
+                # This tells all connected clients where to look
+                logger.info(f"📍 Updating live pointer for {broadcast_course_id}...")
                 
-                if existing_context != context:
-                    logger.info(f"Slide {page_number} context changed, updating")
-                    should_update = True
-                elif has_new_audio:
-                    logger.info(f"Slide {page_number} has new audio URLs, updating")
-                    should_update = True
-                else:
-                    logger.info(f"Slide {page_number} unchanged, skipping registry update")
-            
-            # Update registry with enriched data (preserves audio_url)
-            if should_update:
-                slide_ref.set({
-                    "languages": enriched_languages,
-                    "page_number": page_number,
-                    "source_context": context
-                }, merge=True)
-                logger.info("Updated slide registry with enriched data.")
+                live_update = {
+                    "latest_languages": enriched_languages,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "current_presentation_id": safe_ppt_id,
+                    "current_slide_id": str(page_number)
+                }
+                
+                logger.debug(f"   Live pointer data for {broadcast_course_id}:")
+                logger.debug(f"      current_presentation_id: {safe_ppt_id}")
+                logger.debug(f"      current_slide_id: {page_number}")
+                logger.debug(f"      latest_languages keys: {list(enriched_languages.keys())}")
+                for lang, data in enriched_languages.items():
+                    has_audio = "audio_url" in data if isinstance(data, dict) else False
+                    logger.debug(f"         [{lang}] has_audio={has_audio}")
+                
+                broadcast_ref.set(live_update, merge=True)
+                logger.info(f"   ✅ Live pointer updated for {broadcast_course_id}")
 
-            # B. Update Live Pointer (The "Current State")
-            # This tells all connected clients where to look
-            logger.info("📍 Updating live pointer...")
-            
-            live_update = {
-                "latest_languages": enriched_languages,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-                "current_presentation_id": safe_ppt_id,
-                "current_slide_id": str(page_number)
-            }
-            
-            logger.debug(f"   Live pointer data:")
-            logger.debug(f"      current_presentation_id: {safe_ppt_id}")
-            logger.debug(f"      current_slide_id: {page_number}")
-            logger.debug(f"      latest_languages keys: {list(enriched_languages.keys())}")
-            for lang, data in enriched_languages.items():
-                has_audio = "audio_url" in data if isinstance(data, dict) else False
-                logger.debug(f"         [{lang}] has_audio={has_audio}")
-            
-            broadcast_ref.set(live_update, merge=True)
-            logger.info(f"   ✅ Live pointer updated in client project {client_project_id}")
-
-            # C. Update Presenter Context (Backend DB)
+            # C. Update Presenter Context (Backend DB) - only once for the main course
             # Save current course, presentation, slide pointers for lazy loading
             # talk-stream will fetch all_slides on-demand when needed
             # REQUIRES both course_id and presenter_ids
