@@ -1,7 +1,7 @@
 # Shared constants for LangBridge admin tools and seeding
 
 # Available presentation styles
-AVAILABLE_STYLES = ["professional", "cyberpunk", "gundam", "hkcomic", "star_wars"]
+AVAILABLE_STYLES = ["professional", "cyberpunk", "gundam", "hkcomic", "starwars"]
 
 # Default Voice Configs
 DEFAULT_VOICE_CONFIGS = {
