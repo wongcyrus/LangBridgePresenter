@@ -406,12 +406,10 @@ LANG_PROGRESS_SUFFIX_MAP = {
     "yue-HK": "yue-HK"
 }
 
-# Default Voice Configs
-DEFAULT_VOICE_CONFIGS = {
-    "en-US": {"name": "en-US-Neural2-F", "gender": "FEMALE"},
-    "zh-CN": {"name": "cmn-CN-Chirp3-HD-Achernar", "gender": "FEMALE"},
-    "yue-HK": {"name": "yue-HK-Standard-A", "gender": "FEMALE"}
-}
+
+
+# Import shared constants
+from admin_tools.constants import AVAILABLE_STYLES, DEFAULT_VOICE_CONFIGS
 
 # -----------------
 
@@ -428,12 +426,20 @@ def ensure_course_exists(course_id, course_title, languages):
             logger.warning(f"No default voice config for {lang}, using en-US default as placeholder")
             voice_configs[lang] = {"name": "en-US-Neural2-F", "gender": "FEMALE"}
 
+    # Detect style from course ID
+    style = 'professional'  # Default to professional
+    for available_style in AVAILABLE_STYLES:
+        if available_style != 'professional' and course_id.endswith(f'-{available_style}'):
+            style = available_style
+            break
+
     try:
         create_or_update_course(
             course_id, 
             course_title, 
             languages, 
-            voice_configs
+            voice_configs,
+            style
         )
         logger.info("✅ Course created/updated successfully.")
     except Exception as e:
@@ -601,7 +607,7 @@ def main():
                             break
                     
                     if found_image:
-                        blob_name = f"generated_visuals/{base_search_name}/{lang_code}/{image_filename}"
+                        blob_name = f"generated_visuals/{args.course_id}/{base_search_name}/{lang_code}/{image_filename}"
                         url = upload_to_bucket(bucket_name, found_image, blob_name)
                         return (lang_code, url)
                     return (lang_code, None)
