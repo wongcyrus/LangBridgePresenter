@@ -162,7 +162,9 @@ class LangBridgeApiStack extends TerraformStack {
         "XIAOICE_CHAT_ACCESS_KEY": process.env.XIAOICE_CHAT_ACCESS_KEY || "default_access_key",
         "GOOGLE_CLOUD_PROJECT": projectId,
         "GOOGLE_CLOUD_LOCATION": "global",
-        "GOOGLE_GENAI_USE_VERTEXAI": "True"
+        "GOOGLE_GENAI_USE_VERTEXAI": "True",
+        "CLIENT_FIRESTORE_PROJECT_ID": clientProjectId,
+        "CLIENT_FIRESTORE_DATABASE_ID": "(default)",
       },
       additionalDependencies: [artifactRegistryIamMember],
     });

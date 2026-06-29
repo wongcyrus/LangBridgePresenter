@@ -10,6 +10,7 @@ from auth_utils import validate_authentication
 from firestore_utils import get_config
 from google.cloud import texttospeech, storage
 import course_utils
+import utils
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -93,15 +94,14 @@ def speech(request):
             # Use Course Config for Voice Selection
             voice = course_utils.get_voice_params(course_id, language_code)
             
-            synthesis_input = texttospeech.SynthesisInput(text=reply)
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
                 speaking_rate=1.0
             )
-            tts_response = tts_client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice,
-                audio_config=audio_config
+            
+            # Use retry logic for TTS synthesis
+            tts_response = utils.synthesize_speech_with_retry(
+                tts_client, reply, voice, audio_config
             )
             
             blob.upload_from_string(

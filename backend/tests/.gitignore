@@ -1,0 +1,16 @@
+# Test environment
+.env.test
+venv/
+__pycache__/
+*.pyc
+
+# Test outputs
+.pytest_cache/
+.coverage
+htmlcov/
+*.xlsx
+*.log
+
+# IDE
+.vscode/
+.idea/

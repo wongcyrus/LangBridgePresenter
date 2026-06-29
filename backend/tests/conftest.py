@@ -12,15 +12,17 @@ def api_url():
     # Load from .env.test if available
     env_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.test")
     if os.path.exists(env_file_path):
-        import dotenv
-        dotenv.load_dotenv(env_file_path)
+        try:
+            import dotenv
+            dotenv.load_dotenv(env_file_path)
+        except ImportError:
+            pytest.skip("python-dotenv not installed. Install with: pip install python-dotenv")
 
     url = os.getenv("API_URL")
     if not url:
         pytest.skip("API_URL environment variable not set or found in .env.test")
     
     # Normalize URL: remove trailing slash and optional trailing /api
-    # This ensures that if the user provides '.../api', we don't end up with '.../api/api/...'
     url = url.rstrip("/")
     if url.endswith("/api"):
         url = url[:-4]
@@ -30,23 +32,26 @@ def api_url():
 @pytest.fixture(scope="session")
 def auth_keys():
     """Return (secret_key, access_key) tuple."""
-    # Load from .env.test if available. Note: This assumes dotenv has been loaded by api_url fixture already, 
-    # but we include it here for robustness if auth_keys is called independently.
     env_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.test")
     if os.path.exists(env_file_path):
-        import dotenv
-        dotenv.load_dotenv(env_file_path)
+        try:
+            import dotenv
+            dotenv.load_dotenv(env_file_path)
+        except ImportError:
+            pass
 
     secret_key = (
         os.getenv("XiaoiceChatSecretKey")
         or os.getenv("XIAOICE_CHAT_SECRET_KEY")
-        or "test_secret_key"
     )
     access_key = (
         os.getenv("XiaoiceChatAccessKey")
         or os.getenv("XIAOICE_CHAT_ACCESS_KEY")
-        or "test_access_key"
     )
+    
+    if not secret_key or not access_key:
+        pytest.skip("Auth keys not found in environment. Set XIAOICE_CHAT_SECRET_KEY and XIAOICE_CHAT_ACCESS_KEY")
+    
     return secret_key, access_key
 
 @pytest.fixture(scope="session")

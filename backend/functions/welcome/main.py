@@ -72,12 +72,10 @@ def welcome(request):
     if isinstance(userParams, str):
         is_presentation = "presentation" in userParams.lower()
     
-    config = get_config()
-    
     # Use presentation_messages if presentation context,
     # otherwise welcome_messages
-    if is_presentation:
-        logger.debug("Using presentation_messages logic")
+    if is_presentation and presenter:
+        logger.debug("Using current_slide_languages from presenter")
         
         # Map simple language codes to full codes used in the configuration
         LANG_CODE_MAP = {
@@ -91,8 +89,9 @@ def welcome(request):
         target_lang = LANG_CODE_MAP.get(language_code, "en-US")
         logger.debug(f"Targeting language: {target_lang} for code: {language_code}")
 
-        presentation_messages = config.get("presentation_messages", {})
-        message_data = presentation_messages.get(target_lang)
+        # Get current slide languages directly from presenter
+        current_slide_languages = presenter.get("current_slide_languages", {})
+        message_data = current_slide_languages.get(target_lang)
 
         if message_data and isinstance(message_data, dict) and "text" in message_data:
             reply = message_data["text"]
@@ -101,7 +100,7 @@ def welcome(request):
         else:
             # Fallback to English if target lang not found
             logger.warning(f"No presentation message found for {target_lang}, falling back to en-US")
-            fallback_data = presentation_messages.get("en-US", {})
+            fallback_data = current_slide_languages.get("en-US", {})
             if isinstance(fallback_data, dict):
                 reply = fallback_data.get("text", "Hello")
             elif isinstance(fallback_data, str):
@@ -109,6 +108,8 @@ def welcome(request):
             else:
                 reply = "Hello"
     else:
+        # Non-presentation context: use config
+        config = get_config()
         messages = config.get("welcome_messages", {})        
         logger.debug("Using welcome_messages")    
         reply = messages.get(language_code, messages.get("en", "Welcome!"))

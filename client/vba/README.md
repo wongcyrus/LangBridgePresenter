@@ -21,23 +21,42 @@ Before using the VBA client, ensure you have:
 
 To associate your presentation with a course (required for multi-language support), add the Course ID as the **third line** in your `api_config.txt` file. The language codes used for configuration (e.g., in `manage_courses.py`) should follow the **BCP-47** standard (e.g., `en-US`, `zh-CN`, `yue-HK`).
 
-### File Format (3 lines):
+### File Format (4 lines):
 ```
 XXXXXXXXXXXXXXXXXXXXXX
 https://langbridgeapi-1ynqko7b4cw5d.apigateway.langbridge-presenter.cloud.goog
 demo
+summer
 ```
 
 **Line 1**: API Key  
 **Line 2**: Base URL  
-**Line 3**: Course ID (e.g., `demo`)
+**Line 3**: Course ID (e.g., `demo`)  
+**Line 4**: Presenter ID (e.g., `summer` or `cyber,honey` for multiple presenters)
 
 This tells the system which course configuration to use, including:
 - Supported languages (e.g., English, Mandarin, Cantonese)
 - Voice settings for each language
 - Cached presentation content
+- Presenter context for personalized AI responses
 
-**Note**: If no Course ID is provided (only 2 lines in the file), the system will use default languages (en, zh).
+### Multiple Presenters
+
+You can specify multiple presenters by separating their IDs with commas (no spaces):
+
+```
+XXXXXXXXXXXXXXXXXXXXXX
+https://langbridgeapi-1ynqko7b4cw5d.apigateway.langbridge-presenter.cloud.goog
+demo
+cyber,honey,summer
+```
+
+When multiple presenters are specified:
+- All presenters will receive slide context updates
+- The first presenter's language and settings are used for welcome messages
+- The AI agent has access to all presenters' contexts
+
+**Note**: If no Course ID or Presenter ID is provided, the system will use default languages (en, zh) and no presenter context.
 
 ## API Key Configuration
 

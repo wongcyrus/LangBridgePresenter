@@ -32,8 +32,8 @@ logger.setLevel(_level)
 
 
 # Initialize the ADK agent from YAML configuration
-def create_agent():
-    """Create and return an ADK agent from YAML config."""
+def create_agent(presenter_background=None):
+    """Create and return an ADK agent from YAML config with optional presenter background."""
     # Get the directory where this script is located
     current_dir = os.path.dirname(os.path.abspath(__file__))
     config_file_path = os.path.join(
@@ -41,15 +41,19 @@ def create_agent():
     )
     
     # Load the agent from the config file using utility function
-    return config_agent_utils.from_config(config_file_path)
+    agent = config_agent_utils.from_config(config_file_path)
+    
+    # If presenter background is provided, replace the agent's description
+    if presenter_background:
+        agent.description = presenter_background
+        logger.debug(f"Updated agent description with presenter background")
+    
+    return agent
 
 
-# Create runner (reusable across requests)
-agent = create_agent()
-runner = InMemoryRunner(
-    agent=agent,
-    app_name='langbridge_classroom_assistant',
-)
+# Global agent cache - will be recreated per presenter
+_agent_cache = {}
+_runner_cache = {}
 
 
 @functions_framework.http
@@ -74,14 +78,131 @@ def talk_stream(request):
     language_code = request_json.get("languageCode", "en")
     extra = request_json.get("extra", {})
 
+    # Consistent presenter_id extraction logic (copied from welcome/main.py)
+    userParams = request_json.get("userParams", {})
+    presenter_id = None
+    if isinstance(userParams, dict):
+        presenter_id = userParams.get("presenterId")
+    elif isinstance(userParams, str):
+        # Handle string format like "summer-presentation" or just "summer"
+        if "-" in userParams:
+            parts = userParams.split("-")
+            # Heuristic: assume the first part is the ID if the second is 'presentation'
+            # or just take the first part as a best guess.
+            if len(parts) > 0:
+                presenter_id = parts[0]
+        else:
+            presenter_id = userParams
+    # presenter_id is now extracted consistently
+    logger.info(f"presenter_id {presenter_id}")
+
+    # Read presenter context from Firestore (lazy load all_slides)
+    presenter_context = {}
+    presenter_background = None
+    if presenter_id:
+        try:
+            from google.cloud import firestore
+            db = firestore.Client(database="langbridge")
+            presenter_ref = db.collection('presenters').document(presenter_id)
+            doc = presenter_ref.get()
+            if doc.exists:
+                presenter_context = doc.to_dict()
+                presenter_background = presenter_context.get("background")
+                logger.info(f"Loaded presenter context for {presenter_id}")
+                
+                # Lazy load all_slides from client Firestore if needed
+                course_id = presenter_context.get("current_course_id")
+                presentation_id = presenter_context.get("current_presentation_id")
+                
+                if course_id and presentation_id:
+                    try:
+                        client_project_id = os.environ.get("CLIENT_FIRESTORE_PROJECT_ID", "ai-presenter-client")
+                        client_db = firestore.Client(
+                            project=client_project_id,
+                            database=os.environ.get("CLIENT_FIRESTORE_DATABASE_ID", "(default)")
+                        )
+                        
+                        slides_ref = client_db.collection('presentation_broadcast').document(course_id)\
+                                              .collection('presentations').document(presentation_id)\
+                                              .collection('slides')
+                        
+                        all_slides = {}
+                        slides_docs = slides_ref.stream()
+                        for slide_doc in slides_docs:
+                            slide_data = slide_doc.to_dict()
+                            all_slides[slide_doc.id] = slide_data
+                        
+                        presenter_context["all_slides"] = all_slides
+                        logger.info(f"Lazy loaded {len(all_slides)} slides for presentation {presentation_id}")
+                    except Exception as slides_e:
+                        logger.warning(f"Failed to lazy load slides: {slides_e}")
+            else:
+                logger.info(f"No presenter context found for {presenter_id}")
+        except Exception as e:
+            logger.error(f"Error loading presenter context for {presenter_id}: {e}")
+    
+    # Get or create agent with presenter background
+    cache_key = presenter_id or "default"
+    if cache_key not in _agent_cache:
+        agent = create_agent(presenter_background)
+        runner = InMemoryRunner(
+            agent=agent,
+            app_name='langbridge_classroom_assistant',
+        )
+        _agent_cache[cache_key] = agent
+        _runner_cache[cache_key] = runner
+        logger.info(f"Created new agent/runner for presenter: {cache_key}")
+    else:
+        runner = _runner_cache[cache_key]
+        logger.debug(f"Reusing cached agent/runner for presenter: {cache_key}")
+
     def sse_format(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     def stream_response():
-        # Prepare the prompt with language context
+        # Prepare the prompt with language context and presenter context
         prompt = ask_text
+        
+        # Add presentation context to the prompt (slides info)
+        if presenter_context:
+            # Format the context in a more readable way for the agent
+            context_parts = []
+            
+            current_course = presenter_context.get("current_course_id")
+            current_presentation = presenter_context.get("current_presentation_id")
+            current_slide_id = presenter_context.get("current_slide_id")
+            all_slides = presenter_context.get("all_slides", {})
+            
+            if current_course:
+                context_parts.append(f"Course: {current_course}")
+            if current_presentation:
+                context_parts.append(f"Presentation: {current_presentation}")
+            
+            # Add all slides with current slide highlighted
+            if all_slides:
+                context_parts.append(f"\nPresentation Slides (Total: {len(all_slides)}):")
+                for slide_id, slide_data in sorted(all_slides.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+                    is_current = slide_id == current_slide_id
+                    marker = ">>> CURRENT SLIDE <<<" if is_current else ""
+                    languages = slide_data.get("languages", {})
+                    
+                    # Extract text from each language
+                    slide_texts = []
+                    for lang, lang_data in languages.items():
+                        text = lang_data.get("text", "") if isinstance(lang_data, dict) else ""
+                        if text:
+                            slide_texts.append(f"  [{lang}]: {text}")
+                    
+                    context_parts.append(f"\nSlide {slide_id} {marker}")
+                    context_parts.extend(slide_texts)
+            
+            if context_parts:
+                formatted_context = "\n".join(context_parts)
+                prompt = f"=== Presentation Context ===\n{formatted_context}\n=== End Context ===\n\n{ask_text}"
+                logger.debug(f"Adding formatted presentation context to prompt")
+        
         if language_code and language_code != "en":
-            prompt = f"Please respond in {language_code}: {ask_text}"
+            prompt = f"Please respond in {language_code}: {prompt}"
 
         try:
             # Reuse an existing session if present; otherwise create one
