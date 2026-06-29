@@ -19,6 +19,17 @@ This ensures:
 - **Insert-Proof**: New slides don't shift existing IDs.
 - **De-duplication**: Identical notes share the same cache.
 
+```mermaid
+flowchart TD
+    A[Slide speaker notes] --> B[Normalize content]
+    B --> C[Compute hash]
+    C --> D[Build key v1:language:hash]
+    D --> E{Key exists in Firestore?}
+    E -->|Yes| F[Reuse cached message/audio]
+    E -->|No| G[Generate new message + TTS]
+    G --> H[Store in langbridge_presentation_cache]
+```
+
 ## Tools
 
 ### 1. Excel Cache Editor (NEW)
@@ -56,6 +67,27 @@ python import_cache_from_excel.py --course-id "course_101" --file my_cache.xlsx
    - **Automatically regenerates** the TTS audio (MP3).
    - Uploads the new audio to Cloud Storage.
    - Updates the `audio_url` in the cache.
+
+```mermaid
+sequenceDiagram
+    participant User as Content Editor
+    participant XLSX as Excel File
+    participant Tool as import_cache_from_excel.py
+    participant FS as Firestore
+    participant TTS as Text-to-Speech
+    participant GCS as Cloud Storage
+
+    User->>XLSX: Edit "Generated Message"
+    User->>Tool: Run import command
+    Tool->>FS: Compare with existing cache
+    alt Message changed
+        Tool->>TTS: Synthesize new audio
+        Tool->>GCS: Upload MP3
+        Tool->>FS: Update text + audio_url
+    else No change
+        Tool->>FS: Skip update
+    end
+```
 
 ### 2. `manage_courses.py`
 

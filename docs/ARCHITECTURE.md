@@ -83,5 +83,7 @@ graph TD
    - It appends the user question and streams the AI's response back.
 
 ## Security
-- **API Keys**: All client requests must be authenticated with a valid API key.
+- **Request Authentication**:
+  - Talk/welcome/goodbye/recquestions/speech endpoints validate signed headers (`X-Timestamp`, `X-Key`, `X-Sign`).
+  - Config updates are protected at API Gateway using API key enforcement.
 - **Firestore Rules**: Data access is controlled via security rules.

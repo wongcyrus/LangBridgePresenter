@@ -21,6 +21,22 @@ The system uses **Terraform** (via CDKTF) as the Infrastructure-as-Code tool to 
     *   Builds the React application (`client/web-student`)
     *   Deploys static assets to Firebase Hosting
 
+## Deployment Flow Diagram
+
+```mermaid
+flowchart TD
+    A[Run ./deploy.sh] --> B[Load backend/cdktf/.env]
+    B --> C[cdktf deploy]
+    C --> D[Provision GCP resources<br/>Functions, Gateway, Firestore, Storage, IAM]
+    C --> E[Deploy web client to Firebase Hosting]
+    D --> F[Generate cdktf outputs]
+    F --> G[Sync local configs]
+    G --> H[backend/admin_tools/config.py]
+    G --> I[backend/presentation-preloader/config.py]
+    G --> J[backend/tests/.env.test]
+    G --> K[client/web-student/.env]
+```
+
 ## Prerequisites
 
 Before running the deployment, ensure you have the following installed and authenticated:
@@ -132,3 +148,9 @@ If you need to run development or tests on a machine **different** from the one 
         ```
     *   This will configure your local environment (`tests/.env.test`, `client/web-student/.env`, etc.) using the deployment outputs from the other machine.
 
+```mermaid
+flowchart LR
+    A[Deployment machine] -->|Run ./deploy.sh| B[backend/cdktf_outputs.json]
+    B -->|Secure copy| C[Dev/Test machine backend/cdktf_outputs.json]
+    C -->|Run python3 backend/sync_config.py| D[Local env files synced]
+```

@@ -9,7 +9,9 @@ functions/
 ├── talk-stream/     # SSE streaming chat endpoint
 ├── welcome/         # Welcome message endpoint  
 ├── goodbye/         # Goodbye message endpoint
-└── recquestions/    # Recommended questions endpoint
+├── recquestions/    # Recommended questions endpoint
+├── speech/          # TTS endpoint
+└── config/          # Config + presentation broadcast endpoint
 
 cdktf/              # Infrastructure as Code
 ├── main.ts         # Main deployment stack
@@ -38,12 +40,14 @@ cdktf/              # Infrastructure as Code
 
 ## API Endpoints
 
-- `POST /talk` - Streaming chat response
-- `POST /welcome` - Welcome message
-- `POST /goodbye` - Goodbye message  
-- `POST /recquestions` - Recommended questions
+- `POST /api/talk` - Streaming chat response (SSE)
+- `POST /api/welcome` - Welcome/presentation message
+- `POST /api/goodbye` - Goodbye message
+- `POST /api/recquestions` - Recommended questions
+- `POST /api/speech` - Text-to-speech and voice URL
+- `POST /api/config` - Update Firestore config and live presentation broadcast
 
-All endpoints return mocked responses for development.
+`talk-stream`, `welcome`, `goodbye`, `recquestions`, and `speech` use header-based request signature validation. `/api/config` is exposed through API Gateway key protection and updates Firestore-backed runtime state.
 # xiaoice_class_assistant
 
 ### Login your GCP account

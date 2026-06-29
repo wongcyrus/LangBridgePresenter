@@ -14,6 +14,26 @@ The infrastructure code is located in `backend/cdktf/`.
     - **Firestore**: NoSQL database for state and cache.
     - **Cloud Storage**: Stores function source code.
 
+## Request Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant Client as Client (Web/VBA/Python)
+    participant Gateway as API Gateway
+    participant Fn as Cloud Function
+    participant FS as Firestore
+    participant CS as Cloud Storage
+
+    Client->>Gateway: POST /api/*
+    Gateway->>Fn: Route to target function
+    Fn->>Fn: Validate auth/signature
+    Fn->>FS: Read/write config, cache, sessions
+    alt speech endpoint
+        Fn->>CS: Read or upload MP3
+    end
+    Fn-->>Client: JSON or SSE response
+```
+
 ## Cloud Functions
 
 Located in `backend/functions/`.
@@ -29,13 +49,16 @@ Located in `backend/functions/`.
 
 ### 2. Welcome (`welcome`)
 - **Path**: `/api/welcome`
-- **Method**: GET
+- **Method**: POST
 - **Purpose**: Returns a greeting message when the application starts.
-- **Logic**: Can be personalized based on the current context or time of day.
+- **Logic**:
+    - Supports `languageCode`, `sessionId`, and `traceId` in request body.
+    - If `userParams` indicates presentation context, it returns `presentation_messages` from Firestore config.
+    - Otherwise it returns `welcome_messages`.
 
 ### 3. Goodbye (`goodbye`)
 - **Path**: `/api/goodbye`
-- **Method**: GET
+- **Method**: POST
 - **Purpose**: Returns a farewell message.
 
 ### 4. Config (`config`)
@@ -46,13 +69,35 @@ Located in `backend/functions/`.
 
 ### 5. RecQuestions (`recquestions`)
 - **Path**: `/api/recquestions`
-- **Method**: GET
+- **Method**: POST
 - **Purpose**: Generates recommended questions for the user to ask, based on the current context.
 
 ### 6. Speech (`speech`)
 - **Path**: `/api/speech`
 - **Method**: POST
-- **Purpose**: Converts text to speech (TTS) if enabled.
+- **Purpose**: Converts selected welcome/presentation text to speech (TTS) and returns `voiceUrl`.
+- **Storage**: Uses the configured `SPEECH_FILE_BUCKET` and reuses cached MP3 files by content hash.
+
+## Request Authentication
+
+Runtime auth behavior is split between API Gateway and function-level checks:
+
+- **`/api/talk`, `/api/welcome`, `/api/goodbye`, `/api/recquestions`, `/api/speech`**
+  - Validate custom headers: `X-Timestamp`, `X-Key`, `X-Sign`
+  - Signature is generated from request body + timestamp + secret key.
+- **`/api/config`**
+  - Enforced by API Gateway API key (`key` query parameter in gateway spec).
+  - Function itself currently validates method/body and writes config + broadcast state.
+
+```mermaid
+flowchart LR
+    A[Incoming request] --> B{Endpoint is /api/config?}
+    B -->|Yes| C[API Gateway API key check]
+    B -->|No| D[Function header signature check<br/>X-Timestamp + X-Key + X-Sign]
+    C --> E[Function logic]
+    D --> E
+    E --> F[Firestore/Storage operations]
+```
 
 ## Data Model (Firestore)
 
