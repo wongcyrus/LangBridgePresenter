@@ -1,6 +1,6 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR/cdktf"
-npm install cdktf-cli@latest
+npm install cdktn-cli@latest
 npm i
-npx cdktf-cli get
-npx cdktf-cli deploy --auto-approve
+npx cdktn get
+npx cdktn deploy --auto-approve

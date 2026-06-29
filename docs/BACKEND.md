@@ -1,6 +1,6 @@
 # Backend Documentation
 
-The backend is built on Google Cloud Platform (GCP) using a serverless architecture. It is deployed and managed using the Cloud Development Kit for Terraform (CDKTF).
+The backend is built on Google Cloud Platform (GCP) using a serverless architecture. It is deployed and managed using CDK Terrain (CDKTN).
 
 ## Infrastructure
 
@@ -32,6 +32,20 @@ sequenceDiagram
         Fn->>CS: Read or upload MP3
     end
     Fn-->>Client: JSON or SSE response
+```
+
+## Config Broadcast Flow
+
+```mermaid
+flowchart TD
+    A[POST /api/config] --> B[Validate method + JSON]
+    B --> C[Resolve slide content]
+    C --> D[Normalize PPT id]
+    D --> E[Load course styles]
+    E --> F[Enrich slide languages]
+    F --> G[Write langbridge_config/messages]
+    F --> H[Update presentation_broadcast live pointer]
+    F --> I[Update presenter docs]
 ```
 
 ## Cloud Functions
@@ -76,6 +90,19 @@ Located in `backend/functions/`.
     - Supports multiple presenters via comma-separated presenter IDs in `userParams.presenterId`
     - Updates all specified presenters with current slide context
     - Broadcasts slide updates to client applications
+
+```mermaid
+sequenceDiagram
+    participant VBA as VBA / Python Client
+    participant Fn as config function
+    participant ClientFS as Client Firestore
+    participant BackendFS as Backend Firestore
+
+    VBA->>Fn: POST slide context
+    Fn->>BackendFS: save config messages
+    Fn->>ClientFS: update live pointer
+    Fn->>BackendFS: update presenter docs
+```
 
 ### 5. RecQuestions (`recquestions`)
 - **Path**: `/api/recquestions`
@@ -188,6 +215,14 @@ python seed_course_content.py \
 - Skips existing audio/visual files (idempotent)
 - Supports refined progress files (`*_progress_refined.json`)
 - Sets live pointer to first slide after seeding
+
+```mermaid
+flowchart LR
+    Notes[Progress files + visuals] --> Seed[seed_course_content.py]
+    Seed --> Firestore[(presentation_broadcast)]
+    Seed --> Storage[(Cloud Storage)]
+    Firestore --> Live[Current slide pointer]
+```
 
 ## Deployment
 

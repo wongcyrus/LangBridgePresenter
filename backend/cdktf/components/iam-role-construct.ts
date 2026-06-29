@@ -1,7 +1,7 @@
 import { Construct } from "constructs";
 import { GoogleProjectIamMember } from "../.gen/providers/google-beta/google-project-iam-member";
 import { GoogleStorageBucketIamMember } from "../.gen/providers/google-beta/google-storage-bucket-iam-member";
-import { ITerraformDependable } from "cdktf";
+import { ITerraformDependable } from "cdktn";
 
 export interface ProjectIamRoleProps {
     readonly project: string;

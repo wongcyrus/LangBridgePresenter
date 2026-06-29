@@ -3,7 +3,7 @@ import { GoogleFirebaseWebApp } from "../.gen/providers/google-beta/google-fireb
 import { GoogleFirebaseHostingSite } from "../.gen/providers/google-beta/google-firebase-hosting-site";
 import { GoogleFirebaseProject } from "../.gen/providers/google-beta/google-firebase-project";
 import { GoogleBetaProvider } from "../.gen/providers/google-beta/provider";
-import { ITerraformDependable } from "cdktf";
+import { ITerraformDependable } from "cdktn";
 
 export interface FirebaseHostingConstructProps {
     readonly project: string;

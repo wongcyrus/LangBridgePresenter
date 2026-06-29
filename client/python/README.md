@@ -12,7 +12,7 @@ Cross-platform Python desktop application that captures screen content, performs
 
 ## Prerequisites
 
-- Python 3.8+ (works on 3.8–3.14)
+- Python 3.10+ (works on 3.10–3.14)
 - Tesseract OCR engine
 
 ### Install Tesseract:
@@ -87,7 +87,7 @@ Download from: https://github.com/UB-Mannheim/tesseract/wiki
 
 ### Troubleshooting
 
-- If you are on Python 3.13+, older wheels like Pillow 10.1.0 may not install. The included setup and requirements automatically install compatible versions for newer Python.
+- The included setup and requirements install a Pillow release that works with the supported Python versions.
 - If installation still fails on Windows, upgrade tools inside the venv and retry setup:
 	```powershell
 	.\venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel

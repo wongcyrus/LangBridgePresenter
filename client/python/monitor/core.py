@@ -31,12 +31,21 @@ class MonitorController:
 
     @staticmethod
     def _text_hash(text: str) -> str:
-        return hashlib.md5(text.encode()).hexdigest()
+        return hashlib.sha256(text.encode()).hexdigest()
 
     @staticmethod
     def _image_hash(image: Image.Image) -> str:
         """Fast perceptual hash of image pixels for change detection."""
-        return hashlib.md5(image.tobytes()).hexdigest()
+        return hashlib.sha256(image.tobytes()).hexdigest()
+
+    @staticmethod
+    def _print_change_summary(detect_mode, image_hash, text_hash):
+        if detect_mode == "image":
+            print(f"Image hash: {image_hash}")
+        elif detect_mode == "ocr":
+            print(f"OCR hash: {text_hash}")
+        else:
+            print(f"Image hash: {image_hash} | OCR hash: {text_hash}")
 
     def _save_image(self, image: Image.Image) -> str:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -71,13 +80,11 @@ class MonitorController:
 
         if changed:
             self._save_image(screenshot)
-            # Print detection results
-            if self.detect_mode == "image":
-                print(f"Image hash: {current_image_hash}")
-            elif self.detect_mode == "ocr":
-                print(f"OCR hash: {current_text_hash}")
-            else:  # both
-                print(f"Image hash: {current_image_hash} | OCR hash: {current_text_hash}")
+            self._print_change_summary(
+                self.detect_mode,
+                current_image_hash,
+                current_text_hash,
+            )
         
         return screenshot, text, changed
 
@@ -95,5 +102,5 @@ class MonitorController:
                 time.sleep(self.interval)
         except KeyboardInterrupt:
             print("\nMonitoring stopped")
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             print(f"\nStopped due to error: {e}")

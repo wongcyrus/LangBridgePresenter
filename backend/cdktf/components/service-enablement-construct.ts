@@ -1,6 +1,6 @@
 import { Construct } from "constructs";
 import { GoogleProjectService } from "../.gen/providers/google-beta/google-project-service";
-import { ITerraformDependable } from "cdktf";
+import { ITerraformDependable } from "cdktn";
 
 export interface ServiceEnablementConstructProps {
     readonly project: string;

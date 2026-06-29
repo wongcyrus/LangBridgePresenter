@@ -3,7 +3,7 @@
 # Script to build and deploy the web-student client to Firebase Hosting
 
 # Exit on any error
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CLIENT_DIR="$SCRIPT_DIR"
@@ -15,11 +15,7 @@ echo "🚀 Starting deployment for Web Student Client..."
 
 # 1. Install Dependencies
 echo "📦 Installing dependencies..."
-if [ ! -d "node_modules" ]; then
-    npm install
-else
-    echo "   (Skipping install, node_modules exists)"
-fi
+npm ci
 
 # 2. Build the Project
 echo "🔨 Building the project..."

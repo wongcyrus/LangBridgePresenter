@@ -6,7 +6,13 @@ import sys
 from datetime import datetime
 import functions_framework
 from auth_utils import validate_authentication
-from firestore_utils import get_config
+from firestore_utils import get_config, get_document
+from _shared.context_utils import (
+    canonical_language_code,
+    extract_presenter_ids,
+    has_presentation_context,
+    resolve_message_text,
+)
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -39,80 +45,50 @@ def welcome(request):
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
 
-    userParams = request_json.get("userParams", {})
-    logger.debug("userParams: %s", userParams)
+    user_params = request_json.get("userParams", {})
+    logger.debug("userParams: %s", user_params)
 
-    presenter_id = None
-    if isinstance(userParams, dict):
-        presenter_id = userParams.get("presenterId")
-    elif isinstance(userParams, str):
-        # Handle string format like "summer-presentation" or just "summer"
-        if "-" in userParams:
-            parts = userParams.split("-")
-            # Heuristic: assume the first part is the ID if the second is 'presentation'
-            # or just take the first part as a best guess.
-            if len(parts) > 0:
-                presenter_id = parts[0]
-        else:
-            presenter_id = userParams
-            
-    logger.debug(f"Extracted presenter_id: {presenter_id}")
+    presenter_ids = extract_presenter_ids(user_params)
+    presenter_id = presenter_ids[0] if presenter_ids else None
+    logger.debug("Extracted presenter_ids: %s", presenter_ids)
 
     presenter = None
     if presenter_id:
-        from firestore_utils import get_document
         presenter = get_document("presenters", presenter_id)
-        logger.debug(f"Fetched presenter: {presenter}")
+        logger.debug("Fetched presenter: %s", presenter)
         if presenter and "language" in presenter:
             language_code = presenter["language"]
-            logger.debug(f"Using presenter language: {language_code}")
+            logger.debug("Using presenter language: %s", language_code)
 
     # Check if this is a presentation context
-    is_presentation = False
-    if isinstance(userParams, str):
-        is_presentation = "presentation" in userParams.lower()
-    
     # Use presentation_messages if presentation context,
     # otherwise welcome_messages
-    if is_presentation and presenter:
+    if has_presentation_context(user_params) and presenter:
         logger.debug("Using current_slide_languages from presenter")
-        
-        # Map simple language codes to full codes used in the configuration
-        LANG_CODE_MAP = {
-            "en": "en-US",
-            "zh": "zh-CN",
-            "yue": "yue-HK",
-            "yue-HK": "yue-HK",
-            "zh-CN": "zh-CN",
-            "en-US": "en-US"
-        }
-        target_lang = LANG_CODE_MAP.get(language_code, "en-US")
-        logger.debug(f"Targeting language: {target_lang} for code: {language_code}")
-
         # Get current slide languages directly from presenter
         current_slide_languages = presenter.get("current_slide_languages", {})
-        message_data = current_slide_languages.get(target_lang)
-
-        if message_data and isinstance(message_data, dict) and "text" in message_data:
-            reply = message_data["text"]
-        elif isinstance(message_data, str):
-            reply = message_data
-        else:
-            # Fallback to English if target lang not found
-            logger.warning(f"No presentation message found for {target_lang}, falling back to en-US")
-            fallback_data = current_slide_languages.get("en-US", {})
-            if isinstance(fallback_data, dict):
-                reply = fallback_data.get("text", "Hello")
-            elif isinstance(fallback_data, str):
-                reply = fallback_data
-            else:
-                reply = "Hello"
+        target_lang = canonical_language_code(language_code)
+        logger.debug("Targeting language: %s for code: %s", target_lang, language_code)
+        reply = resolve_message_text(
+            current_slide_languages,
+            [target_lang, "en-US", "en"],
+            "Hello",
+        )
+        if reply == "Hello":
+            logger.warning(
+                "No presentation message found for %s, falling back to default",
+                target_lang,
+            )
     else:
         # Non-presentation context: use config
         config = get_config()
         messages = config.get("welcome_messages", {})        
         logger.debug("Using welcome_messages")    
-        reply = messages.get(language_code, messages.get("en", "Welcome!"))
+        reply = resolve_message_text(
+            messages,
+            [canonical_language_code(language_code), language_code, "en"],
+            "Welcome!",
+        )
         
     logger.debug("reply_text: %s", reply)
     response = {

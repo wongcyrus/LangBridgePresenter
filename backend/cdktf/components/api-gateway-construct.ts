@@ -5,7 +5,7 @@ import { GoogleApiGatewayGateway } from "../.gen/providers/google-beta/google-ap
 import { GoogleBetaProvider } from "../.gen/providers/google-beta/provider";
 import { GoogleServiceAccount } from "../.gen/providers/google-beta/google-service-account";
 import path = require("path");
-import { Fn, ITerraformDependable } from "cdktf";
+import { Fn, ITerraformDependable } from "cdktn";
 
 export interface ApigatewayConstructProps {
     readonly api: string;

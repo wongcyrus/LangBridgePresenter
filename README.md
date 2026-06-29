@@ -8,7 +8,7 @@ Detailed documentation for each component can be found in the `docs/` directory:
 
 - **[System Architecture](docs/ARCHITECTURE.md)**: High-level overview of the system, data flow, and security.
 - **[Deployment Guide](docs/DEPLOYMENT.md)**: Step-by-step guide to deploying the full stack (Backend & Web Client).
-- **[Backend Documentation](docs/BACKEND.md)**: Details on Cloud Functions, API Gateway, and Infrastructure as Code (CDKTF).
+- **[Backend Documentation](docs/BACKEND.md)**: Details on Cloud Functions, API Gateway, and Infrastructure as Code (CDK Terrain / CDKTN).
 - **[Python Monitor Client](docs/CLIENT_PYTHON.md)**: Guide for the desktop application that captures screen content and OCR.
 - **[VBA PowerPoint Client](docs/CLIENT_VBA.md)**: Guide for the PowerPoint integration that pushes slide notes.
 - **[Admin Tools & Caching](docs/ADMIN_TOOLS.md)**: Explanation of the content-based caching strategy and admin scripts.
@@ -31,7 +31,7 @@ Detailed documentation for each component can be found in the `docs/` directory:
 
 ### 1. Unified Deployment
 
-The entire system, including backend infrastructure (via CDKTF) and the frontend web client (to Firebase Hosting), can be deployed with a single command.
+The entire system, including backend infrastructure (via CDK Terrain / CDKTN) and the frontend web client (to Firebase Hosting), can be deployed with a single command.
 
 1.  Navigate to `backend/cdktf`.
 2.  Copy `.env.template` to `.env` and fill in your GCP credentials, project IDs, and API keys. This `.env` file is now the **single source of truth** for all environment-specific configurations.
@@ -42,8 +42,8 @@ The entire system, including backend infrastructure (via CDKTF) and the frontend
     ```
 
 This script will:
--   Provision your Google Cloud infrastructure (Cloud Functions, API Gateway, etc.) using CDKTF.
--   Update local configuration files (`backend/admin_tools/config.py`, `backend/presentation-preloader/config.py`) and test environment variables (`backend/tests/.env.test`) from the CDKTF outputs and your `.env` file.
+-   Provision your Google Cloud infrastructure (Cloud Functions, API Gateway, etc.) using CDK Terrain / CDKTN.
+-   Update local configuration files (`backend/admin_tools/config.py`, `backend/presentation-preloader/config.py`) and test environment variables (`backend/tests/.env.test`) from the CDKTN outputs and your `.env` file.
 -   Build and deploy the `client/web-student` application to Firebase Hosting.
 
 See [Deployment Guide](docs/DEPLOYMENT.md) for comprehensive instructions and troubleshooting.

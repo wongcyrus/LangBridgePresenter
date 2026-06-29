@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "cdktf-cli": "^0.21.0"
+    "cdktn-cli": "^0.23.3"
   }
 }

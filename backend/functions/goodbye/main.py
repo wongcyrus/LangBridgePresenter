@@ -7,6 +7,7 @@ from datetime import datetime
 import functions_framework
 from auth_utils import validate_authentication
 from firestore_utils import get_config
+from _shared.context_utils import canonical_language_code, resolve_message_text
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -39,12 +40,15 @@ def goodbye(request):
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
+    canonical_code = canonical_language_code(language_code, default=language_code)
     
     config = get_config()
     goodbye_messages = config.get("goodbye_messages", {})
-    
-    reply = goodbye_messages.get(
-        language_code, goodbye_messages.get("en", "Goodbye!")
+
+    reply = resolve_message_text(
+        goodbye_messages,
+        [language_code, canonical_code, "en", "en-US"],
+        "Goodbye!",
     )
     logger.debug("reply_text: %s", reply)
     response = {

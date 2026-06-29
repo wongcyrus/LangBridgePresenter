@@ -19,7 +19,10 @@
 		},
 		"vscode": {
 			"settings": {
-				"python.defaultInterpreterPath": "/usr/local/bin/python"
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.linting.enabled": true,
+				"python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
+				"python.linting.flake8Enabled": true
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
@@ -31,12 +34,7 @@
 				"ms-toolsai.jupyter",
 				"GitHub.copilot"
 			]
-		},
-		"settings": {
-			"python.defaultInterpreterPath": "/usr/local/bin/python",
-			"python.linting.enabled": true,
-			"python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
-			"python.linting.flake8Enabled": true
 		}
-	}
+	},
+	"postCreateCommand": "npm install -g firebase-tools"
 }

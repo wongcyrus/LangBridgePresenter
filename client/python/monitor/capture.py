@@ -1,24 +1,45 @@
 import importlib
+from typing import Callable
 from typing import Optional, Dict, List
 
-import pyautogui
 from PIL import Image
 
 
 class ScreenCapture:
-    def __init__(self, monitor_index: Optional[int] = None):
+    @staticmethod
+    def _fallback_screenshot() -> Image.Image:
+        try:
+            import pyautogui
+        except Exception as exc:
+            raise RuntimeError(
+                "pyautogui screenshot fallback is unavailable in this environment"
+            ) from exc
+        return pyautogui.screenshot()
+
+    def __init__(
+        self,
+        monitor_index: Optional[int] = None,
+        mss_factory: Callable[[], object] | None = None,
+        screenshot_fn: Callable[[], Image.Image] | None = None,
+    ):
         self.monitor_index = monitor_index
         self.monitor_rect: Optional[Dict[str, int]] = None
+        self._mss_factory = mss_factory
+        self._screenshot_fn = screenshot_fn or self._fallback_screenshot
         try:
-            _mss = importlib.import_module("mss")
-            self.sct = _mss.mss()
+            self.sct = self._create_mss()
         except ModuleNotFoundError:
             self.sct = None
 
+    def _create_mss(self):
+        if self._mss_factory is not None:
+            return self._mss_factory()
+        _mss = importlib.import_module("mss")
+        return _mss.mss()
+
     def refresh_mss(self):
         try:
-            _mss = importlib.import_module("mss")
-            self.sct = _mss.mss()
+            self.sct = self._create_mss()
         except ModuleNotFoundError:
             self.sct = None
 
@@ -119,7 +140,7 @@ class ScreenCapture:
         if not self.sct:
             self.refresh_mss()
             if not self.sct:
-                return pyautogui.screenshot()
+                return self._screenshot_fn()
         mon = self.monitor_rect or self.sct.monitors[0]
         try:
             shot = self.sct.grab(mon)
@@ -141,4 +162,4 @@ class ScreenCapture:
                     return img
             except Exception:
                 pass
-            return pyautogui.screenshot()
+            return self._screenshot_fn()

@@ -4,7 +4,7 @@ This guide covers the complete deployment process for the LangBridge Presenter s
 
 ## Overview
 
-The system uses **Terraform** (via CDKTF) as the Infrastructure-as-Code tool to provision all resources. A unified deployment script `deploy.sh` is provided to orchestrate the process.
+The system uses **Terraform** (via CDK Terrain / CDKTN) as the Infrastructure-as-Code tool to provision all resources. A unified deployment script `deploy.sh` is provided to orchestrate the process.
 
 **What gets deployed:**
 1.  **Google Cloud Infrastructure**:
@@ -26,10 +26,10 @@ The system uses **Terraform** (via CDKTF) as the Infrastructure-as-Code tool to 
 ```mermaid
 flowchart TD
     A[Run ./deploy.sh] --> B[Load backend/cdktf/.env]
-    B --> C[cdktf deploy]
+    B --> C[cdktn deploy]
     C --> D[Provision GCP resources<br/>Functions, Gateway, Firestore, Storage, IAM]
     C --> E[Deploy web client to Firebase Hosting]
-    D --> F[Generate cdktf outputs]
+    D --> F[Generate cdktn outputs]
     F --> G[Sync local configs]
     G --> H[backend/admin_tools/config.py]
     G --> I[backend/presentation-preloader/config.py]
@@ -52,7 +52,7 @@ Before running the deployment, ensure you have the following installed and authe
     *   Login: `firebase login`
 
 3.  **Node.js & npm**:
-    *   Required for CDKTF and the Web Client build.
+    *   Required for CDK Terrain and the Web Client build.
     *   Version 18+ recommended.
 
 4.  **Python 3.11+**:
@@ -90,7 +90,7 @@ From the root of the project (`xiaoice_class_assistant/`), run the unified deplo
 
 ### What this script does:
 
-1.  **Deploys Infrastructure**: Runs `npx cdktf deploy` to provision GCP resources.
+1.  **Deploys Infrastructure**: Runs `npx cdktn deploy` to provision GCP resources.
     *   *Note: This step includes a `local-exec` provisioner that automatically builds and deploys the web client to Firebase Hosting.*
 2.  **Syncs Configuration**:
     *   Extracts outputs (API Gateway URL, Bucket names, Keys) from the Terraform state.

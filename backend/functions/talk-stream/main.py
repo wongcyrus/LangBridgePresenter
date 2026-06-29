@@ -12,6 +12,7 @@ from firestore_utils import get_config
 from google.adk.agents import config_agent_utils
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from _shared.context_utils import extract_presenter_ids
 
 
 # Robust logging setup that works on Cloud Functions/Cloud Run
@@ -78,23 +79,10 @@ def talk_stream(request):
     language_code = request_json.get("languageCode", "en")
     extra = request_json.get("extra", {})
 
-    # Consistent presenter_id extraction logic (copied from welcome/main.py)
-    userParams = request_json.get("userParams", {})
-    presenter_id = None
-    if isinstance(userParams, dict):
-        presenter_id = userParams.get("presenterId")
-    elif isinstance(userParams, str):
-        # Handle string format like "summer-presentation" or just "summer"
-        if "-" in userParams:
-            parts = userParams.split("-")
-            # Heuristic: assume the first part is the ID if the second is 'presentation'
-            # or just take the first part as a best guess.
-            if len(parts) > 0:
-                presenter_id = parts[0]
-        else:
-            presenter_id = userParams
-    # presenter_id is now extracted consistently
-    logger.info(f"presenter_id {presenter_id}")
+    user_params = request_json.get("userParams", {})
+    presenter_ids = extract_presenter_ids(user_params)
+    presenter_id = presenter_ids[0] if presenter_ids else None
+    logger.info("presenter_ids=%s selected_presenter_id=%s", presenter_ids, presenter_id)
 
     # Read presenter context from Firestore (lazy load all_slides)
     presenter_context = {}

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 VENV_DIR=".venv"
 PYTHON_CMD="python3"
@@ -27,7 +28,7 @@ fi
 # Create virtual environment if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating virtual environment in $VENV_DIR using $PYTHON_CMD..."
-    $PYTHON_CMD -m venv "$VENV_DIR"
+    "$PYTHON_CMD" -m venv "$VENV_DIR"
 fi
 
 # Activate virtual environment
@@ -35,7 +36,7 @@ source "$VENV_DIR/bin/activate"
 
 # Upgrade pip
 echo "Upgrading pip..."
-pip install --upgrade pip
+python -m pip install --upgrade pip
 
 # List of requirements files
 REQUIREMENTS_FILES=(
@@ -59,7 +60,7 @@ FAILED_FILES=()
 for req_file in "${REQUIREMENTS_FILES[@]}"; do
     if [ -f "$req_file" ]; then
         echo "Installing dependencies from $req_file..."
-        if ! pip install -r "$req_file"; then
+        if ! python -m pip install -r "$req_file"; then
             echo "Error installing dependencies from $req_file"
             FAILED_FILES+=("$req_file")
         fi

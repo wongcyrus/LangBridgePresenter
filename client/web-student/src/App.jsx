@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
+import { normalizeLanguageSelection, parseNumericIds } from "./utils/presentation";
 
 // --- Icons ---
 const PlayIcon = () => (
@@ -193,16 +194,8 @@ function App() {
             if (langs.length > 0) {
                 setSupportedLangs(langs);
                 
-                // Auto-select valid language helper
-                const initLang = (current, available) => {
-                    if (available.includes(current)) return current;
-                    const match = available.find(l => l.startsWith(current) || current.startsWith(l));
-                    if (match) return match;
-                    return available[0];
-                };
-
-                setViewLang(prev => initLang(prev, langs));
-                setListenLang(prev => initLang(prev, langs));
+                setViewLang(prev => normalizeLanguageSelection(prev, langs));
+                setListenLang(prev => normalizeLanguageSelection(prev, langs));
             }
         }
       } else {
@@ -267,10 +260,7 @@ function App() {
               const rawIds = snapshot.docs.map(d => d.id);
               console.log("[DEBUG] Raw Slide IDs:", rawIds);
     
-              const ids = rawIds
-                  .map(id => parseInt(id, 10))
-                  .filter(n => !isNaN(n))
-                  .sort((a, b) => a - b);
+              const ids = parseNumericIds(rawIds);
               console.log("[DEBUG] Parsed Slide IDs:", ids);
               setSlideList(ids);
           }, (error) => {
@@ -381,6 +371,13 @@ function App() {
           audio.removeEventListener('play', handlePlay);
           audio.removeEventListener('pause', handlePause);
           audio.removeEventListener('ended', handleEnded);
+      };
+  }, []);
+
+  useEffect(() => {
+      return () => {
+          audioRef.current.pause();
+          audioRef.current.src = '';
       };
   }, []);
 

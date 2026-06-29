@@ -1,7 +1,7 @@
-# CDKTF Infrastructure Refactoring Summary
+# CDK Terrain Infrastructure Refactoring Summary
 
 ## Overview
-This refactoring improves code reusability, clarifies dependencies, and eliminates duplication in the CDKTF infrastructure code.
+This refactoring improves code reusability, clarifies dependencies, and eliminates duplication in the CDK Terrain infrastructure code.
 
 ## Changes Made
 

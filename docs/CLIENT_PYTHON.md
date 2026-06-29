@@ -12,7 +12,7 @@ The Window Monitor is a cross-platform desktop application that captures screen 
 ## Installation
 
 1. **Prerequisites**:
-    - Python 3.8+
+    - Python 3.10+
     - Tesseract OCR installed on the system.
 
 2. **Setup**:
@@ -59,3 +59,26 @@ python window_monitor.py --interval 2 --lang chi_sim --monitor 1
 - **`monitor/ocr.py`**: Wraps `pytesseract` for text extraction.
 - **`monitor/core.py`**: Main loop logic, change detection, and backend communication.
 - **`monitor/gui.py`**: `tkinter`-based preview window.
+
+```mermaid
+flowchart LR
+    Capture[Screen capture] --> OCR[OCR]
+    OCR --> Diff[Change detection]
+    Diff -->|Changed| API[/api/config/]
+    Diff -->|No change| Skip[Skip backend update]
+    API --> FS[(Firestore)]
+```
+
+```mermaid
+sequenceDiagram
+    participant GUI as Preview GUI
+    participant Core as Monitor core
+    participant Cap as Capture backend
+    participant OCR as OCR engine
+
+    GUI->>Core: update loop
+    Core->>Cap: capture()
+    Core->>OCR: image_to_text()
+    Core->>Core: compare hashes
+    Core-->>GUI: render preview + status
+```

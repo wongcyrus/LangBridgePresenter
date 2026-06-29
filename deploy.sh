@@ -5,7 +5,7 @@ set -e
 
 # --- Centralized Deployment Script ---
 # This script orchestrates the full deployment of both backend infrastructure
-# (via CDKTF) and the frontend web client (to Firebase Hosting).
+# (via CDK Terrain / CDKTN) and the frontend web client (to Firebase Hosting).
 #
 # Prerequisites:
 # 1. Ensure `backend/cdktf/.env` is properly configured with your project IDs and API keys.
@@ -16,8 +16,8 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Verify backend/cdktf/.env exists
-CDKTF_ENV_PATH="$SCRIPT_DIR/backend/cdktf/.env"
-if [ ! -f "$CDKTF_ENV_PATH" ]; then
+CDKTN_ENV_PATH="$SCRIPT_DIR/backend/cdktf/.env"
+if [ ! -f "$CDKTN_ENV_PATH" ]; then
     echo "Error: backend/cdktf/.env not found. Please create and configure it based on .env.template."
     exit 1
 fi
@@ -26,12 +26,12 @@ fi
 # (especially for child scripts that might not explicitly load it)
 set -a
 # shellcheck disable=SC1090
-. "$CDKTF_ENV_PATH"
+. "$CDKTN_ENV_PATH"
 set +a
 
 echo "🚀 Starting full deployment..."
 
-# Deploy Backend Infrastructure via CDKTF and sync config files
+# Deploy Backend Infrastructure via CDK Terrain / CDKTN and sync config files
 echo "
 --- Deploying Backend Infrastructure ---"
 # Capture absolute path for use after cd change
@@ -41,10 +41,10 @@ OUTPUT_FILE="$SCRIPT_DIR/backend/cdktf_outputs.json"
 bash "$SCRIPT_DIR/backend/deploy.sh"
 
 # 2. Export Outputs for portability (this allows syncing on other machines)
-echo "Exporting CDKTF outputs to $OUTPUT_FILE..."
+echo "Exporting CDK Terrain outputs to $OUTPUT_FILE..."
 cd "$SCRIPT_DIR/backend/cdktf"
-# Use npx to run cdktf output and save to JSON
-npx cdktf output --outputs-file-include-sensitive-outputs --outputs-file "$OUTPUT_FILE" --json
+# Use npx to run cdktn output and save to JSON
+npx cdktn output --outputs-file-include-sensitive-outputs --outputs-file "$OUTPUT_FILE" --json
 
 # 3. Run Sync Config (now uses the file if available)
 echo "Running final configuration sync..."

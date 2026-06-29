@@ -1,5 +1,5 @@
 import { Construct } from "constructs";
-import { App, TerraformOutput, TerraformStack } from "cdktf";
+import { App, TerraformOutput, TerraformStack } from "cdktn";
 import { ArchiveProvider } from "./.gen/providers/archive/provider";
 import { RandomProvider } from "./.gen/providers/random/provider";
 import { StringResource } from "./.gen/providers/random/string-resource";

@@ -6,6 +6,10 @@ import sys
 import functions_framework
 from auth_utils import validate_authentication
 from firestore_utils import get_config
+from _shared.context_utils import (
+    canonical_language_code,
+    resolve_language_list,
+)
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -37,12 +41,15 @@ def recquestions(request):
     
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
+    canonical_code = canonical_language_code(language_code, default=language_code)
     
     config = get_config()
     recommended_questions = config.get("recommended_questions", {})
-    
-    data = recommended_questions.get(
-        language_code, recommended_questions.get("en", [])
+
+    data = resolve_language_list(
+        recommended_questions,
+        [language_code, canonical_code, "en", "en-US"],
+        [],
     )
     count = len(data) if hasattr(data, "__len__") else -1
     logger.debug("questions_count: %d", count)

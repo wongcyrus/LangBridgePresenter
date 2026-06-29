@@ -8,7 +8,8 @@ import { GoogleServiceAccount } from "../.gen/providers/google-beta/google-servi
 import { GoogleStorageBucketObject } from "../.gen/providers/google-beta/google-storage-bucket-object";
 import { CloudFunctionDeploymentConstruct } from "./cloud-function-deployment-construct";
 import path = require("path");
-import { ITerraformDependable } from "cdktf";
+import { ITerraformDependable } from "cdktn";
+import * as fs from "fs";
 
 export interface CloudFunctionConstructProps {
     readonly functionName: string;
@@ -52,16 +53,38 @@ export class CloudFunctionConstruct extends Construct {
     }
 
     private async build(props: CloudFunctionConstructProps) {
+        const sourceDir = path.resolve(
+            __dirname,
+            "..",
+            "..",
+            "functions",
+            this.props.functionCode ?? this.props.functionName
+        );
+        const sharedDir = path.resolve(__dirname, "..", "..", "functions", "_shared");
+        const stagingDir = path.resolve(
+            __dirname,
+            "..",
+            "cdktf.out",
+            "function-staging",
+            this.props.functionCode ?? this.props.functionName
+        );
+
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+        fs.mkdirSync(stagingDir, { recursive: true });
+        fs.cpSync(sourceDir, stagingDir, { recursive: true });
+        if (fs.existsSync(sharedDir)) {
+            fs.cpSync(sharedDir, path.resolve(stagingDir, "_shared"), { recursive: true });
+        }
 
         const options = {
             folders: { exclude: ['.*', "bin", "obj"] },
             files: { include: ['*.py', '*.txt', '*.zip'] },
         };
-        const hash = await hashElement(path.resolve(__dirname, "..", "..", "functions", this.props.functionCode ?? this.props.functionName), options);
+        const hash = await hashElement(stagingDir, options);
         const outputFileName = `function-source-${hash.hash}cpu.zip`;
         const code = new DataArchiveFile(this, "archiveFile", {
             type: "zip",
-            sourceDir: path.resolve(__dirname, "..", "..", "functions", this.props.functionCode ?? this.props.functionName),
+            sourceDir: stagingDir,
             outputPath: path.resolve(__dirname, "..", "cdktf.out", "functions", outputFileName)
         });
 

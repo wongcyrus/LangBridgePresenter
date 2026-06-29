@@ -1,11 +1,12 @@
+import importlib
 import os
 from typing import Dict
 
 
-def run_preview(controller):
+def run_preview(controller, tk_module=None, image_tk_module=None):
     try:
-        import tkinter as tk
-        from PIL import ImageTk
+        tk = tk_module or importlib.import_module("tkinter")
+        ImageTk = image_tk_module or importlib.import_module("PIL.ImageTk")
     except ImportError as e:
         print("Preview mode requires Tkinter support (ImageTk).", e)
         print("Falling back to headless mode.")

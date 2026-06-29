@@ -11,6 +11,11 @@ from firestore_utils import get_config
 from google.cloud import texttospeech, storage
 import course_utils
 import utils
+from _shared.context_utils import (
+    canonical_language_code,
+    has_presentation_context,
+    resolve_message_text,
+)
 
 _level_name = os.environ.get("LOG_LEVEL", "DEBUG").upper()
 _level = getattr(logging, _level_name, logging.DEBUG)
@@ -42,25 +47,32 @@ def speech(request):
     trace_id = request_json.get("traceId", str(uuid.uuid4()))
     session_id = request_json.get("sessionId", str(uuid.uuid4()))
     language_code = request_json.get("languageCode", "en")
+    canonical_code = canonical_language_code(language_code, default=language_code)
     course_id = request_json.get("courseId")
 
-    userParams = request_json.get("userParams", {})
-    logger.debug("userParams: %s", userParams)
-
-    is_presentation = False
-    if isinstance(userParams, str):
-        is_presentation = "presentation" in userParams.lower()
+    user_params = request_json.get("userParams", {})
+    logger.debug("userParams: %s", user_params)
 
     config = get_config()
 
-    if is_presentation:
+    if has_presentation_context(user_params):
         messages = config.get("presentation_messages", {})
         logger.debug("Using presentation_messages")
-        reply = messages.get(language_code, messages.get("en", "Hello"))
+        reply = resolve_message_text(
+            messages,
+            [language_code, canonical_code, "en-US", "en"],
+            "Hello",
+        )
+        voice_language_code = canonical_code
     else:
         messages = config.get("welcome_messages", {})
         logger.debug("Using welcome_messages")
-        reply = messages.get(language_code, messages.get("en", "Welcome!"))
+        reply = resolve_message_text(
+            messages,
+            [language_code, canonical_code, "en", "en-US"],
+            "Welcome!",
+        )
+        voice_language_code = canonical_code
 
     bucket_name = os.environ.get("SPEECH_FILE_BUCKET")
     if not bucket_name:
@@ -79,9 +91,9 @@ def speech(request):
         
         # Generate stable filename from message content and language
         content_hash = hashlib.sha256(
-            f"{reply}:{language_code}".encode("utf-8")
+            f"{reply}:{voice_language_code}".encode("utf-8")
         ).hexdigest()[:12]
-        filename = f"speech_{language_code}_{content_hash}.mp3"
+        filename = f"speech_{voice_language_code}_{content_hash}.mp3"
         blob = bucket.blob(filename)
         
         # Check if file already exists
@@ -92,7 +104,7 @@ def speech(request):
             tts_client = texttospeech.TextToSpeechClient()
             
             # Use Course Config for Voice Selection
-            voice = course_utils.get_voice_params(course_id, language_code)
+            voice = course_utils.get_voice_params(course_id, voice_language_code)
             
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.MP3,
@@ -131,4 +143,3 @@ def speech(request):
     }
 
     return json.dumps(response), 200, {"Content-Type": "application/json"}
-

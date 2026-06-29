@@ -39,10 +39,22 @@ graph TD
     end
 ```
 
+```mermaid
+flowchart LR
+    PPT[PowerPoint / VBA] --> CFG[/api/config/]
+    MON[Python Monitor] --> CFG
+    CFG --> REG[Firestore registry]
+    CFG --> PRT[Presenter docs]
+    CFG --> LVP[Live pointer]
+    Chat[Chat UI] --> TALK[/api/talk/]
+    TALK --> PRT
+    TALK --> REG
+```
+
 ## Components
 
 ### 1. Backend
-- **Infrastructure**: Managed via CDK for Terraform (CDKTF).
+- **Infrastructure**: Managed via CDK Terrain (CDKTN).
 - **Compute**: Google Cloud Functions (Gen 2) for serverless execution.
 - **API**: Google API Gateway for routing and security (API Keys).
 - **Database**: Firestore for storing configuration, session state, and cached messages.
@@ -60,6 +72,18 @@ graph TD
     - Periodically captures the screen or specific windows.
     - Uses OCR (Tesseract) to extract text.
     - Sends text changes to the backend to keep the AI aware of the visual context.
+
+```mermaid
+sequenceDiagram
+    participant Monitor as Python Monitor
+    participant Config as /api/config
+    participant FS as Firestore
+
+    Monitor->>Config: slide/text update
+    Config->>FS: update presentation_messages
+    Config->>FS: update presenter docs
+    Config->>FS: update live pointer
+```
 
 ### 3. Admin Tools
 - **Seeding Script**: Pre-generates all presentation content (text, audio, visuals) and populates the registry.

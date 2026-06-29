@@ -1,16 +1,15 @@
-pillow==10.1.0; python_version < "3.13"
-pillow>=11.0.0; python_version >= "3.13"
+pillow==12.2.0
 
-# OCR wrapper (use version compatible with Python 3.12+)
-pytesseract>=0.3.13
+# OCR wrapper
+pytesseract==0.3.13
 
 # Screenshot/input utilities
 pyautogui==0.9.54
 
 # Multi-monitor capture helper
-mss>=9.0.1
+mss==10.2.0
 
 # Audio Capture and Speech
-pyaudio
-google-cloud-speech
-requests
+pyaudio==0.2.14
+google-cloud-speech==2.40.0
+requests==2.34.2

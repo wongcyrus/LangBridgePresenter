@@ -49,8 +49,8 @@ def setup_environment():
     if install.returncode != 0:
         print("\nDependency installation failed.")
         print(
-            "If you are using Python 3.13, make sure you have the latest pip "
-            "and that wheels exist for your Python version."
+            "Make sure pip is up to date and that your system has any native "
+            "build prerequisites needed by the dependencies."
         )
         sys.exit(install.returncode)
     

@@ -1,6 +1,6 @@
 # LangBridge Backend
 
-GCP Cloud Functions implementation of LangBridge API endpoints using CDKTF for deployment.
+GCP Cloud Functions implementation of LangBridge API endpoints using CDK Terrain (CDKTN) for deployment.
 
 ## Structure
 
@@ -35,7 +35,7 @@ cdktf/              # Infrastructure as Code
 
 3. Deploy:
    ```bash
-   cdktf deploy
+   cdktn deploy
    ```
 
 ## API Endpoints
