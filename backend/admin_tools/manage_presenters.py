@@ -18,12 +18,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 PRESENTERS_DIR = os.path.join(os.path.dirname(__file__), 'presenters')
+try:
+    from runtime_config import default_project_id
+except ModuleNotFoundError:
+    from backend.admin_tools.runtime_config import default_project_id
 
 def _get_db():
-    db_name = os.environ.get("FIRESTORE_DATABASE", "langbridge").strip()
-    if db_name:
-        return firestore.Client(database=db_name)
-    return firestore.Client(database="langbridge")
+    project_id = default_project_id()
+    db_name = (os.environ.get("FIRESTORE_DATABASE") or "").strip()
+    if not db_name:
+        raise RuntimeError("FIRESTORE_DATABASE is not configured.")
+    return firestore.Client(project=project_id, database=db_name)
 
 def create_or_update_presenter(presenter_id, name, language, background):
     db = _get_db()
@@ -114,6 +119,8 @@ def list_presenters():
 
 def main():
     parser = argparse.ArgumentParser(description="Manage LangBridge Presenters")
+    parser.add_argument("--project-id", required=True, help="Target GCP project")
+    parser.add_argument("--database", default="langbridge", help="Firestore database")
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
     # SYNC Command (Primary)
@@ -130,6 +137,8 @@ def main():
     subparsers.add_parser('list', help='List all presenters')
 
     args = parser.parse_args()
+    os.environ["ADMIN_TOOLS_PROJECT_ID"] = args.project_id
+    os.environ["FIRESTORE_DATABASE"] = args.database
 
     if args.command == 'sync':
         sync_presenters()

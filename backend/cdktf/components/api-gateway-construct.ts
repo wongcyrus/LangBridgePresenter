@@ -60,6 +60,9 @@ export class ApigatewayConstruct extends Construct {
                     googleServiceAccount: props.servicesAccount.email,
                 },
             },
+            lifecycle: {
+                createBeforeDestroy: true,
+            },
             dependsOn: [this.apiGatewayApi],
         });
 

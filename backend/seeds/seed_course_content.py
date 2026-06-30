@@ -26,6 +26,17 @@ from admin_tools.manage_courses import create_or_update_course
 # --- SETUP ENV VARS BEFORE IMPORTS ---
 # This is critical for google.genai / vertexai initialization in message_generator
 
+def _normalize_outputs(data):
+    if not isinstance(data, dict):
+        return {}
+    if "cdktf" in data and isinstance(data["cdktf"], dict):
+        return data["cdktf"]
+    for value in data.values():
+        if isinstance(value, dict) and "project-id" in value:
+            return value
+    return data
+
+
 def _preload_env_vars():
     """Pre-loads project config to set env vars before modules initialize."""
     # Try to find cdktf_outputs.json
@@ -41,7 +52,7 @@ def _preload_env_vars():
         try:
             with open(output_path, 'r') as f:
                 data = json.load(f)
-                outputs = data.get("cdktf", data)
+                outputs = _normalize_outputs(data)
                 project_id = outputs.get("project-id", project_id)
         except Exception:
             pass
@@ -89,7 +100,8 @@ def load_cdktf_outputs():
         
     try:
         with open(output_path, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            return _normalize_outputs(data)
     except Exception as e:
         logger.warning(f"Failed to read cdktf_outputs.json: {e}")
         return {}

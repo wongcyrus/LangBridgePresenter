@@ -1,5 +1,5 @@
 import { Construct } from "constructs";
-import { App, TerraformOutput, TerraformStack } from "cdktn";
+import { App, Fn, TerraformOutput, TerraformStack } from "cdktn";
 import { ArchiveProvider } from "./.gen/providers/archive/provider";
 import { RandomProvider } from "./.gen/providers/random/provider";
 import { StringResource } from "./.gen/providers/random/string-resource";
@@ -25,7 +25,7 @@ import { NullProvider } from "./.gen/providers/null/provider";
 import { TimeProvider } from "./.gen/providers/time/provider";
 import { Sleep } from "./.gen/providers/time/sleep";
 
-dotenv.config();
+dotenv.config({ path: process.env.CDKTF_ENV_FILE || ".env" });
 
 class LangBridgeApiStack extends TerraformStack {
   constructor(scope: Construct, id: string) {
@@ -33,8 +33,14 @@ class LangBridgeApiStack extends TerraformStack {
   }
 
   async buildLangBridgeApiStack() {
+    const toProjectDisplayName = (value: string) => value.substring(0, 30);
+    const toClientProjectId = (backendProjectId: string) =>
+      backendProjectId.length <= 23
+        ? `${backendProjectId}-client`
+        : `${backendProjectId.substring(0, 23)}-client`;
+
     const projectId = process.env.PROJECTID!;
-    const clientProjectId = `${projectId}-client`;
+    const clientProjectId = toClientProjectId(projectId);
 
     const googleBetaProvider = new GoogleBetaProvider(this, "google", {
       region: process.env.REGION!,
@@ -50,7 +56,7 @@ class LangBridgeApiStack extends TerraformStack {
 
     const project = new GoogleProject(this, "project", {
       projectId: projectId,
-      name: projectId,
+      name: toProjectDisplayName(projectId),
       billingAccount: billingAccount.id,
       deletionPolicy: "DELETE",
     });
@@ -58,7 +64,7 @@ class LangBridgeApiStack extends TerraformStack {
     // Create the client project for Firebase Hosting and Firestore
     const clientProject = new GoogleProject(this, "client-project", {
       projectId: clientProjectId,
-      name: clientProjectId,
+      name: toProjectDisplayName(clientProjectId),
       billingAccount: billingAccount.id,
       deletionPolicy: "DELETE",
     });
@@ -99,9 +105,12 @@ class LangBridgeApiStack extends TerraformStack {
       services: [
         "firebase.googleapis.com",
         "firebasehosting.googleapis.com",
+        "firebasevertexai.googleapis.com",
         "firestore.googleapis.com",
         "datastore.googleapis.com",
         "firebaserules.googleapis.com",
+        "identitytoolkit.googleapis.com",
+        "securetoken.googleapis.com",
       ],
       dependsOn: [clientProject],
     });
@@ -283,6 +292,39 @@ class LangBridgeApiStack extends TerraformStack {
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
+    const voiceChatAdminFunction = await CloudFunctionConstruct.create(this, "voiceChatAdminFunction", {
+      functionName: "voice-chat-admin",
+      runtime: "python311",
+      entryPoint: "voice_chat_admin",
+      timeout: 60,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_CHAT_REQUESTS_PER_MINUTE": "10",
+        "VOICE_CHAT_REQUESTS_PER_DAY": "200",
+        "VOICE_CHAT_ADMIN_EMAILS": process.env.VOICE_CHAT_ADMIN_EMAILS || "",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
+    const voiceChatAccessFunction = await CloudFunctionConstruct.create(this, "voiceChatAccessFunction", {
+      functionName: "voice-chat-access",
+      runtime: "python311",
+      entryPoint: "voice_chat_access",
+      timeout: 30,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+      },
+      additionalDependencies: [artifactRegistryIamMember],
+    });
 
     const apigatewayConstruct = await ApigatewayConstruct.create(this, "api-gateway", {
       api: "langbridgeapi",
@@ -294,7 +336,9 @@ class LangBridgeApiStack extends TerraformStack {
         "SPEECH": speechFunction.cloudFunction.url,
         "GOODBYE": goodbyeFunction.cloudFunction.url,
         "RECQUESTIONS": recquestionsFunction.cloudFunction.url,
-        "CONFIG": configFunction.cloudFunction.url
+        "CONFIG": configFunction.cloudFunction.url,
+        "VOICE_CHAT_ADMIN": voiceChatAdminFunction.cloudFunction.url,
+        "VOICE_CHAT_ACCESS": voiceChatAccessFunction.cloudFunction.url
       },
       servicesAccount: talkStreamFunction.serviceAccount,
       dependsOn: [timeSleep],
@@ -306,7 +350,7 @@ class LangBridgeApiStack extends TerraformStack {
       project: project.projectId,
       service: apigatewayConstruct.apiGatewayApi.managedService,
       disableOnDestroy: false,
-      dependsOn: [apigatewayConstruct.apiGatewayApi],
+      dependsOn: [apigatewayConstruct.gateway],
     });
 
     // Explicitly enable Firestore API with a direct dependency
@@ -347,6 +391,7 @@ class LangBridgeApiStack extends TerraformStack {
         firebaseApiKey: firebaseWebAppConfig.apiKey,
         firebaseWebAppAppId: firebaseHosting.webApp.appId,
         firebaseHostingSiteDefaultUrl: firebaseHosting.hostingSite.defaultUrl,
+        apiGatewayBaseUrl: Fn.join("", ["https://", apigatewayConstruct.gateway.defaultHostname]),
         dependsOn: [firebaseHosting.hostingSite]
     });
 
@@ -391,7 +436,9 @@ async function buildStack(scope: Construct, id: string) {
 
 async function createApp(): Promise<App> {
   const app = new App();
-  await buildStack(app, "cdktf");
+  const projectId = process.env.PROJECTID || "default";
+  const stackId = `cdktf-${projectId.replace(/[^a-zA-Z0-9-]/g, "-")}`;
+  await buildStack(app, stackId);
   return app;
 }
 

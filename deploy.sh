@@ -8,19 +8,33 @@ set -e
 # (via CDK Terrain / CDKTN) and the frontend web client (to Firebase Hosting).
 #
 # Prerequisites:
-# 1. Ensure `backend/cdktf/.env` is properly configured with your project IDs and API keys.
+# 1. Ensure your env file (default: `backend/cdktf/.env`) is configured with project IDs and keys.
 # 2. Authenticate to gcloud and firebase CLI.
 #
-# Usage: ./deploy.sh
+# Usage:
+#   ./deploy.sh
+#   ./deploy.sh --env-file backend/cdktf/.env.dev
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ENV_FILE="$SCRIPT_DIR/backend/cdktf/.env"
+
+if [ "${1:-}" = "--env-file" ]; then
+    if [ -z "${2:-}" ]; then
+        echo "Error: --env-file requires a path argument."
+        exit 1
+    fi
+    ENV_FILE="$2"
+fi
 
 # Verify backend/cdktf/.env exists
-CDKTN_ENV_PATH="$SCRIPT_DIR/backend/cdktf/.env"
+CDKTN_ENV_PATH="$(realpath "$ENV_FILE")"
 if [ ! -f "$CDKTN_ENV_PATH" ]; then
-    echo "Error: backend/cdktf/.env not found. Please create and configure it based on .env.template."
+    echo "Error: env file not found at $CDKTN_ENV_PATH"
     exit 1
 fi
+
+export CDKTF_ENV_FILE="$CDKTN_ENV_PATH"
+export CDKTF_ENV_PATH="$CDKTN_ENV_PATH"
 
 # Source the .env file to make variables available for the rest of the script
 # (especially for child scripts that might not explicitly load it)
@@ -38,7 +52,7 @@ echo "
 OUTPUT_FILE="$SCRIPT_DIR/backend/cdktf_outputs.json"
 
 # 1. Run Deployment
-bash "$SCRIPT_DIR/backend/deploy.sh"
+bash "$SCRIPT_DIR/backend/deploy.sh" "$CDKTN_ENV_PATH"
 
 # 2. Export Outputs for portability (this allows syncing on other machines)
 echo "Exporting CDK Terrain outputs to $OUTPUT_FILE..."
@@ -55,6 +69,27 @@ if [ -f "$SYNC_SCRIPT" ]; then
 else
     echo "Warning: sync_config.py not found at $SYNC_SCRIPT"
 fi
+
+echo "Bootstrapping client auth configuration..."
+BOOTSTRAP_AUTH_SCRIPT="$SCRIPT_DIR/backend/admin_tools/bootstrap_client_auth.py"
+if [ -f "$BOOTSTRAP_AUTH_SCRIPT" ]; then
+    python3 "$BOOTSTRAP_AUTH_SCRIPT" --outputs-file "$OUTPUT_FILE"
+else
+    echo "Warning: bootstrap_client_auth.py not found at $BOOTSTRAP_AUTH_SCRIPT"
+fi
+
+echo "
+--- Deploying Web Client Hosting ---"
+CLIENT_PROJECT_ID=$(jq -r '.cdktf["client-project-id"] // empty' "$OUTPUT_FILE")
+if [ -z "$CLIENT_PROJECT_ID" ]; then
+    echo "Error: client-project-id not found in $OUTPUT_FILE"
+    exit 1
+fi
+
+cd "$SCRIPT_DIR/client/web-student"
+npm install
+npm run build
+firebase deploy --only hosting --project "$CLIENT_PROJECT_ID"
 
 
 

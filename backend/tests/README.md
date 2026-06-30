@@ -16,7 +16,9 @@ backend/tests/
 ├── test_admin_tools.py     # Admin tools integration tests
 ├── test_config_function.py # Config function unit tests
 ├── test_auth.py            # Authentication tests
-└── test_helpers.py         # Test utility functions
+├── test_helpers.py         # Test utility functions
+├── test_voice_chat_admin_function.py # Voice-chat admin API unit tests
+└── test_manage_admin_users.py        # Admin user script unit tests
 ```
 
 ## Setup
@@ -95,6 +97,18 @@ Tests authentication and authorization:
 - Invalid signatures
 - Expired timestamps
 - Valid authentication
+
+### Voice Chat Admin Tests (`test_voice_chat_admin_function.py`)
+Unit tests for the voice-chat admin Cloud Function:
+- unauthenticated request rejection
+- usage dashboard response formatting
+- limit update request handling
+- Firestore-backed admin access check
+
+### Admin User Script Tests (`test_manage_admin_users.py`)
+Unit tests for `manage_admin_users.py`:
+- admin doc id normalization
+- grant/revoke Firestore writes
 
 ## Fixtures
 

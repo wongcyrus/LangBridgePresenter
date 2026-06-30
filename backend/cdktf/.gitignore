@@ -10,3 +10,6 @@ tsconfig.tsbuildinfo
 !jest.config.js
 !setup.js
 .env
+.env.*
+!.env.template
+!.env.dev.template

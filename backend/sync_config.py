@@ -10,7 +10,7 @@ CDKTF_DIR = os.path.join(BACKEND_DIR, "cdktf")
 ADMIN_TOOLS_CONFIG = os.path.join(BACKEND_DIR, "admin_tools", "config.py")
 PRELOADER_CONFIG = os.path.join(BACKEND_DIR, "presentation-preloader", "config.py")
 TESTS_ENV = os.path.join(BACKEND_DIR, "tests", ".env.test")
-CDKTF_ENV = os.path.join(CDKTF_DIR, ".env")
+CDKTF_ENV = os.environ.get("CDKTF_ENV_PATH", os.path.join(CDKTF_DIR, ".env"))
 
 def get_cdktf_outputs():
     # 1. Check for static output file in backend dir (passed from deploy machine)
@@ -183,6 +183,8 @@ def main():
         # Extract sender ID from App ID (format: 1:SENDER_ID:web:...)
         sender_id = webapp_app_id.split(":")[1] if ":" in webapp_app_id else ""
 
+        appcheck_site_key = os.environ.get("FIREBASE_APPCHECK_SITE_KEY", "")
+
         client_env_data = {
             "VITE_FIREBASE_API_KEY": firebase_api_key,
             "VITE_FIREBASE_AUTH_DOMAIN": f"{client_project_id}.firebaseapp.com",
@@ -190,7 +192,9 @@ def main():
             "VITE_FIREBASE_STORAGE_BUCKET": f"{client_project_id}.firebasestorage.app",
             "VITE_FIREBASE_MESSAGING_SENDER_ID": sender_id,
             "VITE_FIREBASE_APP_ID": webapp_app_id,
-            "VITE_FIREBASE_HOSTING_URL": hosting_url
+            "VITE_FIREBASE_HOSTING_URL": hosting_url,
+            "VITE_API_BASE_URL": f"https://{api_url}",
+            "VITE_FIREBASE_APPCHECK_SITE_KEY": appcheck_site_key,
         }
         update_test_env(client_env_path, client_env_data)
     else:

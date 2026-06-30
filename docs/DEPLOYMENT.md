@@ -60,12 +60,14 @@ Before running the deployment, ensure you have the following installed and authe
 
 ## Configuration
 
-The system uses a **single source of truth** for configuration: the `.env` file located in `backend/cdktf/.env`.
+The system uses an environment file in `backend/cdktf/` as source of truth (for example `.env` or `.env.dev`).
 
 1.  Navigate to `backend/cdktf/`.
 2.  Copy the template:
     ```bash
     cp .env.template .env
+    # optional: dedicated dev stack
+    # cp .env.dev.template .env.dev
     ```
 3.  Edit `.env` with your specific values:
     ```env
@@ -80,39 +82,65 @@ The system uses a **single source of truth** for configuration: the `.env` file 
 
 **Important:** This `.env` file drives both the infrastructure provisioning and the runtime configuration of the backend and frontend.
 
-## One-Step Deployment
+## Deployment (3 Phases)
 
-From the root of the project (`xiaoice_class_assistant/`), run the unified deployment script:
+Current deployment should be treated as a 3-phase workflow.
+
+### Phase 1: Provision infra + web hosting
+
+Run from repo root:
 
 ```bash
-./deploy.sh
+./deploy.sh --env-file backend/cdktf/.env.dev
 ```
 
-### What this script does:
+This provisions backend/client projects, API Gateway, Cloud Functions, storage buckets, and deploys the web app to Firebase Hosting.
 
-1.  **Deploys Infrastructure**: Runs `npx cdktn deploy` to provision GCP resources.
-    *   *Note: This step includes a `local-exec` provisioner that automatically builds and deploys the web client to Firebase Hosting.*
-2.  **Syncs Configuration**:
-    *   Extracts outputs (API Gateway URL, Bucket names, Keys) from the Terraform state.
-    *   Updates `backend/admin_tools/config.py`.
-    *   Updates `backend/presentation-preloader/config.py`.
-    *   Generates `backend/tests/.env.test` for integration testing.
-    *   Generates `client/web-student/.env` for local frontend development.
+### Phase 2: Initialize client auth
+
+For a fresh client project, initialize Firebase Authentication in the Firebase console first:
+1. Open Firebase Console for the client project (for dev: `langbridge-presenter-d2-client`)
+2. Open **Authentication**
+3. Enable Google provider
+
+Then run bootstrap:
+
+```bash
+python3 backend/admin_tools/bootstrap_client_auth.py --outputs-file backend/cdktf_outputs.json
+```
+
+If you want Google provider configured by script, set these env vars before running bootstrap:
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+
+### Phase 3: Seed presentation content
+
+Seed pre-generated text/audio/visual content to client Firestore and speech bucket:
+
+```bash
+PYTHONPATH=backend/admin_tools \
+backend/.venv/bin/python backend/seeds/seed_course_content.py \
+  --course-id showcase \
+  --course-title Showcase \
+  --data-dir generate \
+  --languages en-US zh-CN yue-HK
+```
+
+Without this phase, slides/audio can be missing even if infra deploy succeeds.
 
 ## Verification
 
-After deployment, the script will output key information. You can verify the deployment by:
+After all 3 phases, verify:
 
-1.  **Checking the Web Client**:
-    *   Visit the hosting URL provided in the output (e.g., `https://<your-project>.web.app`).
-    *   You should see the student interface.
+1.  **Web app is live**: open hosting URL (dev example: `https://langbridge-presenter-d2-client.web.app/?courseId=showcase`)
+2.  **Gateway is reachable**: check API endpoints from your network
+3.  **Seed data exists**: `presentation_broadcast/showcase` and media URLs are populated
 
-2.  **Running Integration Tests**:
+Optionally run integration tests:
     ```bash
     cd backend/tests
     ./run_tests.sh
     ```
-    All tests should pass if the environment is correctly configured.
 
 ## Troubleshooting
 
@@ -126,6 +154,23 @@ After deployment, the script will output key information. You can verify the dep
 ### Firebase Deploy Failures
 *   If the web client deployment fails during the Terraform run, check that you are logged into Firebase (`firebase login`).
 *   You can manually retry the web client deployment (after infrastructure is up) by navigating to `client/web-student` and running `npm run build && firebase deploy`.
+
+### `CONFIGURATION_NOT_FOUND` during sign-in
+*   The client Firebase Auth config is not initialized yet.
+*   Complete Phase 2 (open Authentication in Firebase console, then run `bootstrap_client_auth.py`).
+
+### `ERR_CERT_AUTHORITY_INVALID` / `Failed to fetch` for `*.gateway.dev`
+*   This is typically network TLS interception / DNS security filtering, not CDK deployment failure.
+*   Try a clean network (hotspot/VPN) or allowlist `*.gateway.dev` in your network security policy.
+
+### Live API handshake error (`setupComplete` missing / `AI/response-error`)
+*   If voice chat shows: `Server connection handshake failed... setupComplete message`, Firebase AI Logic is not fully enabled for the **client project** yet.
+*   In Firebase Console (client project), open **Build → AI Logic** and complete the enable/setup flow.
+*   Also ensure API is enabled:
+    ```bash
+    gcloud services enable firebasevertexai.googleapis.com --project <client-project-id>
+    ```
+*   Then hard refresh the web app and retry voice chat.
 
 ## Multi-Machine Workflow (Dev/Test)
 

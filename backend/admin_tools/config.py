@@ -1,3 +1,3 @@
-project_id="langbridge-presenter"
-api="langbridgeapi-1ynqko7b4cw5d.apigateway.langbridge-presenter.cloud.goog"
-speech_file_bucket="speechfileu9u56irdo"
+project_id="langbridge-presenter-d2"
+api="langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog"
+speech_file_bucket="speechfileco3m59510"

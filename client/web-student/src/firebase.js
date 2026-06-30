@@ -1,5 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 
 const requiredKeys = [
   "VITE_FIREBASE_API_KEY",
@@ -26,4 +28,18 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+
+const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APPCHECK_SITE_KEY;
+if (appCheckSiteKey) {
+  initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+    isTokenAutoRefreshEnabled: true,
+  });
+} else {
+  console.warn("VITE_FIREBASE_APPCHECK_SITE_KEY is not configured; App Check is disabled.");
+}
+
+export { app };
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+export const googleAuthProvider = new GoogleAuthProvider();

@@ -32,6 +32,13 @@ flowchart TD
 
 ## Tools
 
+All admin tools now require explicit environment targeting (no fallback defaults):
+
+```bash
+# Any script must include target project/database
+python <tool>.py --project-id langbridge-presenter-d2 --database langbridge <command...>
+```
+
 ### 1. Content Seeding (`seed_course_content.py`)
 
 Pre-generates all presentation content and populates the Firestore registry.
@@ -110,6 +117,9 @@ python manage_courses.py update --id "course_101" --title "Intro to AI" --langs 
 
 # List all courses
 python manage_courses.py list
+
+# Target dev explicitly
+python manage_courses.py --project-id langbridge-presenter-d2 --database langbridge list
 ```
 
 ### 3. Content Preparation Workflow
@@ -152,13 +162,16 @@ Manages Presenter Configurations (name, language, background).
 
 ```bash
 # Create or Update a presenter
-python manage_presenters.py create --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
+python manage_presenters.py update --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
 
 # Batch import from JSON files
 python manage_presenters.py batch-import --dir ./presenters/
 
 # List all presenters
 python manage_presenters.py list
+
+# Target dev explicitly
+python manage_presenters.py --project-id langbridge-presenter-d2 --database langbridge list
 ```
 
 **Multiple Presenters in Presentations:**
@@ -187,11 +200,88 @@ python create_api_key.py <digital_human_id> <name>
 # Example
 python create_api_key.py 12345678 "Cyrus"
 
+# Target dev explicitly
+python create_api_key.py 12345678 "Cyrus" \
+  --project-id langbridge-presenter-d2 \
+  --database langbridge \
+  --api-service langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog
+
 # Delete an API key
 python delete_api_key.py <api_key_string>
 ```
 
 **Note**: The API key will be automatically added to Firestore and restricted to the configured API service. The key details are saved to a JSON file in the current directory.
+
+### 6. `manage_admin_users.py`
+
+**Purpose**: Manage admin users for the voice-chat admin dashboard/API.
+
+It writes admin records to Firestore collection `admin_users` and supports:
+- grant admin access
+- revoke admin access
+- delete admin record
+- list admin users
+
+**Usage**:
+```bash
+cd backend/admin_tools
+
+# Grant by email
+python manage_admin_users.py grant --email "admin@example.com" --note "voice dashboard"
+
+# Grant by Firebase UID
+python manage_admin_users.py grant --uid "abc123uid"
+
+# Revoke access
+python manage_admin_users.py revoke --email "admin@example.com"
+
+# List admins
+python manage_admin_users.py list --active-only
+
+# Target dev explicitly
+python manage_admin_users.py --project-id langbridge-presenter-d2 --database langbridge list --active-only
+```
+
+### 7. `bootstrap_client_auth.py`
+
+**Purpose**: Make Firebase Auth + Google Sign-In setup reproducible for new client projects.
+
+This script reads `backend/cdktf_outputs.json`, initializes Identity Platform auth config, and (optionally) configures Google provider credentials.
+
+**Usage**:
+```bash
+cd backend/admin_tools
+python bootstrap_client_auth.py --outputs-file ../cdktf_outputs.json
+```
+
+If `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are exported in the environment, the script configures and verifies `google.com` provider automatically.
+
+### 8. `manage_voice_chat_users.py`
+
+**Purpose**: Manage which signed-in users are allowed to start Gemini Live voice chat.
+
+This script writes to Firestore collection `voice_chat_users` and supports:
+- grant access
+- revoke access
+- delete access record
+- list access records
+
+**Usage**:
+```bash
+cd backend/admin_tools
+
+# Grant by email
+python manage_voice_chat_users.py grant --email "user@example.com" --note "classroom pilot"
+
+# Revoke by email
+python manage_voice_chat_users.py revoke --email "user@example.com"
+
+# List active voice chat users
+python manage_voice_chat_users.py list --active-only
+
+# Target dev explicitly
+python manage_voice_chat_users.py --project-id langbridge-presenter-d2 --database langbridge list --active-only
+```
 
 ## Environment Setup
 

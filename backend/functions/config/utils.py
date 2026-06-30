@@ -52,31 +52,36 @@ def sanitize_text_for_tts(text: str, max_length: int = 5000, aggressive: bool = 
     # Normalize whitespace
     text = ' '.join(text.split())
     
-    # Ensure sentences end with proper punctuation
-    # Split very long sentences at natural break points
+    # Split overlong sentences to avoid TTS "sentence too long" failures.
+    sentence_limit = 220
+    sentence_parts = re.split(r'([.!?。！？])\s*', text)
+    normalized_parts = []
+    for i in range(0, len(sentence_parts), 2):
+        sentence = (sentence_parts[i] or "").strip()
+        punct = sentence_parts[i + 1] if i + 1 < len(sentence_parts) else ""
+        if not sentence:
+            continue
+        if len(sentence) <= sentence_limit:
+            normalized_parts.append(f"{sentence}{punct}")
+            continue
+
+        # Try natural pauses first.
+        chunks = [s.strip() for s in re.split(r'[，,;；:：、]\s*', sentence) if s.strip()]
+        if not chunks:
+            chunks = [sentence]
+        for chunk in chunks:
+            while len(chunk) > sentence_limit:
+                normalized_parts.append(f"{chunk[:sentence_limit]}。")
+                chunk = chunk[sentence_limit:].lstrip()
+            if chunk:
+                normalized_parts.append(f"{chunk}。")
+
+    if normalized_parts:
+        text = " ".join(normalized_parts).strip()
+
+    # Keep total input bounded.
     if len(text) > max_length:
-        # Try to split at sentence boundaries
-        sentences = re.split(r'([.!?。！？])\s*', text)
-        result = []
-        current_chunk = ""
-        
-        for i in range(0, len(sentences), 2):
-            sentence = sentences[i]
-            punct = sentences[i + 1] if i + 1 < len(sentences) else ""
-            
-            # If adding this sentence would exceed max, start new chunk
-            if len(current_chunk) + len(sentence) + len(punct) > max_length:
-                if current_chunk:
-                    result.append(current_chunk.strip())
-                current_chunk = sentence + punct
-            else:
-                current_chunk += sentence + punct
-        
-        if current_chunk:
-            result.append(current_chunk.strip())
-        
-        # Return first chunk only (or consider limiting message generation)
-        text = result[0] if result else text[:max_length]
+        text = text[:max_length].rstrip()
     
     return text.strip()
 

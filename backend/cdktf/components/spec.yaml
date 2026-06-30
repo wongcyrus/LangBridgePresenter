@@ -142,6 +142,59 @@ paths:
       responses:
         200:
           description: Successful response
+  /api/voice-chat-admin:
+    options:
+      summary: Voice chat admin preflight
+      operationId: voiceChatAdminOptions
+      x-google-backend:
+        address: ${VOICE_CHAT_ADMIN}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: Voice chat admin dashboard data
+      operationId: voiceChatAdminGet
+      x-google-backend:
+        address: ${VOICE_CHAT_ADMIN}
+      responses:
+        200:
+          description: Successful response
+    post:
+      summary: Voice chat admin limits update
+      operationId: voiceChatAdminPost
+      x-google-backend:
+        address: ${VOICE_CHAT_ADMIN}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              requests_per_minute:
+                type: integer
+              requests_per_day:
+                type: integer
+      responses:
+        200:
+          description: Successful response
+  /api/voice-chat-access:
+    options:
+      summary: Voice chat access preflight
+      operationId: voiceChatAccessOptions
+      x-google-backend:
+        address: ${VOICE_CHAT_ACCESS}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: Voice chat access check
+      operationId: voiceChatAccessGet
+      x-google-backend:
+        address: ${VOICE_CHAT_ACCESS}
+      responses:
+        200:
+          description: Successful response
 securityDefinitions:
   api_key:
     type: apiKey

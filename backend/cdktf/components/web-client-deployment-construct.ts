@@ -9,6 +9,7 @@ export interface WebClientDeploymentConstructProps {
     readonly firebaseApiKey: string;
     readonly firebaseWebAppAppId: string;
     readonly firebaseHostingSiteDefaultUrl: string;
+    readonly apiGatewayBaseUrl: string;
     readonly dependsOn?: any[];
 }
 
@@ -26,7 +27,8 @@ export class WebClientDeploymentConstruct extends Construct {
             `VITE_FIREBASE_PROJECT_ID=${props.clientProjectId}`,
             `VITE_FIREBASE_STORAGE_BUCKET=${props.clientProjectId}.firebasestorage.app`,
             `VITE_FIREBASE_APP_ID=${props.firebaseWebAppAppId}`,
-            `VITE_FIREBASE_HOSTING_URL=${props.firebaseHostingSiteDefaultUrl}`
+            `VITE_FIREBASE_HOSTING_URL=${props.firebaseHostingSiteDefaultUrl}`,
+            `VITE_API_BASE_URL=${props.apiGatewayBaseUrl}`
         ].join("\n");
 
         // Calculate hash of the source code to trigger updates.
@@ -71,6 +73,7 @@ VITE_FIREBASE_STORAGE_BUCKET=${props.clientProjectId}.firebasestorage.app
 VITE_FIREBASE_MESSAGING_SENDER_ID=$SENDER_ID
 VITE_FIREBASE_APP_ID=${props.firebaseWebAppAppId}
 VITE_FIREBASE_HOSTING_URL=${props.firebaseHostingSiteDefaultUrl}
+VITE_API_BASE_URL=${props.apiGatewayBaseUrl}
 EOF
 
                         npm install

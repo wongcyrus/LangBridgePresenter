@@ -1,10 +1,15 @@
 from google.cloud import api_keys_v2
 from google.cloud.api_keys_v2 import Key
 from google.cloud import firestore
-from config import project_id, api
 import sys
 import json
+import argparse
+import os
 from datetime import datetime
+try:
+    from runtime_config import default_project_id, default_api_service
+except ModuleNotFoundError:
+    from backend.admin_tools.runtime_config import default_project_id, default_api_service
 
 
 def add_api_key_to_firestore(
@@ -14,7 +19,10 @@ def add_api_key_to_firestore(
     key_id: str,
     name: str
 ) -> None:
-    db = firestore.Client(project=project_id, database="langbridge")
+    db_name = (os.environ.get("FIRESTORE_DATABASE") or "").strip()
+    if not db_name:
+        raise RuntimeError("FIRESTORE_DATABASE is not configured.")
+    db = firestore.Client(project=project_id, database=db_name)
     api_key_ref = db.collection('ApiKey').document(key)
     api_key_ref.set({
         'digital_human_id': digital_human_id,
@@ -110,14 +118,22 @@ def restrict_api_key_api(project_id: str, service: str, key_id: str) -> Key:
 
 
 if __name__ == "__main__":
-    # Get digital human ID and name from command line arguments
-    if len(sys.argv) >= 3:
-        digital_human_id = sys.argv[1]
-        digital_human_name = sys.argv[2]
-    else:
-        print("Usage: python create_api_key.py <digital_human_id> <name>")
-        print("Example: python create_api_key.py 123456789 'John Doe'")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Create and register API key")
+    parser.add_argument("digital_human_id", help="Digital human ID")
+    parser.add_argument("name", help="Digital human display name")
+    parser.add_argument("--project-id", required=True, help="Target GCP project")
+    parser.add_argument("--api-service", required=True, help="API service name")
+    parser.add_argument("--database", default="langbridge", help="Firestore database")
+    args = parser.parse_args()
+
+    os.environ["ADMIN_TOOLS_PROJECT_ID"] = args.project_id
+    os.environ["ADMIN_TOOLS_API_SERVICE"] = args.api_service
+    os.environ["FIRESTORE_DATABASE"] = args.database
+
+    project_id = default_project_id()
+    api = default_api_service()
+    digital_human_id = args.digital_human_id
+    digital_human_name = args.name
 
     # Create the API key
     print(f"Creating API key for digital human: {digital_human_id}")
@@ -160,4 +176,3 @@ if __name__ == "__main__":
         json.dump(key_data, f, indent=2)
     
     print(f"\nAPI key saved to: {filename}")
-

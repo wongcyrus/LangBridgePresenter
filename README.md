@@ -31,22 +31,33 @@ Detailed documentation for each component can be found in the `docs/` directory:
 
 ## 🚀 Quick Start
 
-### 1. Unified Deployment
+### 1. Deploy in 3 phases
 
-The entire system, including backend infrastructure (via CDK Terrain / CDKTN) and the frontend web client (to Firebase Hosting), can be deployed with a single command.
-
-1.  Navigate to `backend/cdktf`.
-2.  Copy `.env.template` to `.env` and fill in your GCP credentials, project IDs, and API keys. This `.env` file is now the **single source of truth** for all environment-specific configurations.
-3.  From the project root directory, run the unified deployment script:
+1.  **Phase 1 – Infra + Hosting**  
+    Copy `.env.template` to `.env` (or `.env.dev.template` to `.env.dev`) under `backend/cdktf/`, then run:
 
     ```bash
-    ./deploy.sh
+    ./deploy.sh --env-file backend/cdktf/.env.dev
     ```
 
-This script will:
--   Provision your Google Cloud infrastructure (Cloud Functions, API Gateway, etc.) using CDK Terrain / CDKTN.
--   Update local configuration files (`backend/admin_tools/config.py`, `backend/presentation-preloader/config.py`) and test environment variables (`backend/tests/.env.test`) from the CDKTN outputs and your `.env` file.
--   Build and deploy the `client/web-student` application to Firebase Hosting.
+2.  **Phase 2 – Client Auth setup**  
+    Open Firebase Console for the client project, initialize Authentication, then run:
+
+    ```bash
+    python3 backend/admin_tools/bootstrap_client_auth.py --outputs-file backend/cdktf_outputs.json
+    ```
+
+3.  **Phase 3 – Seed content**  
+    Seed showcase data (text/audio/visual):
+
+    ```bash
+    PYTHONPATH=backend/admin_tools \
+    backend/.venv/bin/python backend/seeds/seed_course_content.py \
+      --course-id showcase \
+      --course-title Showcase \
+      --data-dir generate \
+      --languages en-US zh-CN yue-HK
+    ```
 
 See [Deployment Guide](docs/DEPLOYMENT.md) for comprehensive instructions and troubleshooting.
 
@@ -60,14 +71,14 @@ cd backend/admin_tools
 # Setup Python environment and authenticate
 ./setup.sh
 
-# Create a demo course
-python manage_courses.py update --id "demo" --title "Demo Course" --langs "en-US,zh-CN,yue-HK"
+# Create a demo course (explicit project target)
+python manage_courses.py --project-id langbridge-presenter-d2 --database langbridge update --id "demo" --title "Demo Course" --langs "en-US,zh-CN,yue-HK"
 
 # Create a presenter
-python manage_presenters.py create --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
+python manage_presenters.py --project-id langbridge-presenter-d2 --database langbridge update --id "summer" --name "Summer" --language "en-US" --background "Friendly AI assistant"
 
 # Create an API key for a digital human
-python create_api_key.py 12345678 "Cyrus"
+python create_api_key.py 12345678 "Cyrus" --project-id langbridge-presenter-d2 --database langbridge --api-service "<api-service-name>"
 ```
 
 See [Admin Tools & Caching](docs/ADMIN_TOOLS.md) for more details.

@@ -1,7 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from "firebase/firestore";
-import { db } from "./firebase";
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut
+} from "firebase/auth";
+import {
+  AIError,
+  getAI,
+  getLiveGenerativeModel,
+  ResponseModality,
+  startAudioConversation,
+  VertexAIBackend,
+} from "firebase/ai";
+import { app, auth, db, googleAuthProvider } from "./firebase";
 import {
   formatBroadcastStatusLabel,
   normalizeBroadcastStatus,
@@ -125,6 +138,8 @@ function App() {
   const [viewLang, setViewLang] = useState('en');
   const [listenLang, setListenLang] = useState('en');
   const [supportedLangs, setSupportedLangs] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authStatus, setAuthStatus] = useState("Guest");
   
   // -- State for Live/Nav Logic --
   const [livePptId, setLivePptId] = useState(null);
@@ -151,11 +166,29 @@ function App() {
   
   // Full Screen State
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Sign in to use voice chat");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceAnswer, setVoiceAnswer] = useState("");
+  const [voiceAccessGranted, setVoiceAccessGranted] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [adminEnabled, setAdminEnabled] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminStatus, setAdminStatus] = useState("");
+  const [adminSummary, setAdminSummary] = useState(null);
+  const [adminTopUsage, setAdminTopUsage] = useState([]);
+  const [limitPerMinute, setLimitPerMinute] = useState(10);
+  const [limitPerDay, setLimitPerDay] = useState(200);
 
   // Refs
   const audioRef = useRef(new Audio());
   const lastPlayedHash = useRef(null);
   const lastNarratedAudioUrl = useRef(null);
+  const liveConversationRef = useRef(null);
+  const liveContextKeyRef = useRef("");
+
+  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+  const LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
 
   const AUDIO_LANGUAGE_NAMES = {
     "en-US": "English",
@@ -171,6 +204,296 @@ function App() {
 
   const getTextLangName = (code) => DISPLAY_LANGUAGE_NAMES[code] || code;
   const getAudioLangName = (code) => AUDIO_LANGUAGE_NAMES[code] || code;
+  const getUserLabel = (user) => {
+    if (!user) return "Guest";
+    const displayName = (user.displayName || "").trim();
+    if (displayName) return displayName;
+    const email = (user.email || "").trim();
+    if (email.includes("@")) return email.split("@")[0];
+    return user.uid || "User";
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthStatus(user ? `Signed in: ${getUserLabel(user)}` : "Guest");
+      if (!user) {
+        setVoiceStatus("Sign in to use voice chat");
+      } else if (!API_BASE_URL) {
+        setVoiceStatus("Voice chat unavailable: API base URL not configured");
+      } else {
+        setVoiceStatus("Checking voice access...");
+      }
+      if (!user) {
+        setVoiceAccessGranted(false);
+      }
+    });
+    return () => unsubscribe();
+  }, [API_BASE_URL]);
+
+  useEffect(() => {
+    if (currentUser) {
+      loadAdminDashboard(currentUser);
+      loadVoiceAccess(currentUser);
+    }
+  }, [currentUser]);
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithPopup(auth, googleAuthProvider);
+    } catch (error) {
+      console.error("Sign-in failed:", error);
+      setVoiceStatus(error?.message || "Sign-in failed");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      if (liveConversationRef.current) {
+        await liveConversationRef.current.controller.stop();
+        await liveConversationRef.current.session.close();
+        liveConversationRef.current = null;
+      }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      await signOut(auth);
+      setVoiceTranscript("");
+      setVoiceAnswer("");
+      setVoiceAccessGranted(false);
+      setAdminEnabled(false);
+      setAdminStatus("");
+      setAdminSummary(null);
+      setAdminTopUsage([]);
+    } catch (error) {
+      console.error("Sign-out failed:", error);
+    }
+  };
+
+  const loadAdminDashboard = async (user = currentUser) => {
+    if (!user || !API_BASE_URL) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        setAdminEnabled(false);
+        setAdminStatus("");
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load admin dashboard");
+      }
+
+      const data = await response.json();
+      setAdminEnabled(true);
+      setAdminStatus("");
+      setAdminSummary(data.summary || null);
+      setAdminTopUsage(Array.isArray(data.top_usage) ? data.top_usage : []);
+      if (data.limits) {
+        setLimitPerMinute(data.limits.requests_per_minute ?? 10);
+        setLimitPerDay(data.limits.requests_per_day ?? 200);
+      }
+    } catch (error) {
+      setAdminEnabled(false);
+      setAdminStatus("");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const loadVoiceAccess = async (user = currentUser) => {
+    if (!user) return;
+    if (!API_BASE_URL) {
+      setVoiceAccessGranted(false);
+      setVoiceStatus("Voice chat unavailable: API base URL not configured");
+      return;
+    }
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-access`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+      if (response.status === 401) {
+        setVoiceAccessGranted(false);
+        setVoiceStatus("Session expired. Please sign in again");
+        return;
+      }
+      if (response.status === 403) {
+        setVoiceAccessGranted(false);
+        setVoiceStatus("Voice chat access requires admin grant");
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to check voice access");
+      }
+      const granted = data.granted === true;
+      setVoiceAccessGranted(granted);
+      setVoiceStatus(granted ? "Ready for voice chat" : "Voice chat access requires admin grant");
+    } catch (error) {
+      console.error("Voice access check failed:", error);
+      setVoiceAccessGranted(false);
+      setVoiceStatus(error?.message || "Voice chat access check failed");
+    }
+  };
+
+  const saveAdminLimits = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          requests_per_minute: Number(limitPerMinute),
+          requests_per_day: Number(limitPerDay),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update limits");
+      }
+      setAdminStatus("Limits updated");
+      await loadAdminDashboard();
+    } catch (error) {
+      console.error("Admin limits update failed:", error);
+      setAdminStatus(error.message || "Failed to update limits");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const buildVoiceContext = () => {
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    if (!presentationId || !slideId) return null;
+
+    const langMap = (slideData?.languages || liveData || {});
+    const langEntry = langMap[listenLang] || langMap[Object.keys(langMap)[0]] || {};
+    const slideText = (langEntry?.text || "").trim();
+    const contextKey = `${courseId}:${presentationId}:${slideId}:${listenLang}:${slideText}`;
+
+    const message = [
+      "Context update for the ongoing classroom conversation.",
+      "Do not answer this message.",
+      `Course: ${courseId}`,
+      `Presentation: ${presentationId}`,
+      `Slide: ${slideId}`,
+      `Language: ${listenLang || "en-US"}`,
+      `Slide text: ${slideText || "(not available)"}`,
+    ].join("\n");
+
+    return { contextKey, message };
+  };
+
+  const sendVoiceContextUpdate = async (session, force = false) => {
+    const context = buildVoiceContext();
+    if (!context) return;
+    if (!force && context.contextKey === liveContextKeyRef.current) return;
+    await session.send(context.message, false);
+    liveContextKeyRef.current = context.contextKey;
+  };
+
+  const startVoiceCapture = async () => {
+    if (!currentUser) {
+      setVoiceStatus("Sign in to use voice chat");
+      return;
+    }
+    if (!voiceAccessGranted) {
+      setVoiceStatus("Voice chat access requires admin grant");
+      return;
+    }
+    if (isListening || voiceBusy) return;
+
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    if (!presentationId || !slideId) {
+      setVoiceStatus("No active slide to discuss");
+      return;
+    }
+
+    setVoiceBusy(true);
+    setVoiceTranscript("");
+    setVoiceAnswer("");
+    stopNarration();
+    setAutoplay(false);
+    setVoiceStatus("Connecting Gemini Live...");
+    try {
+      const ai = getAI(app, {
+        backend: new VertexAIBackend("us-east1"),
+        useLimitedUseAppCheckTokens: true,
+      });
+      const model = getLiveGenerativeModel(ai, {
+        model: LIVE_MODEL,
+        generationConfig: {
+          responseModalities: [ResponseModality.AUDIO],
+        },
+      });
+      const session = await model.connect();
+      await session.send(
+        `You are a classroom voice assistant. Keep responses concise and use ${listenLang || "en-US"}.`,
+        false
+      );
+      await sendVoiceContextUpdate(session, true);
+      const controller = await startAudioConversation(session);
+      liveConversationRef.current = { controller, session };
+      setIsListening(true);
+      setVoiceStatus("Gemini Live connected");
+    } catch (error) {
+      console.error("Gemini Live connection failed:", error);
+      if (error instanceof AIError) {
+        setVoiceStatus(`Live API error: ${error.message}`);
+      } else {
+        setVoiceStatus(error?.message || "Failed to connect Gemini Live");
+      }
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isListening || !liveConversationRef.current?.session) return;
+    sendVoiceContextUpdate(liveConversationRef.current.session).catch((error) => {
+      console.error("Failed to update Gemini Live context:", error);
+    });
+  }, [isListening, courseId, viewingPptId, viewingSlideId, livePptId, liveSlideId, listenLang, slideData, liveData]);
+
+  const stopVoiceCapture = async () => {
+    if (!liveConversationRef.current) {
+      setIsListening(false);
+      setVoiceStatus("Live session not running");
+      return;
+    }
+    setVoiceBusy(true);
+    try {
+      await liveConversationRef.current.controller.stop();
+      await liveConversationRef.current.session.close();
+      liveConversationRef.current = null;
+      liveContextKeyRef.current = "";
+      setIsListening(false);
+      setVoiceStatus("Gemini Live stopped");
+    } catch (error) {
+      console.error("Failed to stop Gemini Live:", error);
+      setVoiceStatus(error?.message || "Failed to stop Gemini Live");
+    } finally {
+      setVoiceBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (hasClassParam) {
@@ -240,7 +563,26 @@ function App() {
     setNarrationStatus("Stopped");
   };
 
+  useEffect(() => {
+    return () => {
+      if (liveConversationRef.current) {
+        liveConversationRef.current.controller.stop();
+        liveConversationRef.current.session.close();
+        liveConversationRef.current = null;
+        liveContextKeyRef.current = "";
+      }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   const narrateCurrentSlide = () => {
+    if (isListening || voiceBusy) {
+      setNarrationStatus("Narration paused during voice chat");
+      return;
+    }
+
     const activeContent = isLiveMode ? liveContentView || liveContentAudio : viewingContentView || viewingContentAudio;
     const audioUrl = activeContent?.audio_url || activeAudioUrl;
 
@@ -426,13 +768,13 @@ function App() {
 
   // --- 5. Audio Player Logic ---
   useEffect(() => {
-      if (!activeAudioUrl || !autoplay) return;
+      if (!activeAudioUrl || !autoplay || isListening || voiceBusy) return;
 
       if (lastPlayedHash.current !== activeAudioUrl) {
           lastPlayedHash.current = activeAudioUrl;
           startAudioPlayback(activeAudioUrl, { restart: false });
       }
-  }, [activeAudioUrl, autoplay]);
+  }, [activeAudioUrl, autoplay, isListening, voiceBusy]);
 
   // Audio Events
   useEffect(() => {
@@ -471,6 +813,11 @@ function App() {
   }, []);
 
   const togglePlay = () => {
+      if (isListening || voiceBusy) {
+        setNarrationStatus("Narration paused during voice chat");
+        return;
+      }
+
       if (isPlaying) {
         audioRef.current.pause();
         return;
@@ -558,6 +905,15 @@ function App() {
               return;
           }
 
+          if (isListening || voiceBusy) {
+              const blockedKeys = new Set([" ", "spacebar", "r", "s", "a", "d", "home"]);
+              const normalized = (event.key || "").toLowerCase();
+              if (blockedKeys.has(normalized) || event.code === "Space") {
+                  event.preventDefault();
+                  return;
+              }
+          }
+
           if (event.key === "Escape") {
               if (isFullScreen) {
                   setIsFullScreen(false);
@@ -610,7 +966,7 @@ function App() {
 
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isFullScreen, livePptId, liveSlideId, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList, togglePlay, narrateCurrentSlide, stopNarration, seekAudio, jumpToAudioStart, handlePrev, handleNext, toggleLiveMode, activeAudioUrl, isPlaying]);
+  }, [isFullScreen, livePptId, liveSlideId, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList, togglePlay, narrateCurrentSlide, stopNarration, seekAudio, jumpToAudioStart, handlePrev, handleNext, toggleLiveMode, activeAudioUrl, isPlaying, isListening, voiceBusy]);
 
   if (!isReady) {
       return (
@@ -672,8 +1028,109 @@ function App() {
                         {supportedLangs.map(lang => <option key={lang} value={lang}>{getAudioLangName(lang)}</option>)}
                     </select>
             </div>
+            <button
+                type="button"
+                onClick={currentUser ? handleSignOut : handleSignIn}
+                style={{
+                    borderRadius: "18px",
+                    border: "1px solid #ddd",
+                    padding: "6px 12px",
+                    background: "#fff",
+                    cursor: "pointer"
+                }}
+            >
+                {currentUser ? "Sign out" : "Sign in"}
+            </button>
+            <button
+                type="button"
+                onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
+                disabled={!currentUser || !voiceAccessGranted}
+                style={{
+                    borderRadius: "18px",
+                    border: "1px solid #ddd",
+                    padding: "6px 12px",
+                    background: (isListening || voiceBusy) ? "#fee2e2" : "#fff",
+                    cursor: (!currentUser || !voiceAccessGranted) ? "not-allowed" : "pointer"
+                }}
+            >
+                {isListening || voiceBusy ? "Stop Voice" : "Voice Chat"}
+            </button>
                             </div>
                         </header>      
+      <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: "8px" }}>
+        {authStatus} · {voiceStatus}
+      </div>
+      {voiceTranscript && (
+        <div style={{ fontSize: "0.9rem", marginBottom: "4px" }}>
+          <strong>You said:</strong> {voiceTranscript}
+        </div>
+      )}
+      {voiceAnswer && (
+        <div style={{ fontSize: "0.9rem", marginBottom: "8px" }}>
+          <strong>Assistant:</strong> {voiceAnswer}
+        </div>
+      )}
+      {currentUser && adminEnabled && (
+        <div style={{ marginBottom: "10px", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <strong>Voice Chat Admin</strong>
+            <button
+              type="button"
+              onClick={() => loadAdminDashboard()}
+              disabled={adminLoading}
+              style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+            >
+              Refresh
+            </button>
+          </div>
+          <>
+              {adminSummary && (
+                <div style={{ fontSize: "0.85rem", marginBottom: "8px" }}>
+                  Tracked users: {adminSummary.tracked_users} · Today requests: {adminSummary.total_today_requests}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+                <label style={{ fontSize: "0.85rem" }}>
+                  Per minute
+                  <input
+                    type="number"
+                    min="1"
+                    value={limitPerMinute}
+                    onChange={(e) => setLimitPerMinute(e.target.value)}
+                    style={{ marginLeft: "6px", width: "80px" }}
+                  />
+                </label>
+                <label style={{ fontSize: "0.85rem" }}>
+                  Per day
+                  <input
+                    type="number"
+                    min="1"
+                    value={limitPerDay}
+                    onChange={(e) => setLimitPerDay(e.target.value)}
+                    style={{ marginLeft: "6px", width: "90px" }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={saveAdminLimits}
+                  disabled={adminLoading}
+                  style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+                >
+                  Save limits
+                </button>
+              </div>
+              {adminStatus && <div style={{ fontSize: "0.82rem", color: "#4b5563", marginBottom: "6px" }}>{adminStatus}</div>}
+              <div style={{ maxHeight: "160px", overflow: "auto", fontSize: "0.8rem", borderTop: "1px solid #f3f4f6", paddingTop: "6px" }}>
+                {adminTopUsage.slice(0, 15).map((row) => (
+                  <div key={row.uid} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.uid}</span>
+                    <span>{row.day_count} today</span>
+                  </div>
+                ))}
+              </div>
+          </>
+        </div>
+      )}
       <div className="sub-header">
         <div className="nav-controls">
             {/* Presentation Selector */}
