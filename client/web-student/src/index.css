@@ -68,27 +68,38 @@ select {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 20px;
+    gap: 12px;
+    padding: 8px 20px;
     background: #fafafa;
     border-bottom: 1px solid #eee;
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
-.live-status-panel {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    padding: 10px 20px;
-    background: #f7faff;
-    border-bottom: 1px solid #e6eef9;
-    font-size: 0.85rem;
-}
-
-.live-status-item {
+.nav-controls {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
     min-width: 0;
+    flex: 1 1 auto;
+}
+
+.lang-select {
+    position: relative;
+}
+
+.lang-select select {
+    padding-left: 28px;
+}
+
+.lang-select-icon {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.85rem;
+    pointer-events: none;
 }
 
 .live-status-label {
@@ -98,26 +109,33 @@ select {
     font-size: 0.72rem;
 }
 
-.live-status-item strong {
-    color: #202124;
-    word-break: break-word;
-}
-
-.autoplay-toggle {
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #5f6368;
-    cursor: pointer;
-    user-select: none;
-}
-
 .narration-controls {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.audio-seek-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 220px;
+    flex: 1 1 260px;
+}
+
+.audio-seek {
+    flex: 1 1 auto;
+    min-width: 120px;
+    accent-color: #1a73e8;
+}
+
+.audio-time {
+    font-size: 0.72rem;
+    color: #5f6368;
+    white-space: nowrap;
+    min-width: 2.8rem;
+    text-align: center;
 }
 
 .narration-btn {
@@ -141,10 +159,30 @@ select {
     border-color: #dadce0;
 }
 
+.compact-meta {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    flex-wrap: wrap;
+    flex: 1 1 100%;
+}
+
 .shortcut-hint {
-    margin-top: 6px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: #5f6368;
+}
+
+.compact-status-line {
+    font-size: 0.72rem;
+    color: #5f6368;
+    white-space: nowrap;
+}
+
+.audio-seek-row {
+    width: 100%;
+    min-width: 0;
 }
 
 /* Main Stage - Single Slide View */
@@ -440,6 +478,13 @@ select {
 }
 
 @media (max-width: 600px) {
+    .sub-header {
+        padding: 10px 14px 8px;
+    }
+    .compact-meta {
+        margin-left: 0;
+        justify-content: flex-start;
+    }
     .nav-btn {
         width: 40px;
         height: 40px;

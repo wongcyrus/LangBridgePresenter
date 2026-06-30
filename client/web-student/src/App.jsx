@@ -118,6 +118,7 @@ const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, has
 // --- Main App Component ---
 function App() {
   const [searchParams] = useSearchParams();
+  const hasClassParam = searchParams.has('class') || searchParams.has('courseId');
   const courseId = searchParams.get('class') || searchParams.get('courseId') || 'current';
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
@@ -144,8 +145,9 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [autoplay, setAutoplay] = useState(true);
   const [isReady, setIsReady] = useState(false); 
-  const [isNarrationMode, setIsNarrationMode] = useState(false);
   const [narrationStatus, setNarrationStatus] = useState("Idle");
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
   
   // Full Screen State
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -170,6 +172,12 @@ function App() {
   const getTextLangName = (code) => DISPLAY_LANGUAGE_NAMES[code] || code;
   const getAudioLangName = (code) => AUDIO_LANGUAGE_NAMES[code] || code;
 
+  useEffect(() => {
+    if (hasClassParam) {
+      setIsReady(true);
+    }
+  }, [hasClassParam]);
+
   // Helper to extract data for specific language
   const getLangContent = (languagesMap, langCode) => {
     if (!languagesMap) return null;
@@ -181,29 +189,55 @@ function App() {
     return content;
   };
 
-  const stopNarration = () => {
-    audioRef.current.pause();
-    audioRef.current.currentTime = 0;
-    setNarrationStatus("Stopped");
+  const cycleLanguage = (currentLang, direction = 1) => {
+    if (!supportedLangs.length) return currentLang;
+
+    const currentIndex = supportedLangs.indexOf(currentLang);
+    const fallbackIndex = currentIndex === -1 ? 0 : currentIndex;
+    const nextIndex = (fallbackIndex + direction + supportedLangs.length) % supportedLangs.length;
+    return supportedLangs[nextIndex];
   };
 
-  const playNarrationAudio = (audioUrl) => {
+  const syncAudioState = () => {
+    setAudioCurrentTime(audioRef.current.currentTime || 0);
+    setAudioDuration(Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
+    setIsPlaying(!audioRef.current.paused && !audioRef.current.ended);
+  };
+
+  const startAudioPlayback = (audioUrl, { restart = true } = {}) => {
     if (!audioUrl) {
       setNarrationStatus("Narration audio unavailable");
       return;
     }
 
+    if (audioRef.current.src !== audioUrl) {
+      audioRef.current.src = audioUrl;
+    }
+
+    if (restart) {
+      audioRef.current.currentTime = 0;
+      setAudioCurrentTime(0);
+    }
+
     lastNarratedAudioUrl.current = audioUrl;
-    audioRef.current.pause();
-    audioRef.current.currentTime = 0;
-    audioRef.current.src = audioUrl;
     setNarrationStatus("Playing MP3 narration");
     audioRef.current.play()
-      .then(() => setNarrationStatus("Narrating"))
+      .then(() => {
+        setIsPlaying(true);
+        setNarrationStatus("Narrating");
+      })
       .catch((error) => {
         console.error("Narration playback blocked:", error);
+        setIsPlaying(false);
         setNarrationStatus("Narration playback blocked");
       });
+  };
+
+  const stopNarration = () => {
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setAudioCurrentTime(0);
+    setNarrationStatus("Stopped");
   };
 
   const narrateCurrentSlide = () => {
@@ -215,12 +249,7 @@ function App() {
       return;
     }
 
-    if (lastNarratedAudioUrl.current === audioUrl && audioRef.current.src === audioUrl && !audioRef.current.paused) {
-      setNarrationStatus("Narrating");
-      return;
-    }
-
-    playNarrationAudio(audioUrl);
+    startAudioPlayback(audioUrl, { restart: true });
   };
 
   // --- 1. Listen to Root Broadcast (Live State) ---
@@ -395,39 +424,42 @@ function App() {
   const activeAudioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
   const activeAudioUrl = activeAudioContent?.audio_url;
 
-  useEffect(() => {
-      if (!isNarrationMode || !isReady || !activeAudioUrl) return;
-      narrateCurrentSlide();
-  }, [isNarrationMode, isReady, activeAudioUrl, isLiveMode, viewingSlideId, liveSlideId]);
-
   // --- 5. Audio Player Logic ---
   useEffect(() => {
       if (!activeAudioUrl || !autoplay) return;
 
       if (lastPlayedHash.current !== activeAudioUrl) {
           lastPlayedHash.current = activeAudioUrl;
-          
-          audioRef.current.src = activeAudioUrl;
-          audioRef.current.play()
-              .then(() => setIsPlaying(true))
-              .catch(e => console.error("Autoplay blocked:", e));
+          startAudioPlayback(activeAudioUrl, { restart: false });
       }
   }, [activeAudioUrl, autoplay]);
 
   // Audio Events
   useEffect(() => {
       const audio = audioRef.current;
-      const handlePlay = () => setIsPlaying(true);
-      const handlePause = () => setIsPlaying(false);
-      const handleEnded = () => setIsPlaying(false);
+      const handlePlay = () => syncAudioState();
+      const handlePause = () => syncAudioState();
+      const handleEnded = () => {
+        syncAudioState();
+        setAudioCurrentTime(0);
+      };
+      const handleTimeUpdate = () => setAudioCurrentTime(audio.currentTime || 0);
+      const handleLoadedMetadata = () => syncAudioState();
+      const handleDurationChange = () => syncAudioState();
 
       audio.addEventListener('play', handlePlay);
       audio.addEventListener('pause', handlePause);
       audio.addEventListener('ended', handleEnded);
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.addEventListener('durationchange', handleDurationChange);
       return () => {
           audio.removeEventListener('play', handlePlay);
           audio.removeEventListener('pause', handlePause);
           audio.removeEventListener('ended', handleEnded);
+          audio.removeEventListener('timeupdate', handleTimeUpdate);
+          audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          audio.removeEventListener('durationchange', handleDurationChange);
       };
   }, []);
 
@@ -439,8 +471,52 @@ function App() {
   }, []);
 
   const togglePlay = () => {
-      if (isPlaying) audioRef.current.pause();
-      else audioRef.current.play();
+      if (isPlaying) {
+        audioRef.current.pause();
+        return;
+      }
+
+      if (!audioRef.current.src || audioRef.current.src !== activeAudioUrl) {
+        if (!activeAudioUrl) {
+          setNarrationStatus("Narration audio unavailable");
+          return;
+        }
+        startAudioPlayback(activeAudioUrl, { restart: false });
+        return;
+      }
+
+      if (audioRef.current.ended) {
+        audioRef.current.currentTime = 0;
+        setAudioCurrentTime(0);
+      }
+
+      audioRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch((error) => {
+          console.error("Playback failed:", error);
+          setNarrationStatus("Narration playback blocked");
+        });
+  };
+
+  const seekAudio = (seconds) => {
+    if (!audioRef.current.src) return;
+    const duration = Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0;
+    const nextTime = Math.min(Math.max((audioRef.current.currentTime || 0) + seconds, 0), duration || Infinity);
+    audioRef.current.currentTime = nextTime;
+    setAudioCurrentTime(nextTime);
+  };
+
+  const jumpToAudioStart = () => {
+    if (!audioRef.current.src) return;
+    audioRef.current.currentTime = 0;
+    setAudioCurrentTime(0);
+  };
+
+  const formatTime = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, "0")}`;
   };
 
   // --- Handlers ---
@@ -487,12 +563,10 @@ function App() {
                   setIsFullScreen(false);
               } else {
                   stopNarration();
-                  setIsNarrationMode(false);
+                  setAutoplay(false);
               }
               return;
           }
-
-          if (!event.altKey) return;
 
           if (event.key === "ArrowLeft") {
               event.preventDefault();
@@ -500,26 +574,43 @@ function App() {
           } else if (event.key === "ArrowRight") {
               event.preventDefault();
               handleNext();
+          } else if (event.key === " " || event.key === "Spacebar" || event.code === "Space") {
+              event.preventDefault();
+              togglePlay();
           } else if (event.key.toLowerCase() === "l") {
               event.preventDefault();
               toggleLiveMode();
-          } else if (event.key.toLowerCase() === "n") {
-              event.preventDefault();
-              setIsNarrationMode((prev) => {
-                  const next = !prev;
-                  if (next) narrateCurrentSlide();
-                  else stopNarration();
-                  return next;
-              });
           } else if (event.key.toLowerCase() === "r") {
               event.preventDefault();
               narrateCurrentSlide();
+          } else if (event.key.toLowerCase() === "s") {
+              event.preventDefault();
+              stopNarration();
+          } else if (event.key.toLowerCase() === "a" && !event.altKey) {
+              event.preventDefault();
+              seekAudio(event.shiftKey ? -30 : -10);
+          } else if (event.key.toLowerCase() === "d" && !event.altKey) {
+              event.preventDefault();
+              seekAudio(event.shiftKey ? 30 : 10);
+          } else if (event.key === "Home") {
+              event.preventDefault();
+              jumpToAudioStart();
+          }
+
+          if (!event.altKey) return;
+
+          if (event.key.toLowerCase() === "v") {
+              event.preventDefault();
+              setViewLang((prev) => cycleLanguage(prev, event.shiftKey ? -1 : 1));
+          } else if (event.key.toLowerCase() === "a") {
+              event.preventDefault();
+              setListenLang((prev) => cycleLanguage(prev, event.shiftKey ? -1 : 1));
           }
       };
 
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isFullScreen, livePptId, liveSlideId, isNarrationMode, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList]);
+  }, [isFullScreen, livePptId, liveSlideId, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList, togglePlay, narrateCurrentSlide, stopNarration, seekAudio, jumpToAudioStart, handlePrev, handleNext, toggleLiveMode, activeAudioUrl, isPlaying]);
 
   if (!isReady) {
       return (
@@ -541,9 +632,7 @@ function App() {
   const currentNum = parseInt(viewingSlideId, 10);
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
-  const presenterList = broadcastStatus?.presenterIds || [];
-  const broadcastLabel = formatBroadcastStatusLabel(broadcastStatus);
-  const narrateButtonLabel = isNarrationMode ? "Narration mode on" : "Narration mode off";
+  const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
 
   return (
     <div className="container single-slide-view">
@@ -565,30 +654,28 @@ function App() {
         <h1>🎓 LangBridge</h1>
         <div className="controls">
             <div className="status" style={{ color: status.color }}>{status.text}</div>
-            <div style={{display: 'flex', gap: '8px'}}>
-                    <select 
-                        value={viewLang} 
-                        onChange={(e) => setViewLang(e.target.value)}
-                        style={{paddingLeft: '28px'}}
-                    >
-                        {supportedLangs.map(lang => <option key={lang} value={lang}>{getTextLangName(lang)}</option>)}
-                    </select>
-                </div>
-                {/* Listen Language */}
-                <div style={{position: 'relative'}} title="Audio Language">
-                    <span style={{position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', pointerEvents: 'none'}}>🔊</span>
+            <div className="lang-select" title="Display Language">
+                <span className="lang-select-icon">🌐</span>
+                <select 
+                    value={viewLang} 
+                    onChange={(e) => setViewLang(e.target.value)}
+                >
+                    {supportedLangs.map(lang => <option key={lang} value={lang}>{getTextLangName(lang)}</option>)}
+                </select>
+            </div>
+            <div className="lang-select" title="Audio Language">
+                <span className="lang-select-icon">🔊</span>
                     <select 
                         value={listenLang} 
                         onChange={(e) => setListenLang(e.target.value)}
-                        style={{paddingLeft: '28px'}}
                     >
                         {supportedLangs.map(lang => <option key={lang} value={lang}>{getAudioLangName(lang)}</option>)}
                     </select>
-                                </div>
+            </div>
                             </div>
                         </header>      
       <div className="sub-header">
-        <div className="nav-controls" style={{display:'flex', alignItems:'center', gap:'10px'}}>
+        <div className="nav-controls">
             {/* Presentation Selector */}
             <select 
                 value={viewingPptId || ''} 
@@ -668,64 +755,55 @@ function App() {
             <button disabled={!hasNext} onClick={handleNext} className="nav-btn-mini">
                 <ChevronRightIcon />
             </button>
-        </div>
 
-        <label className="autoplay-toggle">
-            <input 
-            type="checkbox" 
-            checked={autoplay} 
-            onChange={(e) => setAutoplay(e.target.checked)} 
-            /> 
-            <span>Autoplay</span>
-        </label>
-        <div className="narration-controls">
-          <button
-            className={`narration-btn ${isNarrationMode ? 'active' : ''}`}
-            onClick={() => {
-              setIsNarrationMode((prev) => {
-                const next = !prev;
-                if (next) narrateCurrentSlide();
-                else stopNarration();
-                return next;
-              });
-            }}
-          >
-            {narrateButtonLabel}
-          </button>
-          <button className="narration-btn" onClick={narrateCurrentSlide}>
-            Narrate slide
-          </button>
-          <button className="narration-btn secondary" onClick={stopNarration}>
-            Stop
-          </button>
-        </div>
-        <div className="shortcut-hint">
-          Shortcuts: Alt+N narration, Alt+R narrate now, Alt+L live sync, Alt+←/→ slides, Esc stop/close
+          <div className="narration-controls">
+            <button
+              className={`narration-btn ${autoplay ? 'active' : ''}`}
+              title="Automatically play new MP3s"
+              onClick={() => {
+                setAutoplay((prev) => !prev);
+              }}
+            >
+              {readAloudLabel}
+            </button>
+            <button className="narration-btn" title="Restart from beginning (R)" onClick={narrateCurrentSlide}>
+              Restart
+            </button>
+            <button className="narration-btn secondary" title="Stop (S)" onClick={stopNarration}>
+              Stop
+            </button>
+          </div>
+          <div className="audio-seek-row">
+            <span className="audio-time">{formatTime(audioCurrentTime)}</span>
+            <input
+              className="audio-seek"
+              type="range"
+              min="0"
+              max={audioDuration || 0}
+              step="0.1"
+              value={Math.min(audioCurrentTime, audioDuration || audioCurrentTime || 0)}
+              onChange={(e) => {
+                const nextTime = Number(e.target.value);
+                audioRef.current.currentTime = nextTime;
+                setAudioCurrentTime(nextTime);
+              }}
+              aria-label="Audio progress"
+              title="Seek audio"
+              disabled={!audioDuration}
+            />
+            <span className="audio-time">{formatTime(audioDuration)}</span>
+          </div>
+          <div className="compact-meta">
+            <span className="shortcut-hint">
+              Language: Alt+V view · Alt+A audio
+            </span>
+            <span className="shortcut-hint">
+              Player: Space play/pause · R restart · A/D seek · S stop · Home start
+            </span>
+            <span className="compact-status-line">Narration: {narrationStatus}</span>
+          </div>
         </div>
       </div>
-
-      <section className="live-status-panel" aria-label="Live presentation status">
-        <div className="live-status-item">
-          <span className="live-status-label">Live slide</span>
-          <strong>{livePptId || "—"}#{liveSlideId || "—"}</strong>
-        </div>
-        <div className="live-status-item">
-          <span className="live-status-label">Broadcast</span>
-          <strong>{broadcastLabel}</strong>
-        </div>
-        <div className="live-status-item">
-          <span className="live-status-label">Presenters</span>
-          <strong>{presenterList.length ? presenterList.join(", ") : "—"}</strong>
-        </div>
-        <div className="live-status-item">
-          <span className="live-status-label">Registry</span>
-          <strong>{broadcastStatus?.registryUpdated === null ? "—" : broadcastStatus?.registryUpdated ? "Updated" : "Unchanged"}</strong>
-        </div>
-        <div className="live-status-item">
-          <span className="live-status-label">Narration</span>
-          <strong>{narrationStatus}</strong>
-        </div>
-      </section>
 
       <div className="main-stage">
           <div className="slide-container" onClick={() => setIsFullScreen(true)}>
@@ -744,7 +822,12 @@ function App() {
              <div className="caption-text">
                  {displayText}
              </div>
-             <button className="play-btn" onClick={(e) => { e.stopPropagation(); togglePlay(); }}>
+             <button
+               className="play-btn"
+               title={isPlaying ? "Pause (Space)" : "Play / pause from current position (Space)"}
+               aria-label={isPlaying ? "Pause" : "Play / pause from current position"}
+               onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+             >
                 {isPlaying ? <PauseIcon /> : <PlayIcon />}
              </button>
           </div>
