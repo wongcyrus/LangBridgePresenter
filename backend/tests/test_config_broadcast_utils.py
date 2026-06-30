@@ -11,6 +11,7 @@ if FUNC_PATH not in sys.path:
 
 from config.broadcast_utils import (  # noqa: E402
     build_broadcast_course_ids,
+    build_broadcast_status,
     build_live_update,
     build_presenter_update,
     build_safe_ppt_id,
@@ -91,8 +92,19 @@ def test_live_and_presenter_updates_are_derived_from_same_state():
     enriched = {"en": {"text": "Hello", "audio_url": "x"}}
     live = build_live_update("deck", 3, enriched)
     presenter = build_presenter_update("course-a", "deck", 3, enriched)
+    status = build_broadcast_status(
+        "broadcasted",
+        "course-a",
+        "deck",
+        3,
+        presenter_ids=["p1"],
+        broadcast_course_ids=["course-a"],
+        registry_updated=True,
+    )
 
     assert live["current_slide_id"] == "3"
     assert live["latest_languages"] == enriched
     assert presenter["current_course_id"] == "course-a"
     assert presenter["current_slide_languages"] == enriched
+    assert status["status"] == "broadcasted"
+    assert status["presenter_ids"] == ["p1"]

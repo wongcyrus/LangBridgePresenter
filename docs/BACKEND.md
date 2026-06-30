@@ -90,6 +90,7 @@ Located in `backend/functions/`.
     - Supports multiple presenters via comma-separated presenter IDs in `userParams.presenterId`
     - Updates all specified presenters with current slide context
     - Broadcasts slide updates to client applications
+    - Persists a compact `broadcast_status` summary and returns it to the caller
 
 ```mermaid
 sequenceDiagram
@@ -158,13 +159,14 @@ The backend uses two Firestore databases:
     - **Multiple Presenters**: The system supports comma-separated presenter IDs, allowing multiple AI agents to share the same presentation context.
 - **Collection**: `langbridge_config`
     - Stores system configuration and messages.
+    - Includes the latest `broadcast_status` summary from `/api/config`
 - **Collection**: `sessions` (implied)
     - Stores active conversation state.
 
 ### Client Database (`default`)
 - **Collection**: `presentation_broadcast`
     - **Document**: `{courseId}` - Live pointer to current slide
-        - **Fields**: `current_presentation_id`, `current_slide_id`, `latest_languages`, `updated_at`
+            - **Fields**: `current_presentation_id`, `current_slide_id`, `latest_languages`, `broadcast_status`, `updated_at`
     - **Subcollection**: `presentations/{pptId}` - Presentation registry
         - **Subcollection**: `slides/{slideNum}` - Individual slide data
             - **Fields**:
@@ -178,6 +180,21 @@ The backend uses two Firestore databases:
 1. **Seeding**: Pre-generates all content and populates the registry
 2. **Live Presentation**: VBA sends slide changes → Backend fetches from registry → Updates live pointer
 3. **Web Client**: Listens to live pointer or browses registry for slide content
+
+```mermaid
+sequenceDiagram
+    participant Client as VBA/Python Client
+    participant Config as /api/config
+    participant BackendFS as backend Firestore
+    participant ClientFS as client Firestore
+    participant Web as web-student
+
+    Client->>Config: slide/context update
+    Config->>BackendFS: save config + broadcast_status
+    Config->>ClientFS: update live pointer + status
+    ClientFS-->>Web: onSnapshot update
+    Web-->>Client: live slide / presenter panel
+```
 
 ## Content Seeding
 

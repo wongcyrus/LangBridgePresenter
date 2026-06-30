@@ -2,7 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
-import { normalizeLanguageSelection, parseNumericIds } from "./utils/presentation";
+import {
+  formatBroadcastStatusLabel,
+  normalizeBroadcastStatus,
+  normalizeLanguageSelection,
+  parseNumericIds,
+} from "./utils/presentation";
 
 // --- Icons ---
 const PlayIcon = () => (
@@ -123,6 +128,7 @@ function App() {
   // -- State for Live/Nav Logic --
   const [livePptId, setLivePptId] = useState(null);
   const [liveSlideId, setLiveSlideId] = useState(null);
+  const [broadcastStatus, setBroadcastStatus] = useState(null);
   
   const [viewingPptId, setViewingPptId] = useState(null);
   const [viewingSlideId, setViewingSlideId] = useState(null);
@@ -138,6 +144,8 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [autoplay, setAutoplay] = useState(true);
   const [isReady, setIsReady] = useState(false); 
+  const [isNarrationMode, setIsNarrationMode] = useState(false);
+  const [narrationStatus, setNarrationStatus] = useState("Idle");
   
   // Full Screen State
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -145,6 +153,7 @@ function App() {
   // Refs
   const audioRef = useRef(new Audio());
   const lastPlayedHash = useRef(null);
+  const lastNarratedAudioUrl = useRef(null);
 
   const AUDIO_LANGUAGE_NAMES = {
     "en-US": "English",
@@ -172,6 +181,48 @@ function App() {
     return content;
   };
 
+  const stopNarration = () => {
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setNarrationStatus("Stopped");
+  };
+
+  const playNarrationAudio = (audioUrl) => {
+    if (!audioUrl) {
+      setNarrationStatus("Narration audio unavailable");
+      return;
+    }
+
+    lastNarratedAudioUrl.current = audioUrl;
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    audioRef.current.src = audioUrl;
+    setNarrationStatus("Playing MP3 narration");
+    audioRef.current.play()
+      .then(() => setNarrationStatus("Narrating"))
+      .catch((error) => {
+        console.error("Narration playback blocked:", error);
+        setNarrationStatus("Narration playback blocked");
+      });
+  };
+
+  const narrateCurrentSlide = () => {
+    const activeContent = isLiveMode ? liveContentView || liveContentAudio : viewingContentView || viewingContentAudio;
+    const audioUrl = activeContent?.audio_url || activeAudioUrl;
+
+    if (!audioUrl) {
+      setNarrationStatus("Narration audio unavailable");
+      return;
+    }
+
+    if (lastNarratedAudioUrl.current === audioUrl && audioRef.current.src === audioUrl && !audioRef.current.paused) {
+      setNarrationStatus("Narrating");
+      return;
+    }
+
+    playNarrationAudio(audioUrl);
+  };
+
   // --- 1. Listen to Root Broadcast (Live State) ---
   useEffect(() => {
     if (!isReady) return;
@@ -184,6 +235,7 @@ function App() {
         // Update Live Pointers
         if (data.current_presentation_id) setLivePptId(data.current_presentation_id);
         if (data.current_slide_id) setLiveSlideId(data.current_slide_id);
+        setBroadcastStatus(normalizeBroadcastStatus(data.broadcast_status));
         
         // Update Live Content (Audio/Text)
         if (data.latest_languages) {
@@ -343,6 +395,11 @@ function App() {
   const activeAudioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
   const activeAudioUrl = activeAudioContent?.audio_url;
 
+  useEffect(() => {
+      if (!isNarrationMode || !isReady || !activeAudioUrl) return;
+      narrateCurrentSlide();
+  }, [isNarrationMode, isReady, activeAudioUrl, isLiveMode, viewingSlideId, liveSlideId]);
+
   // --- 5. Audio Player Logic ---
   useEffect(() => {
       if (!activeAudioUrl || !autoplay) return;
@@ -417,6 +474,53 @@ function App() {
       }
   };
 
+  useEffect(() => {
+      const onKeyDown = (event) => {
+          const target = event.target;
+          const tagName = target?.tagName?.toLowerCase();
+          if (tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable) {
+              return;
+          }
+
+          if (event.key === "Escape") {
+              if (isFullScreen) {
+                  setIsFullScreen(false);
+              } else {
+                  stopNarration();
+                  setIsNarrationMode(false);
+              }
+              return;
+          }
+
+          if (!event.altKey) return;
+
+          if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              handlePrev();
+          } else if (event.key === "ArrowRight") {
+              event.preventDefault();
+              handleNext();
+          } else if (event.key.toLowerCase() === "l") {
+              event.preventDefault();
+              toggleLiveMode();
+          } else if (event.key.toLowerCase() === "n") {
+              event.preventDefault();
+              setIsNarrationMode((prev) => {
+                  const next = !prev;
+                  if (next) narrateCurrentSlide();
+                  else stopNarration();
+                  return next;
+              });
+          } else if (event.key.toLowerCase() === "r") {
+              event.preventDefault();
+              narrateCurrentSlide();
+          }
+      };
+
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFullScreen, livePptId, liveSlideId, isNarrationMode, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList]);
+
   if (!isReady) {
       return (
           <div className="splash-screen">
@@ -437,6 +541,9 @@ function App() {
   const currentNum = parseInt(viewingSlideId, 10);
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
+  const presenterList = broadcastStatus?.presenterIds || [];
+  const broadcastLabel = formatBroadcastStatusLabel(broadcastStatus);
+  const narrateButtonLabel = isNarrationMode ? "Narration mode on" : "Narration mode off";
 
   return (
     <div className="container single-slide-view">
@@ -571,7 +678,54 @@ function App() {
             /> 
             <span>Autoplay</span>
         </label>
+        <div className="narration-controls">
+          <button
+            className={`narration-btn ${isNarrationMode ? 'active' : ''}`}
+            onClick={() => {
+              setIsNarrationMode((prev) => {
+                const next = !prev;
+                if (next) narrateCurrentSlide();
+                else stopNarration();
+                return next;
+              });
+            }}
+          >
+            {narrateButtonLabel}
+          </button>
+          <button className="narration-btn" onClick={narrateCurrentSlide}>
+            Narrate slide
+          </button>
+          <button className="narration-btn secondary" onClick={stopNarration}>
+            Stop
+          </button>
+        </div>
+        <div className="shortcut-hint">
+          Shortcuts: Alt+N narration, Alt+R narrate now, Alt+L live sync, Alt+←/→ slides, Esc stop/close
+        </div>
       </div>
+
+      <section className="live-status-panel" aria-label="Live presentation status">
+        <div className="live-status-item">
+          <span className="live-status-label">Live slide</span>
+          <strong>{livePptId || "—"}#{liveSlideId || "—"}</strong>
+        </div>
+        <div className="live-status-item">
+          <span className="live-status-label">Broadcast</span>
+          <strong>{broadcastLabel}</strong>
+        </div>
+        <div className="live-status-item">
+          <span className="live-status-label">Presenters</span>
+          <strong>{presenterList.length ? presenterList.join(", ") : "—"}</strong>
+        </div>
+        <div className="live-status-item">
+          <span className="live-status-label">Registry</span>
+          <strong>{broadcastStatus?.registryUpdated === null ? "—" : broadcastStatus?.registryUpdated ? "Updated" : "Unchanged"}</strong>
+        </div>
+        <div className="live-status-item">
+          <span className="live-status-label">Narration</span>
+          <strong>{narrationStatus}</strong>
+        </div>
+      </section>
 
       <div className="main-stage">
           <div className="slide-container" onClick={() => setIsFullScreen(true)}>

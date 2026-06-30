@@ -21,6 +21,8 @@ Detailed documentation for each component can be found in the `docs/` directory:
   - See [Admin Tools & Caching](docs/ADMIN_TOOLS.md) for how to set up courses.
   - See [VBA PowerPoint Client](docs/CLIENT_VBA.md) for how to configure your presentations with a `CourseID`.
 - **Multiple Presenter Support**: Specify comma-separated presenter IDs to enable collaborative presentations with multiple AI agents sharing the same context.
+- **Slide Narration Mode**: Play the pre-generated MP3 for the current slide, with keyboard/touch controls for low-vision users.
+- **Keyboard Shortcuts**: Use Alt+N, Alt+R, Alt+L, and Alt+←/→ for narration and slide control.
 
 ## 🎬 Demo
 

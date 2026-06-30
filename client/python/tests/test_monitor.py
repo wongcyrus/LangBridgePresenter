@@ -82,6 +82,7 @@ def test_monitor_controller_process_once_tracks_changes(tmp_path, monkeypatch):
     class FakeOcr:
         def __init__(self):
             self.calls = 0
+            self.status_message = "Tesseract OK"
 
         def image_to_text(self, _image):
             self.calls += 1
@@ -112,6 +113,8 @@ def test_monitor_controller_process_once_tracks_changes(tmp_path, monkeypatch):
 
     _, _, changed_again = controller.process_once()
     assert changed_again is False
+    assert "Last change:" in controller.status_summary()
+    assert "Saved:" in controller.status_summary()
 
 
 def test_run_preview_drives_gui_update_loop(monkeypatch):
@@ -193,6 +196,9 @@ def test_run_preview_drives_gui_update_loop(monkeypatch):
     class FakeOcr:
         status_message = "Tesseract OK"
 
+        def ensure_tesseract(self):
+            return True
+
     class FakeController:
         def __init__(self):
             self.capture = FakeCapture()
@@ -205,6 +211,9 @@ def test_run_preview_drives_gui_update_loop(monkeypatch):
         def process_once(self):
             self.calls += 1
             return Image.new("RGB", (10, 10), "green"), "hello", True
+
+        def status_summary(self):
+            return "Monitor: fake | OCR: Tesseract OK | Last change: never | Saved: none"
 
     controller = FakeController()
 
@@ -285,6 +294,12 @@ def test_screen_capture_supports_injected_backends():
     )
 
     assert capture.capture().size == (1, 1)
+
+
+def test_screen_capture_monitor_summary():
+    capture = ScreenCapture(monitor_index=2, mss_factory=lambda: None, screenshot_fn=lambda: Image.new("RGB", (1, 1), "white"))
+    capture.monitor_rect = {"index": 2, "left": 10, "top": 20, "width": 30, "height": 40}
+    assert capture.monitor_summary().startswith("#2 30x40")
 
 
 def test_screen_capture_falls_back_when_mss_capture_fails(monkeypatch):

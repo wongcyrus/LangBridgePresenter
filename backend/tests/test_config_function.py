@@ -1,3 +1,4 @@
+import json
 import importlib
 import os
 import sys
@@ -75,7 +76,7 @@ def test_populate_messages_from_latest_languages(config_module, mock_request):
     response = config_module.config(mock_request)
 
     assert response[1] == 200
-    config_data = doc_ref.set.call_args[0][0]
+    config_data = doc_ref.set.call_args_list[0][0][0]
     assert config_data["presentation_messages"] == latest_languages
 
 
@@ -94,9 +95,11 @@ def test_empty_slide_content_stays_none_when_registry_missing(config_module, moc
     config_module._get_client_db = lambda: _make_client_db_with_slide(exists=False)
     config_module.get_course_config = lambda _course_id: None
 
-    config_module.config(mock_request)
+    response = config_module.config(mock_request)
 
-    config_data = doc_ref.set.call_args[0][0]
+    config_data = doc_ref.set.call_args_list[0][0][0]
+    payload = json.loads(response[0])
+    assert payload["broadcast_status"]["status"] == "skipped"
     assert config_data["presentation_messages"] is None
 
 
@@ -115,7 +118,7 @@ def test_latest_languages_take_precedence_over_legacy_messages(config_module, mo
 
     config_module.config(mock_request)
 
-    config_data = doc_ref.set.call_args[0][0]
+    config_data = doc_ref.set.call_args_list[0][0][0]
     assert config_data["presentation_messages"] == latest_languages
 
 
@@ -210,11 +213,14 @@ def test_config_broadcasts_live_slide_and_presenter_context(config_module, mock_
     response = config_module.config(mock_request)
 
     assert response[1] == 200
+    payload = json.loads(response[0])
+    assert payload["broadcast_status"]["status"] == "broadcasted"
     assert backend_doc_ref.set.called
     assert course_docs["course-a"].set.call_count == 1
     assert course_docs["course-a-casual"].set.call_count == 1
     assert course_docs["course-a"]._slide_ref.set.call_count == 1
     assert course_docs["course-a"]._slide_ref.set.call_args[0][0]["source_context"] == "new-context"
     assert course_docs["course-a"].set.call_args[0][0]["latest_languages"]["en"]["audio_url"] == "https://example.com/seeded.mp3"
+    assert course_docs["course-a"]._slide_ref.set.call_args[0][0]["source_context"] == "new-context"
     assert presenter_docs["p1"].set.call_count == 1
     assert presenter_docs["p2"].set.call_count == 1

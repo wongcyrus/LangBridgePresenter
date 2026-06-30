@@ -9,6 +9,7 @@ from course_utils import get_course_config
 from _shared.context_utils import extract_presenter_ids
 from broadcast_utils import (
     build_broadcast_course_ids,
+    build_broadcast_status,
     build_live_update,
     build_presenter_update,
     build_safe_ppt_id,
@@ -177,6 +178,18 @@ def config(request):
         doc_ref.set(config_data)
         logger.info("Backend config updated in Firestore")
 
+        if not (course_id and ppt_filename and page_number is not None and slide_content):
+            broadcast_status = build_broadcast_status(
+                status="skipped",
+                course_id=course_id,
+                safe_ppt_id=build_safe_ppt_id(ppt_filename),
+                page_number=page_number,
+                presenter_ids=presenter_ids,
+                reason="missing_required_fields",
+            )
+            doc_ref.set({"broadcast_status": broadcast_status}, merge=True)
+            config_data["broadcast_status"] = broadcast_status
+
         # --- Client Broadcast Logic for Live Slide ---
         # This updates the live pointer so web clients know what's currently being presented
 
@@ -187,7 +200,7 @@ def config(request):
             logger.warning(f"    ppt_filename: {ppt_filename}")
             logger.warning(f"    page_number: {page_number}")
             logger.warning(f"    slide_content: {'Present' if slide_content else 'Missing'}")
-            return json.dumps({"success": True}), 200, {"Content-Type": "application/json"}
+            return json.dumps({"success": True, "broadcast_status": broadcast_status}), 200, {"Content-Type": "application/json"}
 
         # Check if this course has multiple styles - if so, broadcast to all style variants
         try:
@@ -218,6 +231,7 @@ def config(request):
         logger.info(f"   Slide: {page_number}")
 
         # 3. Database Operations
+        registry_updates = []
         try:
             # TARGET THE CLIENT PROJECT
             client_db = _get_client_db()
@@ -297,6 +311,7 @@ def config(request):
                         "source_context": context
                     }, merge=True)
                     logger.info(f"Updated slide registry for {broadcast_course_id}.")
+                    registry_updates.append(broadcast_course_id)
 
                 # B. Update Live Pointer (The "Current State")
                 # This tells all connected clients where to look
@@ -304,6 +319,15 @@ def config(request):
                 
                 live_update = build_live_update(safe_ppt_id, page_number, enriched_languages)
                 live_update["updated_at"] = firestore.SERVER_TIMESTAMP
+                live_update["broadcast_status"] = build_broadcast_status(
+                    status="broadcasted",
+                    course_id=course_id,
+                    safe_ppt_id=safe_ppt_id,
+                    page_number=page_number,
+                    presenter_ids=presenter_ids,
+                    broadcast_course_ids=broadcast_course_ids,
+                    registry_updated=bool(registry_updates),
+                )
                 
                 logger.debug(f"   Live pointer data for {broadcast_course_id}:")
                 logger.debug(f"      current_presentation_id: {safe_ppt_id}")
@@ -342,12 +366,25 @@ def config(request):
 
         except Exception as b_e:
             logger.error(f"❌ Failed to broadcast live slide updates: {b_e}", exc_info=True)
+            raise
+
+        broadcast_status = build_broadcast_status(
+            status="broadcasted",
+            course_id=course_id,
+            safe_ppt_id=safe_ppt_id,
+            page_number=page_number,
+            presenter_ids=presenter_ids,
+            broadcast_course_ids=broadcast_course_ids,
+            registry_updated=bool(registry_updates),
+        )
+        doc_ref.set({"broadcast_status": broadcast_status}, merge=True)
+        config_data["broadcast_status"] = broadcast_status
 
         logger.info("=" * 80)
         logger.info("✅ CONFIG ENDPOINT COMPLETED SUCCESSFULLY")
         logger.info("=" * 80)
         
-        return json.dumps({"success": True}), 200, {
+        return json.dumps({"success": True, "broadcast_status": broadcast_status}), 200, {
             "Content-Type": "application/json"
         }
 

@@ -43,6 +43,28 @@ def build_broadcast_course_ids(course_id: str, course_config: Mapping[str, Any] 
     return broadcast_course_ids
 
 
+def build_broadcast_status(
+    status: str,
+    course_id: str | None,
+    safe_ppt_id: str | None,
+    page_number: int | str | None,
+    presenter_ids: list[str] | None = None,
+    broadcast_course_ids: list[str] | None = None,
+    registry_updated: bool | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "reason": reason,
+        "course_id": course_id,
+        "presentation_id": safe_ppt_id,
+        "slide_id": str(page_number) if page_number is not None else None,
+        "presenter_ids": presenter_ids or [],
+        "broadcast_course_ids": broadcast_course_ids or ([course_id] if course_id else []),
+        "registry_updated": registry_updated,
+    }
+
+
 def enrich_slide_languages(
     slide_content: Mapping[str, Any],
     existing_languages: Mapping[str, Any] | None,

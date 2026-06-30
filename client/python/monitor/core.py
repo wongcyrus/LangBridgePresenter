@@ -27,6 +27,7 @@ class MonitorController:
         self.last_text_hash = None
         self.last_image_hash = None
         self.last_saved_path = None
+        self.last_change_at = None
         os.makedirs(output_dir, exist_ok=True)
 
     @staticmethod
@@ -79,6 +80,7 @@ class MonitorController:
                 self.last_text_hash = current_text_hash
 
         if changed:
+            self.last_change_at = datetime.now()
             self._save_image(screenshot)
             self._print_change_summary(
                 self.detect_mode,
@@ -87,6 +89,16 @@ class MonitorController:
             )
         
         return screenshot, text, changed
+
+    def status_summary(self) -> str:
+        monitor = self.capture.monitor_summary() if hasattr(self.capture, "monitor_summary") else "unknown"
+        ocr_status = self.ocr.status_message or "OCR not checked"
+        last_change = self.last_change_at.strftime("%Y-%m-%d %H:%M:%S") if self.last_change_at else "never"
+        last_saved = os.path.basename(self.last_saved_path) if self.last_saved_path else "none"
+        return (
+            f"Monitor: {monitor} | OCR: {ocr_status} | "
+            f"Last change: {last_change} | Saved: {last_saved}"
+        )
 
     def run_headless(self):
         print("Starting window monitor (headless)… Press Ctrl+C to stop")

@@ -74,6 +74,35 @@ select {
     flex-shrink: 0;
 }
 
+.live-status-panel {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    padding: 10px 20px;
+    background: #f7faff;
+    border-bottom: 1px solid #e6eef9;
+    font-size: 0.85rem;
+}
+
+.live-status-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.live-status-label {
+    color: #5f6368;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.72rem;
+}
+
+.live-status-item strong {
+    color: #202124;
+    word-break: break-word;
+}
+
 .autoplay-toggle {
     font-size: 0.85rem;
     display: flex;
@@ -82,6 +111,40 @@ select {
     color: #5f6368;
     cursor: pointer;
     user-select: none;
+}
+
+.narration-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.narration-btn {
+    border: 1px solid #d2e3fc;
+    background: #e8f0fe;
+    color: #174ea6;
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.narration-btn.active {
+    background: #d2e3fc;
+    font-weight: 600;
+}
+
+.narration-btn.secondary {
+    background: #fff;
+    color: #5f6368;
+    border-color: #dadce0;
+}
+
+.shortcut-hint {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: #5f6368;
 }
 
 /* Main Stage - Single Slide View */

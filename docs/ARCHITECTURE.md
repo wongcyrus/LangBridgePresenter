@@ -72,6 +72,9 @@ flowchart LR
     - Periodically captures the screen or specific windows.
     - Uses OCR (Tesseract) to extract text.
     - Sends text changes to the backend to keep the AI aware of the visual context.
+- **Web Student Client**:
+    - Subscribes to live Firestore pointers for the current slide.
+    - Provides a slide narration mode that plays the pre-generated MP3 narration for the current slide.
 
 ```mermaid
 sequenceDiagram
@@ -90,6 +93,7 @@ sequenceDiagram
 - **Course Management**: Tools to create and configure courses with language and voice settings.
 - **Presenter Management**: Tools to create and manage AI presenter profiles.
 - **Key Management**: Tools to generate and revoke API keys.
+- **Broadcast Visibility**: The config endpoint now records a compact `broadcast_status` summary so clients can surface sync health.
 
 ## Data Flow
 
@@ -109,6 +113,23 @@ sequenceDiagram
    - The `talk-stream` function retrieves the current context (set by clients).
    - It loads presenter context from Firestore, including all slides in the presentation.
    - It appends the user question and streams the AI's response back.
+
+```mermaid
+sequenceDiagram
+   participant VBA as VBA Client
+   participant Monitor as Python Monitor
+   participant Config as /api/config
+   participant FS as Firestore
+   participant Web as Web Client
+   participant Talk as /api/talk
+
+   VBA->>Config: slide notes + presenter IDs
+   Monitor->>Config: OCR context + monitor status
+   Config->>FS: persist config + broadcast_status
+   FS-->>Web: live pointer + broadcast metadata
+   Web->>Talk: current slide / presenter context
+   Talk->>FS: load presenter + registry data
+```
 
 ## Presenter System
 

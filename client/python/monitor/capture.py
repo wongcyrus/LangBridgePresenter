@@ -43,6 +43,18 @@ class ScreenCapture:
         except ModuleNotFoundError:
             self.sct = None
 
+    def monitor_summary(self) -> str:
+        if self.monitor_rect:
+            idx = self.monitor_index if self.monitor_index is not None else self.monitor_rect.get("index", "?")
+            return (
+                f"#{idx} {self.monitor_rect.get('width', '?')}x"
+                f"{self.monitor_rect.get('height', '?')} @ "
+                f"({self.monitor_rect.get('left', '?')},{self.monitor_rect.get('top', '?')})"
+            )
+        if self.monitor_index is not None:
+            return f"monitor #{self.monitor_index}"
+        return "auto-selected display"
+
     def list_monitors(self) -> List[Dict[str, int]]:
         if not self.sct:
             return []

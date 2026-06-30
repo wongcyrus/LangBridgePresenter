@@ -58,7 +58,7 @@ python window_monitor.py --interval 2 --lang chi_sim --monitor 1
 - **`monitor/capture.py`**: Handles screen capturing using `mss` or `pyautogui`.
 - **`monitor/ocr.py`**: Wraps `pytesseract` for text extraction.
 - **`monitor/core.py`**: Main loop logic, change detection, and backend communication.
-- **`monitor/gui.py`**: `tkinter`-based preview window.
+- **`monitor/gui.py`**: `tkinter`-based preview window with OCR and monitor status.
 
 ```mermaid
 flowchart LR

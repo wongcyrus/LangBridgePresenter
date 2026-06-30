@@ -63,6 +63,7 @@ def run_preview(controller, tk_module=None, image_tk_module=None):
     root.protocol("WM_DELETE_WINDOW", on_close)
 
     controller.capture.ensure_monitor_selected(gui=True, parent=root)
+    controller.ocr.ensure_tesseract()
 
     def update_loop():
         try:
@@ -90,7 +91,7 @@ def run_preview(controller, tk_module=None, image_tk_module=None):
                 else "<none>"
             )
             text_var.set(f"hash: {last_hash}\nlast: {last_name}")
-            status_var.set(controller.ocr.status_message)
+            status_var.set(controller.status_summary())
         except (RuntimeError, OSError, ValueError) as e:
             text_var.set(f"Error: {e}")
         finally:
