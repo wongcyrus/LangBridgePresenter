@@ -25,9 +25,18 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 *   **Optional Sign-In**: The web app still works without login for normal slide viewing.
 *   **Access Control**: Signed-in users must be explicitly granted in `voice_chat_users`.
 *   **Gemini Live API**: Uses Firebase AI Logic Live session for realtime audio conversation.
+*   **Client-side Tool Calling**: Uses Firebase Live `functionCallingHandler` in the web client (no extra backend voice-command function).
 *   **Slide-Aware Context**: Active slide context is sent to the live session and updated when pages change.
 *   **Admin Controls**: Admin users can view voice-chat usage and tune per-minute/per-day limits in-app.
 *   **iOS Chrome Limitation**: Voice chat is intentionally blocked on iPad/iPhone Chrome (`CriOS`). Use Safari on iOS devices.
+
+### 🗣️ Voice Commands (Accessibility)
+
+*   **Navigation**: `next slide`, `previous slide`
+*   **Sync**: `enable live sync`, `disable live sync`
+*   **Language**: `set audio language to Cantonese`, `set display language to English`
+*   **Narration handoff**: `pause narration`, `resume narration`, `restart narration`
+*   **Help**: `what can I say`
 
 ### ⌨️ Keyboard Shortcuts
 
@@ -38,9 +47,9 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 ### 🎧 MP3 + Voice Chat Interaction Rules
 
 *   **Audio language source of truth**: MP3 playback always follows the Audio Language selector (`listenLang`), including `Restart (R)`.
-*   **When voice chat starts**: current MP3 playback is stopped and auto-read (`Read aloud`) is turned off.
-*   **While voice chat is active/connecting**: player shortcuts and controls are blocked to prevent overlap.
-*   **When voice chat stops**: MP3 does not auto-resume; user must press play/restart manually.
+*   **Voice + MP3 run together by default**: narration is not blocked when voice chat starts.
+*   **After first play**: narration follows slide/audio changes continuously.
+*   **Voice narration commands** (`play/resume/restart`) trigger immediate MP3 playback and keep follow mode on.
 
 ```mermaid
 flowchart TD

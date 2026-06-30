@@ -8,6 +8,7 @@ import {
 } from "firebase/auth";
 import {
   AIError,
+  FunctionCallingMode,
   getAI,
   getLiveGenerativeModel,
   ResponseModality,
@@ -199,6 +200,20 @@ function App() {
   const lastNarratedAudioUrl = useRef(null);
   const liveConversationRef = useRef(null);
   const liveContextKeyRef = useRef("");
+  const narrationCheckpointRef = useRef({ url: "", time: 0 });
+  const pendingNarrationAfterVoiceRef = useRef(null);
+  const activeAudioUrlRef = useRef(null);
+  const voiceStateRef = useRef({
+    slideList: [],
+    viewingSlideId: null,
+    livePptId: null,
+    liveSlideId: null,
+    isLiveMode: true,
+    supportedLangs: [],
+    listenLang: "en-US",
+    liveData: null,
+    slideData: null,
+  });
 
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
   const LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
@@ -217,6 +232,40 @@ function App() {
 
   const getTextLangName = (code) => DISPLAY_LANGUAGE_NAMES[code] || code;
   const getAudioLangName = (code) => AUDIO_LANGUAGE_NAMES[code] || code;
+  const parseBooleanArg = (value) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes", "on", "enable", "enabled"].includes(normalized)) return true;
+      if (["false", "0", "no", "off", "disable", "disabled"].includes(normalized)) return false;
+    }
+    return null;
+  };
+  const normalizeVoiceLanguageCode = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const normalized = raw.toLowerCase();
+    const aliases = {
+      "en": "en-US",
+      "en-us": "en-US",
+      "english": "en-US",
+      "zh": "zh-CN",
+      "zh-cn": "zh-CN",
+      "mandarin": "zh-CN",
+      "chinese": "zh-CN",
+      "simplified chinese": "zh-CN",
+      "yue": "yue-HK",
+      "yue-hk": "yue-HK",
+      "cantonese": "yue-HK",
+      "traditional chinese": "yue-HK",
+    };
+    const candidate = aliases[normalized] || raw;
+    const available = supportedLangs.length > 0 ? supportedLangs : Object.keys(AUDIO_LANGUAGE_NAMES);
+    if (available.includes(candidate)) return candidate;
+    const matched = available.find((code) => code.toLowerCase() === String(candidate).toLowerCase());
+    return matched || null;
+  };
   const getUserLabel = (user) => {
     if (!user) return "Guest";
     const displayName = (user.displayName || "").trim();
@@ -225,6 +274,20 @@ function App() {
     if (email.includes("@")) return email.split("@")[0];
     return user.uid || "User";
   };
+
+  useEffect(() => {
+    voiceStateRef.current = {
+      slideList,
+      viewingSlideId,
+      livePptId,
+      liveSlideId,
+      isLiveMode,
+      supportedLangs,
+      listenLang,
+      liveData,
+      slideData,
+    };
+  }, [slideList, viewingSlideId, livePptId, liveSlideId, isLiveMode, supportedLangs, listenLang, liveData, slideData]);
 
   useEffect(() => {
     if (typeof navigator === "undefined") return;
@@ -289,6 +352,7 @@ function App() {
       setVoiceTranscript("");
       setVoiceAnswer("");
       setVoiceAccessGranted(false);
+      pendingNarrationAfterVoiceRef.current = null;
       setAdminEnabled(false);
       setAdminStatus("");
       setAdminSummary(null);
@@ -442,6 +506,36 @@ function App() {
     liveContextKeyRef.current = context.contextKey;
   };
 
+  const isNarrationBlockedByVoice = () => false;
+
+  const resolveAudioUrlFromVoiceState = () => {
+    const state = voiceStateRef.current;
+    const pickLang = (languagesMap, langCode) => {
+      if (!languagesMap) return null;
+      let content = languagesMap[langCode];
+      if (!content) {
+        const match = Object.keys(languagesMap).find((k) => k.startsWith(langCode) || langCode.startsWith(k));
+        if (match) content = languagesMap[match];
+      }
+      return content;
+    };
+    const liveAudio = pickLang(state.liveData, state.listenLang);
+    const viewingAudio = pickLang(state.slideData?.languages, state.listenLang);
+    const activeContent = state.isLiveMode ? liveAudio : viewingAudio;
+    return activeContent?.audio_url || null;
+  };
+
+  const snapshotNarrationForVoice = () => {
+    const currentUrl = audioRef.current.src || resolveAudioUrlFromVoiceState() || "";
+    narrationCheckpointRef.current = {
+      url: currentUrl,
+      time: Number.isFinite(audioRef.current.currentTime) ? audioRef.current.currentTime : 0,
+    };
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setNarrationStatus("Paused for voice chat");
+  };
+
   const startVoiceCapture = async () => {
     if (!currentUser) {
       setVoiceStatus("Sign in to use voice chat");
@@ -467,8 +561,7 @@ function App() {
     setVoiceBusy(true);
     setVoiceTranscript("");
     setVoiceAnswer("");
-    stopNarration();
-    setAutoplay(false);
+    setAutoplay(true);
     setVoiceStatus("Connecting Gemini Live...");
     try {
       const ai = getAI(app, {
@@ -479,15 +572,162 @@ function App() {
         model: LIVE_MODEL,
         generationConfig: {
           responseModalities: [ResponseModality.AUDIO],
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+        },
+        tools: [
+          {
+            functionDeclarations: [
+              {
+                name: "navigate_slide",
+                description: "Move to the next or previous slide.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    direction: {
+                      type: "string",
+                      enum: ["next", "previous"],
+                      description: "Slide navigation direction.",
+                    },
+                  },
+                  required: ["direction"],
+                },
+              },
+              {
+                name: "set_live_sync",
+                description: "Enable or disable live sync mode.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    enabled: {
+                      type: "boolean",
+                      description: "True to sync with live presenter slide.",
+                    },
+                  },
+                  required: ["enabled"],
+                },
+              },
+              {
+                name: "set_audio_language",
+                description: "Set narration audio language. Supported: en-US, zh-CN, yue-HK.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    language: {
+                      type: "string",
+                      description: "Target audio language code or name.",
+                    },
+                  },
+                  required: ["language"],
+                },
+              },
+              {
+                name: "set_display_language",
+                description: "Set displayed subtitle language. Supported: en-US, zh-CN, yue-HK.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    language: {
+                      type: "string",
+                      description: "Target display language code or name.",
+                    },
+                  },
+                  required: ["language"],
+                },
+              },
+              {
+                name: "narration_control",
+                description: "Control narration playback.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    action: {
+                      type: "string",
+                      enum: ["play", "pause", "restart", "stop", "resume"],
+                      description: "Narration control action.",
+                    },
+                  },
+                  required: ["action"],
+                },
+              },
+              {
+                name: "help_commands",
+                description: "Get a short spoken list of available voice commands.",
+                parameters: {
+                  type: "object",
+                  properties: {},
+                },
+              },
+            ],
+          },
+        ],
+        toolConfig: {
+          functionCallingConfig: {
+            mode: FunctionCallingMode.ANY,
+            allowedFunctionNames: [
+              "navigate_slide",
+              "set_live_sync",
+              "set_audio_language",
+              "set_display_language",
+              "narration_control",
+              "help_commands",
+            ],
+          },
         },
       });
       const session = await model.connect();
       await session.send(
-        `You are a classroom voice assistant. Keep responses concise and use ${listenLang || "en-US"}.`,
+        `You are an accessibility-first classroom voice assistant for visually impaired students.
+Use ${listenLang || "en-US"} for spoken responses.
+When user intent matches an available function, call the function instead of describing steps.
+Narration and voice are allowed to run at the same time.
+For each actionable user command, issue exactly one function call whenever possible.
+Do not bundle multiple function calls in one response unless absolutely required.
+Keep replies short and explicit about the action completed.`,
         false
       );
       await sendVoiceContextUpdate(session, true);
-      const controller = await startAudioConversation(session);
+      const controller = await startAudioConversation(session, {
+        functionCallingHandler: async (functionCalls) => {
+          const calls = Array.isArray(functionCalls) ? functionCalls.filter((fc) => fc?.name) : [];
+          if (calls.length === 0) {
+            return {
+              name: "help_commands",
+              response: { ok: false, message: "No valid tool call received." },
+            };
+          }
+
+          const responses = [];
+          for (const call of calls) {
+            const result = await executeVoiceCommand(call);
+            const shouldAutoStopVoice = Boolean(result && result._autoStopVoice);
+            if (shouldAutoStopVoice) {
+              setTimeout(() => {
+                stopVoiceCapture().catch((error) => {
+                  console.error("Auto stop voice failed:", error);
+                });
+              }, 0);
+            }
+            const publicResult = { ...result };
+            delete publicResult._autoStopVoice;
+            responses.push({
+              id: call.id,
+              name: call.name,
+              response: publicResult,
+            });
+          }
+
+          if (responses.length > 1) {
+            await session.sendFunctionResponses(responses.slice(1));
+          }
+
+          return {
+            id: responses[0].id,
+            name: responses[0].name,
+            response: responses[0].response,
+          };
+        },
+      });
       liveConversationRef.current = { controller, session };
       setIsListening(true);
       setVoiceStatus("Gemini Live connected");
@@ -524,6 +764,7 @@ function App() {
       liveContextKeyRef.current = "";
       setIsListening(false);
       setVoiceStatus("Gemini Live stopped");
+      playNarrationAfterVoiceStop();
     } catch (error) {
       console.error("Failed to stop Gemini Live:", error);
       setVoiceStatus(error?.message || "Failed to stop Gemini Live");
@@ -593,11 +834,76 @@ function App() {
       });
   };
 
+  const playAudioUrlNow = async ({ audioUrl, restart = false, startTime = null } = {}) => {
+    if (!audioUrl) {
+      setNarrationStatus("Narration audio unavailable");
+      return { ok: false, message: "Narration audio unavailable." };
+    }
+    if (audioRef.current.src !== audioUrl) {
+      audioRef.current.src = audioUrl;
+    }
+    if (restart) {
+      audioRef.current.currentTime = 0;
+      setAudioCurrentTime(0);
+    } else if (Number.isFinite(startTime) && startTime >= 0) {
+      audioRef.current.currentTime = startTime;
+      setAudioCurrentTime(startTime);
+    }
+    setNarrationStatus("Playing MP3 narration");
+    try {
+      await audioRef.current.play();
+      setIsPlaying(true);
+      setNarrationStatus("Narrating");
+      return { ok: true, message: "Narration started." };
+    } catch (error) {
+      console.error("Narration playback blocked:", error);
+      setIsPlaying(false);
+      setNarrationStatus("Narration playback blocked");
+      return { ok: false, message: "Narration playback blocked." };
+    }
+  };
+
   const stopNarration = () => {
     audioRef.current.pause();
     audioRef.current.currentTime = 0;
     setAudioCurrentTime(0);
     setNarrationStatus("Stopped");
+  };
+
+  const playNarrationAfterVoiceStop = () => {
+    const pending = pendingNarrationAfterVoiceRef.current;
+    pendingNarrationAfterVoiceRef.current = null;
+    if (!pending?.mode) return;
+
+    const checkpoint = narrationCheckpointRef.current;
+    const targetUrl = pending.url || resolveAudioUrlFromVoiceState() || activeAudioUrlRef.current || checkpoint.url;
+    if (!targetUrl) {
+      setNarrationStatus("Narration audio unavailable");
+      return;
+    }
+
+    if (audioRef.current.src !== targetUrl) {
+      audioRef.current.src = targetUrl;
+    }
+
+    if (pending.mode === "restart") {
+      audioRef.current.currentTime = 0;
+      setAudioCurrentTime(0);
+    } else {
+      const resumeTime = Number.isFinite(checkpoint.time) ? Math.max(0, checkpoint.time) : 0;
+      audioRef.current.currentTime = (checkpoint.url && checkpoint.url === targetUrl) ? resumeTime : 0;
+      setAudioCurrentTime(audioRef.current.currentTime);
+    }
+
+    audioRef.current.play()
+      .then(() => {
+        setIsPlaying(true);
+        setNarrationStatus("Narrating");
+      })
+      .catch((error) => {
+        console.error("Narration handoff playback blocked:", error);
+        setNarrationStatus("Narration playback blocked");
+      });
   };
 
   useEffect(() => {
@@ -615,7 +921,8 @@ function App() {
   }, []);
 
   const narrateCurrentSlide = () => {
-    if (isListening || voiceBusy) {
+    const narrationBlockedByVoice = isNarrationBlockedByVoice();
+    if (narrationBlockedByVoice) {
       setNarrationStatus("Narration paused during voice chat");
       return;
     }
@@ -806,16 +1113,21 @@ function App() {
   // If Sync is ON: Play LIVE audio (from listenLang)
   // If Sync is OFF: Play Viewing Slide audio (from listenLang)
   const activeAudioUrl = resolveActiveAudioUrl();
+  useEffect(() => {
+    activeAudioUrlRef.current = activeAudioUrl;
+  }, [activeAudioUrl]);
 
   // --- 5. Audio Player Logic ---
   useEffect(() => {
-      if (!activeAudioUrl || !autoplay || isListening || voiceBusy) return;
+      const narrationBlockedByVoice = isNarrationBlockedByVoice();
+      const shouldFollowSlideAudio = Boolean(audioRef.current.src) || isPlaying || autoplay;
+      if (!activeAudioUrl || !shouldFollowSlideAudio || narrationBlockedByVoice) return;
 
       if (lastPlayedHash.current !== activeAudioUrl) {
           lastPlayedHash.current = activeAudioUrl;
           startAudioPlayback(activeAudioUrl, { restart: false });
       }
-  }, [activeAudioUrl, autoplay, isListening, voiceBusy]);
+  }, [activeAudioUrl, autoplay, isListening, voiceBusy, isPlaying]);
 
   // Audio Events
   useEffect(() => {
@@ -854,7 +1166,8 @@ function App() {
   }, []);
 
   const togglePlay = () => {
-      if (isListening || voiceBusy) {
+      const narrationBlockedByVoice = isNarrationBlockedByVoice();
+      if (narrationBlockedByVoice) {
         setNarrationStatus("Narration paused during voice chat");
         return;
       }
@@ -939,6 +1252,130 @@ function App() {
       }
   };
 
+  const executeVoiceCommand = async (functionCall) => {
+    const name = functionCall?.name;
+    const args = (functionCall?.args && typeof functionCall.args === "object") ? functionCall.args : {};
+    try {
+      if (name === "navigate_slide") {
+        const { slideList: latestSlideList, viewingSlideId: latestViewingSlideId } = voiceStateRef.current;
+        const currentNum = parseInt(latestViewingSlideId, 10);
+        if (!Number.isFinite(currentNum) || latestSlideList.length === 0) {
+          return { ok: false, message: "No active slide to navigate." };
+        }
+        const direction = String(args.direction || "").toLowerCase();
+        const idx = latestSlideList.indexOf(currentNum);
+        if (idx === -1) {
+          return { ok: false, message: "Current slide is outside slide list." };
+        }
+        if (direction === "next") {
+          if (idx >= latestSlideList.length - 1) {
+            return { ok: false, message: "Already at the last slide." };
+          }
+          setViewingSlideId(String(latestSlideList[idx + 1]));
+          setIsLiveMode(false);
+          return { ok: true, message: "Moved to next slide." };
+        }
+        if (direction === "previous") {
+          if (idx <= 0) {
+            return { ok: false, message: "Already at the first slide." };
+          }
+          setViewingSlideId(String(latestSlideList[idx - 1]));
+          setIsLiveMode(false);
+          return { ok: true, message: "Moved to previous slide." };
+        }
+        return { ok: false, message: "Direction must be next or previous." };
+      }
+
+      if (name === "set_live_sync") {
+        const enabled = parseBooleanArg(args.enabled);
+        if (enabled === null) {
+          return { ok: false, message: "Enabled must be true or false." };
+        }
+        const { isLiveMode: latestIsLiveMode, livePptId: latestLivePptId, liveSlideId: latestLiveSlideId } = voiceStateRef.current;
+        if (enabled && !latestIsLiveMode) {
+          setViewingPptId(latestLivePptId);
+          setViewingSlideId(latestLiveSlideId);
+          setIsLiveMode(true);
+        }
+        if (!enabled && latestIsLiveMode) {
+          setIsLiveMode(false);
+        }
+        return { ok: true, message: enabled ? "Live sync enabled." : "Live sync disabled." };
+      }
+
+      if (name === "set_audio_language") {
+        const code = normalizeVoiceLanguageCode(args.language);
+        const { supportedLangs: latestSupportedLangs } = voiceStateRef.current;
+        if (latestSupportedLangs.length > 0 && !latestSupportedLangs.includes(code)) {
+          return { ok: false, message: "Requested audio language is not available on current slide." };
+        }
+        if (!code) {
+          return { ok: false, message: "Unsupported audio language." };
+        }
+        voiceStateRef.current.listenLang = code;
+        setListenLang(code);
+        return { ok: true, message: `Audio language set to ${getAudioLangName(code)}.` };
+      }
+
+      if (name === "set_display_language") {
+        const code = normalizeVoiceLanguageCode(args.language);
+        const { supportedLangs: latestSupportedLangs } = voiceStateRef.current;
+        if (latestSupportedLangs.length > 0 && !latestSupportedLangs.includes(code)) {
+          return { ok: false, message: "Requested display language is not available on current slide." };
+        }
+        if (!code) {
+          return { ok: false, message: "Unsupported display language." };
+        }
+        setViewLang(code);
+        return { ok: true, message: `Display language set to ${getTextLangName(code)}.` };
+      }
+
+      if (name === "narration_control") {
+        const rawAction = String(args.action || "").toLowerCase().trim();
+        const action = rawAction.includes("restart")
+          ? "restart"
+          : (rawAction.includes("resume") || rawAction.includes("play"))
+            ? "resume"
+            : rawAction.includes("pause")
+              ? "pause"
+              : rawAction.includes("stop")
+                ? "stop"
+                : rawAction;
+        if (action === "pause" || action === "stop") {
+          audioRef.current.pause();
+          setIsPlaying(false);
+          setNarrationStatus(action === "stop" ? "Stopped" : "Paused");
+          return { ok: true, message: action === "stop" ? "Narration stopped." : "Narration paused." };
+        }
+        if (action === "restart") {
+          const url = resolveAudioUrlFromVoiceState();
+          setAutoplay(true);
+          return await playAudioUrlNow({ audioUrl: url, restart: true });
+        }
+        if (action === "play" || action === "resume") {
+          const url = resolveAudioUrlFromVoiceState();
+          const checkpoint = narrationCheckpointRef.current;
+          const sameUrl = Boolean(checkpoint.url && checkpoint.url === url);
+          const startTime = sameUrl ? checkpoint.time : null;
+          setAutoplay(true);
+          return await playAudioUrlNow({ audioUrl: url, restart: false, startTime });
+        }
+        return { ok: false, message: "Unknown narration action." };
+      }
+
+      if (name === "help_commands") {
+        return {
+          ok: true,
+          message: "Try: next slide, previous slide, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, pause narration, or resume narration.",
+        };
+      }
+
+      return { ok: false, message: `Unsupported command: ${name}` };
+    } catch (error) {
+      return { ok: false, message: error?.message || "Voice command failed." };
+    }
+  };
+
   useEffect(() => {
       const onKeyDown = (event) => {
           const target = event.target;
@@ -947,7 +1384,8 @@ function App() {
               return;
           }
 
-          if (isListening || voiceBusy) {
+          const narrationBlockedByVoice = isNarrationBlockedByVoice();
+          if (narrationBlockedByVoice) {
               const blockedKeys = new Set([" ", "spacebar", "r", "s", "a", "d", "home"]);
               const normalized = (event.key || "").toLowerCase();
               if (blockedKeys.has(normalized) || event.code === "Space") {
@@ -1088,14 +1526,16 @@ function App() {
         <div className="voice-assistant-panel">
           <div className="voice-assistant-top">
             <span className="voice-assistant-label">Voice Assistant</span>
-            <button
-              type="button"
-              className={`voice-action-btn ${isListening || voiceBusy ? "active" : ""}`}
-              onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
-            >
-              <MicIcon />
-              <span>{isListening || voiceBusy ? "Stop" : "Start"}</span>
-            </button>
+            <div className="voice-assistant-actions">
+              <button
+                type="button"
+                className={`voice-action-btn ${isListening || voiceBusy ? "active" : ""}`}
+                onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
+              >
+                <MicIcon />
+                <span>{isListening || voiceBusy ? "Stop" : "Start"}</span>
+              </button>
+            </div>
           </div>
           <div className="voice-assistant-status">{voiceStatus}</div>
           {voiceTranscript && (
