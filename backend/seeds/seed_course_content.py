@@ -119,8 +119,8 @@ def upload_to_bucket(bucket_name, source_file_path, destination_blob_name):
 
 def load_notes_for_language(json_path, lang_code):
     """
-    Loads slide notes from a language-specific progress JSON file.
-    Returns a dict: {slide_number_str: note_text}
+    Loads slide assets from a language-specific progress JSON file.
+    Returns a dict: {slide_number_str: {"text": note_text, "audio_file_path": "..."}}
     """
     if not os.path.exists(json_path):
         return {}
@@ -139,12 +139,57 @@ def load_notes_for_language(json_path, lang_code):
             
             idx = str(slide.get("slide_index"))
             if note:
-                notes_map[idx] = note
+                notes_map[idx] = {
+                    "text": note,
+                    "audio_file_path": slide.get("audio_file_path")
+                }
                 
         return notes_map
     except Exception as e:
         logger.error(f"Failed to load notes from {json_path}: {e}")
         return {}
+
+
+def resolve_local_audio_path(raw_audio_path, generate_dir, base_name, lang_suffix):
+    """Resolve audio file path from progress JSON to a local file if available."""
+    if not raw_audio_path:
+        return None
+
+    candidates = []
+
+    # Keep original path first.
+    candidates.append(raw_audio_path)
+
+    # Relative paths are interpreted from generate_dir.
+    if not os.path.isabs(raw_audio_path):
+        candidates.append(os.path.join(generate_dir, raw_audio_path))
+
+    filename = os.path.basename(raw_audio_path)
+    source_dir_name = os.path.basename(os.path.dirname(raw_audio_path))
+
+    if filename:
+        candidates.extend([
+            os.path.join(generate_dir, f"{base_name}_{lang_suffix}_speech", filename),
+            os.path.join(generate_dir, f"{base_name}_speech", filename),
+            os.path.join(generate_dir, filename),
+        ])
+        if source_dir_name:
+            candidates.append(os.path.join(generate_dir, source_dir_name, filename))
+
+    for cand in candidates:
+        if cand and os.path.exists(cand):
+            return cand
+
+    return None
+
+
+def sha256_file(file_path):
+    """Compute SHA256 for a file."""
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 def load_slides_structure(json_path):
     """
@@ -187,7 +232,9 @@ def process_slide_locally(
 ):
     """
     Replicates logic to generate/broadcast. 
-    Now accepts `pre_generated_messages`: { 'zh-CN': '...', 'yue-HK': '...' }
+    Now accepts `pre_generated_messages` entries as either:
+    - { 'zh-CN': '...', 'yue-HK': '...' }
+    - { 'zh-CN': {'text': '...', 'audio_file_path': '...'} }
     """
     logger.info(f"--- Processing Slide {slide_number} ---")
     pre_generated_messages = pre_generated_messages or {}
@@ -232,10 +279,16 @@ def process_slide_locally(
     def generate_for_language(lang):
         # OPTIMIZATION: Check if we already have the text
         if lang in pre_generated_messages:
-            existing_text = pre_generated_messages[lang]
+            pre_gen_entry = pre_generated_messages[lang]
+            local_audio_file = None
+            if isinstance(pre_gen_entry, dict):
+                existing_text = pre_gen_entry.get("text", "")
+                local_audio_file = pre_gen_entry.get("audio_file_path")
+            else:
+                existing_text = pre_gen_entry
             if existing_text:
                 logger.info(f"[{lang}] ✅ Found pre-generated text.")
-                return (lang, existing_text, None, None)
+                return (lang, existing_text, None, local_audio_file, None)
         
         # Fallback to Agent Generation
         logger.info(f"[{lang}] ⚠️  No pre-generated text found. Calling Agent...")
@@ -248,20 +301,21 @@ def process_slide_locally(
                 audio_url = None
             
             if generated:
-                return (lang, generated, audio_url, None)
+                return (lang, generated, audio_url, None, None)
             else:
-                return (lang, None, None, "Generation failed")
+                return (lang, None, None, None, "Generation failed")
         except Exception as e:
-            return (lang, None, None, str(e))
+            return (lang, None, None, None, str(e))
 
     with ThreadPoolExecutor(max_workers=min(len(languages), 5)) as executor:
         future_to_lang = {executor.submit(generate_for_language, lang): lang for lang in languages}
         for future in as_completed(future_to_lang):
-            lang, generated, audio_url, error = future.result()
+            lang, generated, audio_url, local_audio_file, error = future.result()
             if generated:
                 message_results[lang] = {
                     "text": generated,
-                    "audio_url": audio_url
+                    "audio_url": audio_url,
+                    "local_audio_file": local_audio_file
                 }
                 # logger.info(f"[{lang}] Text ready.")
             elif error:
@@ -280,6 +334,7 @@ def process_slide_locally(
         def generate_mp3_for_language(lang, data):
             generated = data["text"]
             cached_audio_url = data.get("audio_url")
+            local_audio_file = data.get("local_audio_file")
             
             if cached_audio_url:
                 logger.info(f"[{lang}] Using cached audio: {cached_audio_url}")
@@ -287,8 +342,16 @@ def process_slide_locally(
             
             lang_data = {"text": generated}
             try:
-                norm_ctx = utils.normalize_context(context)
-                content_hash = hashlib.sha256(norm_ctx.encode("utf-8")).hexdigest()[:12]
+                if local_audio_file:
+                    if not os.path.exists(local_audio_file):
+                        raise FileNotFoundError(
+                            f"Pre-generated audio file not found: {local_audio_file}"
+                        )
+                    content_hash = sha256_file(local_audio_file)[:12]
+                else:
+                    content_hash = hashlib.sha256(
+                        f"{generated}:{lang}".encode("utf-8")
+                    ).hexdigest()[:12]
                 filename = f"speech_{lang}_{content_hash}.mp3"
                 
                 storage_client = storage.Client(project=backend_project_id)
@@ -298,24 +361,28 @@ def process_slide_locally(
                 if blob.exists():
                     logger.info(f"[{lang}] ✅ MP3 already exists: {filename}, skipping generation")
                 else:
-                    logger.info(f"[{lang}] Generating TTS...")
-                    tts_client = texttospeech.TextToSpeechClient()
-                    voice = course_utils.get_voice_params(course_id, lang)
-                    
-                    audio_config = texttospeech.AudioConfig(
-                        audio_encoding=texttospeech.AudioEncoding.MP3,
-                        speaking_rate=1.0
-                    )
-                    
-                    # Use retry logic for TTS synthesis
-                    tts_response = utils.synthesize_speech_with_retry(
-                        tts_client, generated, voice, audio_config
-                    )
-                    
-                    blob.upload_from_string(
-                        tts_response.audio_content,
-                        content_type="audio/mpeg"
-                    )
+                    if local_audio_file:
+                        logger.info(f"[{lang}] Uploading pre-generated audio from {local_audio_file}")
+                        blob.upload_from_filename(local_audio_file, content_type="audio/mpeg")
+                    else:
+                        logger.info(f"[{lang}] Generating TTS...")
+                        tts_client = texttospeech.TextToSpeechClient()
+                        voice = course_utils.get_voice_params(course_id, lang)
+                        
+                        audio_config = texttospeech.AudioConfig(
+                            audio_encoding=texttospeech.AudioEncoding.MP3,
+                            speaking_rate=1.0
+                        )
+                        
+                        # Use retry logic for TTS synthesis
+                        tts_response = utils.synthesize_speech_with_retry(
+                            tts_client, generated, voice, audio_config
+                        )
+                        
+                        blob.upload_from_string(
+                            tts_response.audio_content,
+                            content_type="audio/mpeg"
+                        )
                     logger.info(f"[{lang}] Uploaded {filename}")
                 
                 speech_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
@@ -567,10 +634,25 @@ def main():
                 
                 if lang_prog_file:
                     notes = load_notes_for_language(lang_prog_file, lang)
-                    for idx, text in notes.items():
+                    for idx, assets in notes.items():
                         if idx not in slide_notes_map:
                             slide_notes_map[idx] = {}
-                        slide_notes_map[idx][lang] = text
+                        text = assets.get("text", "")
+                        raw_audio_path = assets.get("audio_file_path")
+                        resolved_audio_path = resolve_local_audio_path(
+                            raw_audio_path,
+                            generate_dir,
+                            base_name,
+                            suffix
+                        )
+                        if raw_audio_path and not resolved_audio_path:
+                            logger.warning(
+                                f"[{lang}] Could not resolve local audio path for slide {idx}: {raw_audio_path}"
+                            )
+                        slide_notes_map[idx][lang] = {
+                            "text": text,
+                            "audio_file_path": resolved_audio_path
+                        }
                 else:
                     logger.info(f"No progress file found for {lang} ({original_lang_path})")
 
