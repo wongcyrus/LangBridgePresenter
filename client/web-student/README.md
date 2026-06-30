@@ -34,8 +34,8 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 
 *   **Navigation**: `next slide`, `previous slide`
 *   **Sync**: `enable live sync`, `disable live sync`
-*   **Language**: `set audio language to Cantonese`, `set display language to English`
-*   **Narration handoff**: `pause narration`, `resume narration`, `restart narration`
+*   **Language**: `set audio language to Cantonese`, `set display language to English`, `next audio language`, `previous display language`
+*   **Narration controls**: `pause narration`, `resume narration`, `restart narration`, `seek forward 10 seconds`, `seek back 30 seconds`, `jump narration to start`
 *   **Help**: `what can I say`
 
 ### ⌨️ Keyboard Shortcuts

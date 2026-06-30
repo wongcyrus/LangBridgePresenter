@@ -658,6 +658,48 @@ function App() {
                   properties: {},
                 },
               },
+              {
+                name: "cycle_language",
+                description: "Cycle audio or display language to next/previous option.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    target: {
+                      type: "string",
+                      enum: ["audio", "display"],
+                      description: "Which language selector to cycle.",
+                    },
+                    direction: {
+                      type: "string",
+                      enum: ["next", "previous"],
+                      description: "Cycle direction.",
+                    },
+                  },
+                  required: ["target", "direction"],
+                },
+              },
+              {
+                name: "seek_narration",
+                description: "Seek narration by seconds. Positive moves forward, negative moves backward.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    seconds: {
+                      type: "number",
+                      description: "Seek offset in seconds.",
+                    },
+                  },
+                  required: ["seconds"],
+                },
+              },
+              {
+                name: "jump_narration_start",
+                description: "Jump narration playback to the beginning.",
+                parameters: {
+                  type: "object",
+                  properties: {},
+                },
+              },
             ],
           },
         ],
@@ -671,6 +713,9 @@ function App() {
               "set_display_language",
               "narration_control",
               "help_commands",
+              "cycle_language",
+              "seek_narration",
+              "jump_narration_start",
             ],
           },
         },
@@ -1366,8 +1411,51 @@ Keep replies short and explicit about the action completed.`,
       if (name === "help_commands") {
         return {
           ok: true,
-          message: "Try: next slide, previous slide, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, pause narration, or resume narration.",
+          message: "Try: next slide, previous slide, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, next audio language, previous display language, seek forward 10 seconds, seek back 30 seconds, jump narration to start, pause narration, or resume narration.",
         };
+      }
+
+      if (name === "cycle_language") {
+        const target = String(args.target || "").toLowerCase();
+        const direction = String(args.direction || "").toLowerCase();
+        const step = direction === "previous" ? -1 : direction === "next" ? 1 : 0;
+        if (!step) {
+          return { ok: false, message: "Direction must be next or previous." };
+        }
+        if (target === "audio") {
+          const nextCode = cycleLanguage(voiceStateRef.current.listenLang || listenLang, step);
+          if (!nextCode) return { ok: false, message: "No audio language available." };
+          setListenLang(nextCode);
+          voiceStateRef.current.listenLang = nextCode;
+          return { ok: true, message: `Audio language switched to ${getAudioLangName(nextCode)}.` };
+        }
+        if (target === "display") {
+          const nextCode = cycleLanguage(viewLang, step);
+          if (!nextCode) return { ok: false, message: "No display language available." };
+          setViewLang(nextCode);
+          return { ok: true, message: `Display language switched to ${getTextLangName(nextCode)}.` };
+        }
+        return { ok: false, message: "Target must be audio or display." };
+      }
+
+      if (name === "seek_narration") {
+        const seconds = Number(args.seconds);
+        if (!Number.isFinite(seconds) || seconds === 0) {
+          return { ok: false, message: "Seconds must be a non-zero number." };
+        }
+        if (!audioRef.current.src) {
+          return { ok: false, message: "Narration is not loaded yet." };
+        }
+        seekAudio(seconds);
+        return { ok: true, message: `Narration moved ${seconds > 0 ? "forward" : "backward"} ${Math.abs(seconds)} seconds.` };
+      }
+
+      if (name === "jump_narration_start") {
+        if (!audioRef.current.src) {
+          return { ok: false, message: "Narration is not loaded yet." };
+        }
+        jumpToAudioStart();
+        return { ok: true, message: "Narration moved to start." };
       }
 
       return { ok: false, message: `Unsupported command: ${name}` };
