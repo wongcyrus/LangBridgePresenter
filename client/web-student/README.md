@@ -27,6 +27,37 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 *   **Gemini Live API**: Uses Firebase AI Logic Live session for realtime audio conversation.
 *   **Slide-Aware Context**: Active slide context is sent to the live session and updated when pages change.
 *   **Admin Controls**: Admin users can view voice-chat usage and tune per-minute/per-day limits in-app.
+*   **iOS Chrome Limitation**: Voice chat is intentionally blocked on iPad/iPhone Chrome (`CriOS`). Use Safari on iOS devices.
+
+### ⌨️ Keyboard Shortcuts
+
+*   **Navigation**: `←` / `→` (prev/next slide), `L` (toggle Live Sync), `Esc` (close fullscreen or stop narration)
+*   **Languages**: `Alt+V` (cycle display language), `Alt+A` (cycle audio language)
+*   **Player**: `Space` (play/pause), `R` (restart current MP3), `S` (stop), `A`/`D` (seek -10s / +10s), `Shift+A`/`Shift+D` (seek -30s / +30s), `Home` (jump to start)
+
+### 🎧 MP3 + Voice Chat Interaction Rules
+
+*   **Audio language source of truth**: MP3 playback always follows the Audio Language selector (`listenLang`), including `Restart (R)`.
+*   **When voice chat starts**: current MP3 playback is stopped and auto-read (`Read aloud`) is turned off.
+*   **While voice chat is active/connecting**: player shortcuts and controls are blocked to prevent overlap.
+*   **When voice chat stops**: MP3 does not auto-resume; user must press play/restart manually.
+
+```mermaid
+flowchart TD
+    A[User action] --> B{Voice chat active/connecting?}
+    B -- Yes --> C[Block player shortcuts and controls]
+    C --> D[Show 'Narration paused during voice chat']
+    B -- No --> E{Action type}
+
+    E -- Restart R --> F[Use activeAudioUrl from listenLang]
+    E -- Play Space --> G[Play/Pause current MP3]
+    E -- A/D, Shift+A/D, Home --> H[Seek or jump in current MP3]
+    E -- Start Voice Chat --> I[Stop MP3 and set Read aloud Off]
+    I --> J[Connect Gemini Live session]
+    J --> K[Voice conversation]
+    K --> L[Stop Voice Chat]
+    L --> M[Do not auto-resume MP3]
+```
 
 Admin users can be managed from backend with:
 
@@ -117,3 +148,4 @@ The build and deployment to Firebase Hosting for this client are automatically m
 *   **No Audio**: Most browsers block auto-playing audio until the user has interacted with the page. Click anywhere on the page to enable audio.
 *   **"Waiting..." Status**: This means the client is connected but hasn't found an active session for the specified Course ID. Ensure the presenter has started the session.
 *   **Live API handshake error (`AI/response-error`, missing `setupComplete`)**: In Firebase Console for the client project, open **AI Logic** and finish enable/setup. Also confirm `firebasevertexai.googleapis.com` is enabled for the client project.
+*   **Voice chat unavailable on iPad/iPhone Chrome**: This is expected. iOS Chrome uses WKWebView and is not supported for this Live voice flow. Use Safari.

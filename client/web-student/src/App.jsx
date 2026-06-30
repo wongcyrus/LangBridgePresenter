@@ -71,6 +71,18 @@ const LiveIcon = () => (
     </svg>
 );
 
+const MicIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V22h3a1 1 0 1 1 0 2H8a1 1 0 0 1 0-2h3v-3.07A7 7 0 0 1 5 12a1 1 0 1 1 2 0 5 5 0 1 0 10 0z"/>
+    </svg>
+);
+
+const UserIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.42 0-8 2.24-8 5a1 1 0 1 0 2 0c0-1.4 2.39-3 6-3s6 1.6 6 3a1 1 0 1 0 2 0c0-2.76-3.58-5-8-5z"/>
+    </svg>
+);
+
 // --- FullScreen Slide Component ---
 const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, hasPrev, isPlaying, onTogglePlay }) => {
     const [isSubtitleVisible, setIsSubtitleVisible] = useState(true);
@@ -170,6 +182,7 @@ function App() {
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceAnswer, setVoiceAnswer] = useState("");
   const [voiceAccessGranted, setVoiceAccessGranted] = useState(false);
+  const [voicePlatformBlockReason, setVoicePlatformBlockReason] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [adminEnabled, setAdminEnabled] = useState(false);
@@ -214,11 +227,26 @@ function App() {
   };
 
   useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const userAgent = navigator.userAgent || "";
+    const isIPadOS = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+    const isIOSDevice = /iPad|iPhone|iPod/i.test(userAgent) || isIPadOS;
+    const isIOSChrome = /CriOS/i.test(userAgent);
+    if (isIOSDevice && isIOSChrome) {
+      setVoicePlatformBlockReason("Voice chat is not supported on iPad/iPhone Chrome. Use Safari.");
+      return;
+    }
+    setVoicePlatformBlockReason("");
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthStatus(user ? `Signed in: ${getUserLabel(user)}` : "Guest");
       if (!user) {
         setVoiceStatus("Sign in to use voice chat");
+      } else if (voicePlatformBlockReason) {
+        setVoiceStatus(voicePlatformBlockReason);
       } else if (!API_BASE_URL) {
         setVoiceStatus("Voice chat unavailable: API base URL not configured");
       } else {
@@ -229,7 +257,7 @@ function App() {
       }
     });
     return () => unsubscribe();
-  }, [API_BASE_URL]);
+  }, [API_BASE_URL, voicePlatformBlockReason]);
 
   useEffect(() => {
     if (currentUser) {
@@ -311,6 +339,11 @@ function App() {
 
   const loadVoiceAccess = async (user = currentUser) => {
     if (!user) return;
+    if (voicePlatformBlockReason) {
+      setVoiceAccessGranted(false);
+      setVoiceStatus(voicePlatformBlockReason);
+      return;
+    }
     if (!API_BASE_URL) {
       setVoiceAccessGranted(false);
       setVoiceStatus("Voice chat unavailable: API base URL not configured");
@@ -416,6 +449,10 @@ function App() {
     }
     if (!voiceAccessGranted) {
       setVoiceStatus("Voice chat access requires admin grant");
+      return;
+    }
+    if (voicePlatformBlockReason) {
+      setVoiceStatus(voicePlatformBlockReason);
       return;
     }
     if (isListening || voiceBusy) return;
@@ -583,9 +620,7 @@ function App() {
       return;
     }
 
-    const activeContent = isLiveMode ? liveContentView || liveContentAudio : viewingContentView || viewingContentAudio;
-    const audioUrl = activeContent?.audio_url || activeAudioUrl;
-
+    const audioUrl = resolveActiveAudioUrl();
     if (!audioUrl) {
       setNarrationStatus("Narration audio unavailable");
       return;
@@ -760,11 +795,17 @@ function App() {
   const liveContentAudio = getLangContent(liveData, listenLang);
   const viewingContentAudio = getLangContent(slideData?.languages, listenLang);
   
+  const resolveActiveAudioUrl = () => {
+    // Strictly use audio-language content path only.
+    // No fallback to display-language content.
+    const audioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
+    return audioContent?.audio_url || null;
+  };
+
   // Audio Source Decision
   // If Sync is ON: Play LIVE audio (from listenLang)
   // If Sync is OFF: Play Viewing Slide audio (from listenLang)
-  const activeAudioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
-  const activeAudioUrl = activeAudioContent?.audio_url;
+  const activeAudioUrl = resolveActiveAudioUrl();
 
   // --- 5. Audio Player Logic ---
   useEffect(() => {
@@ -823,12 +864,13 @@ function App() {
         return;
       }
 
-      if (!audioRef.current.src || audioRef.current.src !== activeAudioUrl) {
-        if (!activeAudioUrl) {
+      const audioUrl = resolveActiveAudioUrl();
+      if (!audioRef.current.src || audioRef.current.src !== audioUrl) {
+        if (!audioUrl) {
           setNarrationStatus("Narration audio unavailable");
           return;
         }
-        startAudioPlayback(activeAudioUrl, { restart: false });
+        startAudioPlayback(audioUrl, { restart: false });
         return;
       }
 
@@ -989,6 +1031,7 @@ function App() {
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
+  const canUseVoiceChat = Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason);
 
   return (
     <div className="container single-slide-view">
@@ -1029,45 +1072,47 @@ function App() {
                     </select>
             </div>
             <button
-                type="button"
-                onClick={currentUser ? handleSignOut : handleSignIn}
-                style={{
-                    borderRadius: "18px",
-                    border: "1px solid #ddd",
-                    padding: "6px 12px",
-                    background: "#fff",
-                    cursor: "pointer"
-                }}
+              type="button"
+              className="account-action-btn"
+              onClick={currentUser ? handleSignOut : handleSignIn}
             >
-                {currentUser ? "Sign out" : "Sign in"}
-            </button>
-            <button
-                type="button"
-                onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
-                disabled={!currentUser || !voiceAccessGranted}
-                style={{
-                    borderRadius: "18px",
-                    border: "1px solid #ddd",
-                    padding: "6px 12px",
-                    background: (isListening || voiceBusy) ? "#fee2e2" : "#fff",
-                    cursor: (!currentUser || !voiceAccessGranted) ? "not-allowed" : "pointer"
-                }}
-            >
-                {isListening || voiceBusy ? "Stop Voice" : "Voice Chat"}
+              <UserIcon />
+              <span>{currentUser ? "Sign out" : "Sign in"}</span>
             </button>
                             </div>
                         </header>      
-      <div style={{ fontSize: "0.85rem", color: "#555", marginBottom: "8px" }}>
-        {authStatus} · {voiceStatus}
+      <div className="identity-status">
+        {authStatus}
       </div>
-      {voiceTranscript && (
-        <div style={{ fontSize: "0.9rem", marginBottom: "4px" }}>
-          <strong>You said:</strong> {voiceTranscript}
+      {canUseVoiceChat ? (
+        <div className="voice-assistant-panel">
+          <div className="voice-assistant-top">
+            <span className="voice-assistant-label">Voice Assistant</span>
+            <button
+              type="button"
+              className={`voice-action-btn ${isListening || voiceBusy ? "active" : ""}`}
+              onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
+            >
+              <MicIcon />
+              <span>{isListening || voiceBusy ? "Stop" : "Start"}</span>
+            </button>
+          </div>
+          <div className="voice-assistant-status">{voiceStatus}</div>
+          {voiceTranscript && (
+            <div className="voice-transcript">
+              <strong>You said:</strong> {voiceTranscript}
+            </div>
+          )}
+          {voiceAnswer && (
+            <div className="voice-answer">
+              <strong>Assistant:</strong> {voiceAnswer}
+            </div>
+          )}
         </div>
-      )}
-      {voiceAnswer && (
-        <div style={{ fontSize: "0.9rem", marginBottom: "8px" }}>
-          <strong>Assistant:</strong> {voiceAnswer}
+      ) : (
+        <div className="voice-assistant-inline">
+          <MicIcon />
+          <span>{voiceStatus}</span>
         </div>
       )}
       {currentUser && adminEnabled && (
@@ -1231,6 +1276,15 @@ function App() {
             </button>
           </div>
           <div className="audio-seek-row">
+            <button
+              className="audio-play-btn"
+              title={isPlaying ? "Pause (Space)" : "Play / pause from current position (Space)"}
+              aria-label={isPlaying ? "Pause" : "Play / pause from current position"}
+              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+              disabled={!activeAudioUrl}
+            >
+              {isPlaying ? <PauseIcon /> : <PlayIcon />}
+            </button>
             <span className="audio-time">{formatTime(audioCurrentTime)}</span>
             <input
               className="audio-seek"
@@ -1255,7 +1309,13 @@ function App() {
               Language: Alt+V view · Alt+A audio
             </span>
             <span className="shortcut-hint">
-              Player: Space play/pause · R restart · A/D seek · S stop · Home start
+              Navigation: ←/→ slide · L sync/live · Esc close/stop
+            </span>
+            <span className="shortcut-hint">
+              Player: Space play/pause · R restart · A/D seek (Shift=30s) · S stop · Home start
+            </span>
+            <span className="shortcut-hint">
+              Voice chat active: player shortcuts are blocked
             </span>
             <span className="compact-status-line">Narration: {narrationStatus}</span>
           </div>
@@ -1279,14 +1339,6 @@ function App() {
              <div className="caption-text">
                  {displayText}
              </div>
-             <button
-               className="play-btn"
-               title={isPlaying ? "Pause (Space)" : "Play / pause from current position (Space)"}
-               aria-label={isPlaying ? "Pause" : "Play / pause from current position"}
-               onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-             >
-                {isPlaying ? <PauseIcon /> : <PlayIcon />}
-             </button>
           </div>
       </div>
     </div>

@@ -172,6 +172,23 @@ Optionally run integration tests:
     ```
 *   Then hard refresh the web app and retry voice chat.
 
+### Voice chat not available on iPad/iPhone Chrome
+*   Current web client intentionally blocks voice chat on iOS Chrome (`CriOS`) due iOS WebKit limitations for the Live audio flow.
+*   Use Safari on iPad/iPhone for voice chat.
+
+```mermaid
+flowchart TD
+    A[Voice chat fails] --> B{Browser is iOS Chrome?}
+    B -- Yes --> C[Expected block<br/>Use Safari]
+    B -- No --> D{Error contains setupComplete / AI/response-error?}
+    D -- Yes --> E[Open Firebase Console client project<br/>Build -> AI Logic -> complete setup]
+    E --> F[Enable firebasevertexai.googleapis.com]
+    F --> G[Hard refresh and retry]
+    D -- No --> H{ERR_CERT_AUTHORITY_INVALID or Failed to fetch to gateway.dev?}
+    H -- Yes --> I[Network TLS interception / DNS filtering<br/>Use clean network or allowlist *.gateway.dev]
+    H -- No --> J[Check auth + voice access grant + API base URL]
+```
+
 ## Multi-Machine Workflow (Dev/Test)
 
 If you need to run development or tests on a machine **different** from the one where you deployed the infrastructure:

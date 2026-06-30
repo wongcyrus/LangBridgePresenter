@@ -48,6 +48,89 @@ h1 {
     align-items: center;
 }
 
+.account-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 18px;
+    border: 1px solid #ddd;
+    padding: 6px 12px;
+    background: #fff;
+    color: #1f2937;
+    cursor: pointer;
+}
+
+.identity-status {
+    font-size: 0.85rem;
+    color: #555;
+    margin: 0 20px 8px;
+}
+
+.voice-assistant-panel {
+    margin: 0 20px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 10px;
+}
+
+.voice-assistant-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+
+.voice-assistant-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.voice-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 18px;
+    border: 1px solid #ddd;
+    padding: 4px 10px;
+    background: #fff;
+    color: #1f2937;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.voice-action-btn.active {
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+
+.voice-action-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.voice-assistant-status {
+    font-size: 0.8rem;
+    color: #4b5563;
+}
+
+.voice-transcript,
+.voice-answer {
+    font-size: 0.82rem;
+    margin-top: 4px;
+}
+
+.voice-assistant-inline {
+    margin: 0 20px 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #4b5563;
+    font-size: 0.82rem;
+}
+
 select {
     padding: 6px 10px;
     border-radius: 20px;
@@ -122,12 +205,41 @@ select {
     gap: 8px;
     min-width: 220px;
     flex: 1 1 260px;
+    background: #fff;
+    border: 1px solid #dadce0;
+    border-radius: 22px;
+    padding: 6px 10px;
 }
 
 .audio-seek {
     flex: 1 1 auto;
     min-width: 120px;
     accent-color: #1a73e8;
+}
+
+.audio-play-btn {
+    background: #1a73e8;
+    color: white;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.audio-play-btn:hover {
+    background: #1557b0;
+}
+
+.audio-play-btn:disabled {
+    background: #c4c7cc;
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 .audio-time {
