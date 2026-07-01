@@ -102,36 +102,42 @@ const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, has
                 </button>
             )}
 
-            <div className="fullscreen-content" onClick={(e) => { e.stopPropagation(); onTogglePlay(); }}>
-                {slideUrl ? (
-                                                                    <img
-                        src={slideUrl} 
-                        alt="Presentation Slide"
-                        className="fullscreen-image" 
-                    />
-                ) : (
-                    <div className="fullscreen-placeholder">
-                        <span>No Slide Image</span>
-                    </div>
-                )}
-                
-                <div 
+            <div className="fullscreen-content">
+                <div className="fullscreen-media" onClick={(e) => { e.stopPropagation(); onTogglePlay(); }}>
+                    {slideUrl ? (
+                        <img
+                            src={slideUrl}
+                            alt="Presentation Slide"
+                            className="fullscreen-image"
+                        />
+                    ) : (
+                        <div className="fullscreen-placeholder">
+                            <span>No Slide Image</span>
+                        </div>
+                    )}
+                </div>
+
+                <div
                     className={`fullscreen-subtitle ${!isSubtitleVisible ? 'hidden' : ''}`}
-                    onClick={(e) => e.stopPropagation()} // Prevent click through to image toggle
+                    onClick={(e) => e.stopPropagation()}
                 >
-                    <button 
-                        className="fs-play-btn" 
-                        onClick={(e) => { e.stopPropagation(); onTogglePlay(); }}
-                    >
-                        {isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </button>
-                    <p>{text}</p>
-                    <button 
-                        className="toggle-subtitle-btn" 
-                        onClick={(e) => { e.stopPropagation(); setIsSubtitleVisible(!isSubtitleVisible); }}
-                    >
-                        {isSubtitleVisible ? <HideSubtitleIcon /> : <ShowSubtitleIcon />}
-                    </button>
+                    <div className="fullscreen-subtitle-toolbar">
+                        <button
+                            className="fs-play-btn"
+                            onClick={(e) => { e.stopPropagation(); onTogglePlay(); }}
+                        >
+                            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                        </button>
+                        <button
+                            className="toggle-subtitle-btn"
+                            onClick={(e) => { e.stopPropagation(); setIsSubtitleVisible(!isSubtitleVisible); }}
+                        >
+                            {isSubtitleVisible ? <HideSubtitleIcon /> : <ShowSubtitleIcon />}
+                        </button>
+                    </div>
+                    <div className="fullscreen-subtitle-text">
+                        <p>{text}</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1919,6 +1925,7 @@ function App() {
       const languageInstruction = sessionLanguage === "auto"
         ? "Detect the user's spoken language each turn and reply in that language. You may switch languages naturally across turns."
         : `Prefer ${sessionLanguage} for speech unless the user explicitly asks to switch language.`;
+      const currentStudentName = getUserLabel(currentUser);
       const setupMessage = {
         setup: {
           model: `projects/${GCP_PROJECT_ID}/locations/${LIVE_MODEL_LOCATION}/publishers/google/models/${LIVE_MODEL}`,
@@ -1936,6 +1943,7 @@ function App() {
             parts: [{
               text: `You are an accessibility-first student voice assistant for visually impaired students.
 ${languageInstruction}
+The signed-in student name is ${currentStudentName}. Use this name naturally in greetings when appropriate.
 Use tool calls for navigation, playback, and language actions.
 Never invent class IDs, presentation IDs, or slide IDs.
 When user intent matches an available function, call the function instead of describing steps.
@@ -4041,13 +4049,12 @@ Keep replies short and explicit about the action completed.`,
               onClick={currentUser ? handleSignOut : handleSignIn}
             >
               <UserIcon />
-              <span>{currentUser ? "Sign out" : "Sign in"}</span>
+              <span>{currentUser ? `Sign out ${getUserLabel(currentUser)}` : "Sign in"}</span>
             </button>
                             </div>
                         </header>      
       <div className="identity-course-row" aria-label="Current account and course">
         <div className="identity-course-main">
-          <span>{authStatus}</span>
           <span><strong>Course:</strong> {activeCourseLabel}</span>
         </div>
         <details className="identity-shortcuts">
