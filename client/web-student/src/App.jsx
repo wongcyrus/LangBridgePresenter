@@ -11,6 +11,7 @@ import {
   AdminIndexPage,
   ClassSelectionPage,
   TeacherWorkspacePage,
+  VoiceAssistantCard,
 } from "./components/AppPages";
 import {
   formatBroadcastStatusLabel,
@@ -149,7 +150,7 @@ function App() {
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
   const [viewLang, setViewLang] = useState('en');
-  const [listenLang, setListenLang] = useState('en');
+  const [listenLang, setListenLang] = useState('en-US');
   const [supportedLangs, setSupportedLangs] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [authStatus, setAuthStatus] = useState("Guest");
@@ -183,6 +184,7 @@ function App() {
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [voiceAnswer, setVoiceAnswer] = useState("");
   const [voiceAccessGranted, setVoiceAccessGranted] = useState(false);
+  const [voiceAccessLoading, setVoiceAccessLoading] = useState(false);
   const [voicePlatformBlockReason, setVoicePlatformBlockReason] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -214,6 +216,12 @@ function App() {
   const [teacherCourseLanguages, setTeacherCourseLanguages] = useState("en-US,zh-CN,yue-HK");
   const [teacherCloneCourseId, setTeacherCloneCourseId] = useState("");
   const [teacherCloneClassTitle, setTeacherCloneClassTitle] = useState("");
+  const [teacherClassIsPublic, setTeacherClassIsPublic] = useState(false);
+  const [teacherPackageBucket, setTeacherPackageBucket] = useState("");
+  const [teacherPackagePrefix, setTeacherPackagePrefix] = useState("");
+  const [teacherPackageManifestUrl, setTeacherPackageManifestUrl] = useState("");
+  const [teacherUploadFilePaths, setTeacherUploadFilePaths] = useState("");
+  const [teacherUploadUrls, setTeacherUploadUrls] = useState([]);
   const [studentClasses, setStudentClasses] = useState([]);
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentStatus, setStudentStatus] = useState("");
@@ -229,6 +237,10 @@ function App() {
   const voiceProxySocketRef = useRef(null);
   const voiceProxyAuthorizedRef = useRef(false);
   const voiceRecognitionStartedRef = useRef(false);
+  const voiceCaptureStreamRef = useRef(null);
+  const voiceCaptureAudioContextRef = useRef(null);
+  const voiceCaptureSourceRef = useRef(null);
+  const voiceCaptureProcessorRef = useRef(null);
   const voicePlaybackCtxRef = useRef(null);
   const voicePlaybackNextRef = useRef(0);
   const voiceCaptureActiveRef = useRef(false);
@@ -236,10 +248,18 @@ function App() {
   const voiceLeaseRef = useRef(null);
   const voiceLeaseHeartbeatRef = useRef(null);
   const voiceLeaseExpiryTimeoutRef = useRef(null);
+  const voiceSuppressNextCloseRef = useRef(false);
   const liveContextKeyRef = useRef("");
   const narrationCheckpointRef = useRef({ url: "", time: 0 });
   const pendingNarrationAfterVoiceRef = useRef(null);
   const activeAudioUrlRef = useRef(null);
+  const voiceSessionLanguageRef = useRef("auto");
+  const audioUnlockedRef = useRef(false);
+  const pendingNarrationRetryRef = useRef(false);
+  const userPausedNarrationRef = useRef(false);
+  const activeVoiceModeRef = useRef("disabled");
+  const recentVoiceTranscriptRef = useRef({ text: "", time: 0 });
+  const recentVoiceToolCallRef = useRef({ signature: "", time: 0, result: null });
   const voiceStateRef = useRef({
     slideList: [],
     viewingSlideId: null,
@@ -250,6 +270,9 @@ function App() {
     listenLang: "en-US",
     liveData: null,
     slideData: null,
+    studentClasses: [],
+    presentationList: [],
+    pageMode: "disabled",
   });
 
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
@@ -279,6 +302,7 @@ function App() {
 
   const getTextLangName = (code) => DISPLAY_LANGUAGE_NAMES[code] || code;
   const getAudioLangName = (code) => AUDIO_LANGUAGE_NAMES[code] || code;
+  const availableVoiceLanguages = supportedLangs.length > 0 ? supportedLangs : Object.keys(AUDIO_LANGUAGE_NAMES);
   const parseBooleanArg = (value) => {
     if (typeof value === "boolean") return value;
     if (typeof value === "number") return value !== 0;
@@ -313,6 +337,52 @@ function App() {
     const matched = available.find((code) => code.toLowerCase() === String(candidate).toLowerCase());
     return matched || null;
   };
+  const resolveSpeechRecognitionLang = () => {
+    const preferred = normalizeVoiceLanguageCode(listenLang)
+      || normalizeDisplayLanguageCode(viewLang)
+      || "en-US";
+    const recognitionLangMap = {
+      "en-US": "en-US",
+      "zh-CN": "cmn-Hans-CN",
+      "yue-HK": "yue-Hant-HK",
+    };
+    return recognitionLangMap[preferred] || preferred;
+  };
+  const normalizeDisplayLanguageCode = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const normalized = raw.toLowerCase();
+    const aliases = {
+      "en": "en-US",
+      "en-us": "en-US",
+      "english": "en-US",
+      "zh": "zh-CN",
+      "zh-cn": "zh-CN",
+      "mandarin": "zh-CN",
+      "chinese": "zh-CN",
+      "simplified chinese": "zh-CN",
+      "yue": "yue-HK",
+      "yue-hk": "yue-HK",
+      "cantonese": "yue-HK",
+      "traditional chinese": "yue-HK",
+    };
+    const candidate = aliases[normalized] || raw;
+    const available = Array.from(new Set([
+      ...supportedLangs,
+      ...Object.keys(liveData || {}),
+      ...Object.keys(slideData?.languages || {}),
+      ...Object.keys(DISPLAY_LANGUAGE_NAMES),
+    ]));
+    if (available.includes(candidate)) return candidate;
+    const matched = available.find((code) => code.toLowerCase() === String(candidate).toLowerCase());
+    return matched || null;
+  };
+  const getDisplayLanguageOptions = () => Array.from(new Set([
+    ...supportedLangs,
+    ...Object.keys(liveData || {}),
+    ...Object.keys(slideData?.languages || {}),
+    ...Object.keys(DISPLAY_LANGUAGE_NAMES),
+  ]));
   const getUserLabel = (user) => {
     if (!user) return "Guest";
     const displayName = (user.displayName || "").trim();
@@ -321,6 +391,14 @@ function App() {
     if (email.includes("@")) return email.split("@")[0];
     return user.uid || "User";
   };
+
+  const getStudentVoiceMode = () => {
+    if (isAdminIndexPage || isAdminPage || isTeacherPage) return "disabled";
+    if (!hasClassParam) return "class_selection";
+    if (hasClassParam && isReady && !classAccessLoading && !classAccessDeniedMessage) return "presentation";
+    return "disabled";
+  };
+  const studentVoiceMode = getStudentVoiceMode();
 
   useEffect(() => {
     voiceStateRef.current = {
@@ -333,8 +411,24 @@ function App() {
       listenLang,
       liveData,
       slideData,
+      studentClasses,
+      presentationList,
+      pageMode: studentVoiceMode,
     };
-  }, [slideList, viewingSlideId, livePptId, liveSlideId, isLiveMode, supportedLangs, listenLang, liveData, slideData]);
+  }, [slideList, viewingSlideId, livePptId, liveSlideId, isLiveMode, supportedLangs, listenLang, liveData, slideData, studentClasses, presentationList, studentVoiceMode]);
+
+  useEffect(() => {
+    if (!isListening) {
+      activeVoiceModeRef.current = studentVoiceMode;
+      return;
+    }
+    if (activeVoiceModeRef.current && activeVoiceModeRef.current !== studentVoiceMode) {
+      setVoiceStatus("Page changed. Voice session stopped; start again to load correct tools.");
+      stopVoiceCapture().catch((error) => {
+        console.error("Failed to stop voice after page mode change:", error);
+      });
+    }
+  }, [studentVoiceMode, isListening]);
 
   useEffect(() => {
     if (typeof navigator === "undefined") return;
@@ -350,17 +444,32 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handlePageShow = (event) => {
+      if (!event.persisted) return;
+      // Safari iOS can restore a stale JS runtime/session from bfcache.
+      window.location.reload();
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthStatus(user ? `Signed in: ${getUserLabel(user)}` : "Guest");
       if (!user) {
         setVoiceStatus("Sign in to use voice chat");
+        setVoiceAccessLoading(false);
       } else if (voicePlatformBlockReason) {
         setVoiceStatus(voicePlatformBlockReason);
+        setVoiceAccessLoading(false);
       } else if (!API_BASE_URL) {
         setVoiceStatus("Voice chat unavailable: API base URL not configured");
+        setVoiceAccessLoading(false);
       } else {
         setVoiceStatus("Checking voice access...");
+        setVoiceAccessLoading(true);
       }
       if (!user) {
         setVoiceAccessGranted(false);
@@ -716,6 +825,7 @@ function App() {
           action: "clone_class",
           course_id: courseIdValue,
           class_title: classTitleValue || undefined,
+          is_public: teacherClassIsPublic,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -726,6 +836,128 @@ function App() {
       await loadStudentClasses(currentUser);
     } catch (error) {
       setTeacherStatus(error?.message || "Failed to clone class");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const parseLines = (rawText) => String(rawText || "")
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const linkTeacherCoursePackage = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const courseIdValue = String(teacherCloneCourseId || "").trim();
+    const manifestUrl = String(teacherPackageManifestUrl || "").trim();
+    if (!courseIdValue) {
+      setTeacherStatus("Select a course first");
+      return;
+    }
+    if (!manifestUrl) {
+      setTeacherStatus("Manifest URL is required");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "link_course_package",
+          course_id: courseIdValue,
+          package_bucket: String(teacherPackageBucket || "").trim() || undefined,
+          package_prefix: String(teacherPackagePrefix || "").trim() || undefined,
+          manifest_url: manifestUrl || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to link course package");
+      setTeacherStatus(`Package linked and validated (${data.validation?.slides || 0} slides)`);
+      await loadTeacherWorkspace(currentUser);
+    } catch (error) {
+      setTeacherStatus(error?.message || "Failed to link package");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const createClassFromPackage = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const courseIdValue = String(teacherCloneCourseId || "").trim();
+    if (!courseIdValue) {
+      setTeacherStatus("Select a course first");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "clone_class_from_package",
+          course_id: courseIdValue,
+          class_title: String(teacherCloneClassTitle || "").trim() || undefined,
+          is_public: teacherClassIsPublic,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create class from package");
+      setTeacherStatus(`Created class from package: ${data.class_id}`);
+      setTeacherCloneClassTitle("");
+      await loadTeacherWorkspace(currentUser);
+      await loadStudentClasses(currentUser);
+    } catch (error) {
+      setTeacherStatus(error?.message || "Failed to create class from package");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const createTeacherUploadSession = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const courseIdValue = String(teacherCloneCourseId || "").trim();
+    if (!courseIdValue) {
+      setTeacherStatus("Select a course first");
+      return;
+    }
+    const filePaths = parseLines(teacherUploadFilePaths);
+    if (filePaths.length === 0) {
+      setTeacherStatus("Provide file paths (one per line)");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "create_upload_session",
+          course_id: courseIdValue,
+          package_bucket: String(teacherPackageBucket || "").trim() || undefined,
+          package_prefix: String(teacherPackagePrefix || "").trim() || undefined,
+          file_paths: filePaths,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create upload session");
+      setTeacherUploadUrls(Array.isArray(data.upload_urls) ? data.upload_urls : []);
+      setTeacherStatus(`Upload session ready (${(data.upload_urls || []).length} file URLs)`);
+    } catch (error) {
+      setTeacherUploadUrls([]);
+      setTeacherStatus(error?.message || "Failed to create upload session");
     } finally {
       setTeacherLoading(false);
     }
@@ -760,14 +992,17 @@ function App() {
 
   const loadVoiceAccess = async (user = currentUser) => {
     if (!user) return;
+    setVoiceAccessLoading(true);
     if (voicePlatformBlockReason) {
       setVoiceAccessGranted(false);
       setVoiceStatus(voicePlatformBlockReason);
+      setVoiceAccessLoading(false);
       return;
     }
     if (!API_BASE_URL) {
       setVoiceAccessGranted(false);
       setVoiceStatus("Voice chat unavailable: API base URL not configured");
+      setVoiceAccessLoading(false);
       return;
     }
     try {
@@ -799,6 +1034,8 @@ function App() {
       console.error("Voice access check failed:", error);
       setVoiceAccessGranted(false);
       setVoiceStatus(error?.message || "Voice chat access check failed");
+    } finally {
+      setVoiceAccessLoading(false);
     }
   };
 
@@ -1029,22 +1266,34 @@ function App() {
   };
 
   const buildVoiceTurnPayload = (userText) => {
-    const snapshot = getCurrentSlideSnapshot();
-    if (!snapshot || !snapshot.slideText) {
-      return null;
+    const mode = studentVoiceMode;
+    if (mode === "class_selection") {
+      const classSummary = studentClasses
+        .slice(0, 20)
+        .map((row) => `${row.class_id}:${row.title || row.class_id}`)
+        .join(", ");
+      return [
+        "Student class selection context:",
+        `available_classes=${classSummary || "none"}`,
+        "",
+        `User request: ${userText}`,
+      ].join("\n");
     }
-    return [
-      "Classroom context:",
-      `course_id=${snapshot.courseId}`,
-      `presentation_id=${snapshot.presentationId}`,
-      `slide_id=${snapshot.slideId}`,
-      `live_sync=${snapshot.isLiveMode ? "on" : "off"}`,
-      `display_language=${snapshot.displayLanguage}`,
-      `audio_language=${snapshot.audioLanguage}`,
-      `slide_text=${snapshot.slideText}`,
-      "",
-      `User request: ${userText}`,
-    ].join("\n");
+
+    const snapshot = getCurrentSlideSnapshot();
+    if (mode === "presentation" && snapshot && snapshot.slideText) {
+      return [
+        "Student presentation context:",
+        `class_id=${courseId}`,
+        `presentation_id=${snapshot.presentationId}`,
+        `slide_id=${snapshot.slideId}`,
+        `slide_text=${snapshot.slideText}`,
+        "",
+        `User request: ${userText}`,
+      ].join("\n");
+    }
+
+    return null;
   };
 
   const isNarrationBlockedByVoice = () => false;
@@ -1186,46 +1435,49 @@ function App() {
     }, heartbeatSeconds * 1000);
   };
 
-  const getSpeechRecognitionCtor = () => {
-    if (typeof window === "undefined") return null;
-    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
-  };
-
-  const buildVoiceToolDeclarations = () => ([
+  const buildVoiceToolDeclarations = (mode = getStudentVoiceMode()) => {
+    const declarations = [
     {
-      name: "get_current_state",
-      description: "Get current classroom/player state including active presentation and slide.",
+      name: "get_student_state",
+      description: "Get current student page state, classes, and presentation context.",
       parameters: { type: "object", properties: {} },
     },
     {
-      name: "get_slide_content",
-      description: "Get slide content for a specific or current slide.",
+      name: "list_available_classes",
+      description: "List available student course access entries.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "open_class",
+      description: "Open the student's course by class_id/title/course_id.",
       parameters: {
         type: "object",
         properties: {
-          presentation_id: { type: "string" },
-          slide_id: { type: "string" },
-          language: { type: "string" },
+          class_id: { type: "string" },
+          class_title: { type: "string" },
+          course_id: { type: "string" },
         },
       },
     },
     {
-      name: "search_slides",
-      description: "Search slide text in the current presentation.",
+      name: "back_to_class_selection",
+      description: "Navigate back to the student course home page.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "select_presentation",
+      description: "Select a presentation by presentation_id on the student slide page.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string" },
           presentation_id: { type: "string" },
-          language: { type: "string" },
-          limit: { type: "number" },
         },
-        required: ["query"],
+        required: ["presentation_id"],
       },
     },
     {
       name: "navigate_slide",
-      description: "Move to the next or previous slide.",
+      description: "Move to the next or previous slide on the student slide page.",
       parameters: {
         type: "object",
         properties: {
@@ -1240,7 +1492,7 @@ function App() {
     },
     {
       name: "go_to_slide",
-      description: "Jump directly to a specific slide/page number.",
+      description: "Jump directly to a specific slide/page number on the student slide page.",
       parameters: {
         type: "object",
         properties: {
@@ -1256,96 +1508,185 @@ function App() {
       },
     },
     {
-      name: "set_live_sync",
-      description: "Enable or disable live sync mode.",
+      name: "select_slide",
+      description: "Select a specific slide/page number on the student slide page.",
       parameters: {
         type: "object",
         properties: {
-          enabled: {
-            type: "boolean",
-            description: "True to sync with live presenter slide.",
-          },
+          slide_number: { type: "number", description: "Target slide/page number (for example 5)." },
+          page_number: { type: "number", description: "Alias of slide_number." },
+          slide: { type: "number", description: "Alias of slide_number." },
+          page: { type: "number", description: "Alias of slide_number." },
         },
-        required: ["enabled"],
       },
     },
     {
-      name: "set_audio_language",
-      description: "Set narration audio language. Supported: en-US, zh-CN, yue-HK.",
+      name: "list_presentations",
+      description: "List available topic slide sets and the currently selected set.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "get_slide_range",
+      description: "Get current slide page range (first page, last page, total pages).",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "list_slide_pages",
+      description: "List available slide page numbers and the current page.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "get_current_slide_content",
+      description: "Get current slide content (text/image/audio URLs) for active languages.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "jump_to_slide_boundary",
+      description: "Jump directly to the first or last slide page.",
       parameters: {
         type: "object",
         properties: {
-          language: {
+          boundary: {
             type: "string",
-            description: "Target audio language code or name.",
+            enum: ["first", "last"],
+            description: "Which edge of the current slide range to jump to.",
           },
         },
-        required: ["language"],
+        required: ["boundary"],
       },
     },
     {
-      name: "set_display_language",
-      description: "Set displayed subtitle language. Supported: en-US, zh-CN, yue-HK.",
+      name: "list_slide_languages",
+      description: "Show available slide display and narration languages.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "toggle_live_mode",
+      description: "Switch between LIVE sync mode and manual slide mode.",
       parameters: {
         type: "object",
         properties: {
-          language: {
+          mode: {
             type: "string",
-            description: "Target display language code or name.",
+            enum: ["toggle", "live", "manual"],
+            description: "Set mode explicitly or toggle current mode.",
           },
         },
-        required: ["language"],
       },
     },
     {
-      name: "narration_control",
-      description: "Control narration playback.",
+      name: "playback_control",
+      description: "Control narration playback (start, pause, play/pause toggle, restart, stop, seek, jump start).",
       parameters: {
         type: "object",
         properties: {
           action: {
             type: "string",
-            enum: ["play", "pause", "restart", "stop", "resume"],
-            description: "Narration control action.",
+            enum: ["start", "pause", "play_pause", "restart", "stop", "seek", "seek_to", "jump_start"],
+          },
+          seconds: {
+            type: "number",
+            description: "For seek action: positive or negative seconds.",
+          },
+          position_seconds: {
+            type: "number",
+            description: "For seek_to action: absolute playback position in seconds.",
           },
         },
-        required: ["action"],
       },
+    },
+    {
+      name: "set_read_aloud",
+      description: "Set or toggle read-aloud autoplay for narration.",
+      parameters: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+          mode: { type: "string", enum: ["on", "off", "toggle"] },
+        },
+      },
+    },
+    {
+      name: "set_fullscreen_mode",
+      description: "Open or close full-screen slide view.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["open", "close", "toggle"] },
+        },
+      },
+    },
+    {
+      name: "change_display_language",
+      description: "Change display language (same as Alt+V shortcut).",
+      parameters: {
+        type: "object",
+        properties: {
+          direction: { type: "string", enum: ["next", "previous"] },
+          language: { type: "string", description: "Target display language code/name." },
+        },
+      },
+    },
+    {
+      name: "change_narration_language",
+      description: "Change narration language (same as Alt+A shortcut).",
+      parameters: {
+        type: "object",
+        properties: {
+          direction: { type: "string", enum: ["next", "previous"] },
+          language: { type: "string", description: "Target narration language code/name." },
+        },
+      },
+    },
+    {
+      name: "list_shortcuts",
+      description: "List available keyboard shortcuts for this page mode.",
+      parameters: { type: "object", properties: {} },
     },
     {
       name: "help_commands",
       description: "Get a short spoken list of available voice commands.",
       parameters: { type: "object", properties: {} },
     },
-    {
-      name: "cycle_language",
-      description: "Cycle audio or display language to next/previous option.",
-      parameters: {
-        type: "object",
-        properties: {
-          target: { type: "string", enum: ["audio", "display"] },
-          direction: { type: "string", enum: ["next", "previous"] },
-        },
-        required: ["target", "direction"],
-      },
-    },
-    {
-      name: "seek_narration",
-      description: "Seek narration by seconds. Positive moves forward, negative moves backward.",
-      parameters: {
-        type: "object",
-        properties: {
-          seconds: { type: "number" },
-        },
-        required: ["seconds"],
-      },
-    },
-    {
-      name: "jump_narration_start",
-      description: "Jump narration playback to the beginning.",
-      parameters: { type: "object", properties: {} },
-    },
-  ]);
+    ];
+    const declarationsByName = new Map(declarations.map((item) => [item.name, item]));
+    const commonToolNames = [
+      "get_student_state",
+      "back_to_class_selection",
+      "list_slide_languages",
+      "list_shortcuts",
+      "help_commands",
+    ];
+    const classSelectionToolNames = [
+      "list_available_classes",
+      "open_class",
+    ];
+    const presentationToolNames = [
+      "list_presentations",
+      "select_presentation",
+      "get_slide_range",
+      "list_slide_pages",
+      "get_current_slide_content",
+      "jump_to_slide_boundary",
+      "navigate_slide",
+      "go_to_slide",
+      "select_slide",
+      "toggle_live_mode",
+      "playback_control",
+      "set_read_aloud",
+      "set_fullscreen_mode",
+      "change_display_language",
+      "change_narration_language",
+    ];
+    const modeToolNames = mode === "class_selection"
+      ? [...commonToolNames, ...classSelectionToolNames]
+      : mode === "presentation"
+        ? [...commonToolNames, ...presentationToolNames]
+        : commonToolNames;
+    return modeToolNames
+      .map((name) => declarationsByName.get(name))
+      .filter(Boolean);
+  };
 
   const playProxyPcmAudio = async (base64Data, mimeType = "audio/pcm") => {
     if (!base64Data || !mimeType.includes("audio/pcm")) return;
@@ -1376,6 +1717,33 @@ function App() {
     voicePlaybackNextRef.current = when + buffer.duration;
   };
 
+  const unlockAudioPlayback = async () => {
+    audioUnlockedRef.current = true;
+    if (voicePlaybackCtxRef.current && voicePlaybackCtxRef.current.state === "suspended") {
+      try {
+        await voicePlaybackCtxRef.current.resume();
+      } catch (_error) {
+        // no-op
+      }
+    }
+    if (voiceCaptureAudioContextRef.current && voiceCaptureAudioContextRef.current.state === "suspended") {
+      try {
+        await voiceCaptureAudioContextRef.current.resume();
+      } catch (_error) {
+        // no-op
+      }
+    }
+    if (pendingNarrationRetryRef.current) {
+      pendingNarrationRetryRef.current = false;
+      const retryUrl = activeAudioUrlRef.current || resolveActiveAudioUrl();
+      if (retryUrl) {
+        setTimeout(() => {
+          startAudioPlayback(retryUrl, { restart: false });
+        }, 0);
+      }
+    }
+  };
+
   const sendVoiceTextTurn = (socket, text) => {
     if (!socket || socket.readyState !== WebSocket.OPEN || !text) return true;
     const enrichedText = buildVoiceTurnPayload(text);
@@ -1389,6 +1757,128 @@ function App() {
       },
     }));
     return true;
+  };
+
+  const pcm16ToBase64 = (float32Array) => {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < float32Array.length; i += 1) {
+      const sample = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  };
+
+  const stopRawVoiceInputCapture = async () => {
+    if (voiceCaptureProcessorRef.current) {
+      try {
+        voiceCaptureProcessorRef.current.disconnect();
+      } catch (_error) {
+        // no-op
+      }
+      voiceCaptureProcessorRef.current.onaudioprocess = null;
+      voiceCaptureProcessorRef.current = null;
+    }
+    if (voiceCaptureSourceRef.current) {
+      try {
+        voiceCaptureSourceRef.current.disconnect();
+      } catch (_error) {
+        // no-op
+      }
+      voiceCaptureSourceRef.current = null;
+    }
+    if (voiceCaptureAudioContextRef.current) {
+      try {
+        await voiceCaptureAudioContextRef.current.close();
+      } catch (_error) {
+        // no-op
+      }
+      voiceCaptureAudioContextRef.current = null;
+    }
+    if (voiceCaptureStreamRef.current) {
+      voiceCaptureStreamRef.current.getTracks().forEach((track) => track.stop());
+      voiceCaptureStreamRef.current = null;
+    }
+  };
+
+  const startRawVoiceInputCapture = async (socket) => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      throw new Error("Microphone capture is not supported on this device");
+    }
+    await stopRawVoiceInputCapture();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContextCtor({ sampleRate: 16000 });
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      if (!voiceCaptureActiveRef.current) return;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      const input = event.inputBuffer.getChannelData(0);
+      const base64Audio = pcm16ToBase64(input);
+      socket.send(JSON.stringify({
+        realtime_input: {
+          media_chunks: [
+            {
+              mime_type: "audio/pcm",
+              data: base64Audio,
+            },
+          ],
+        },
+      }));
+    };
+
+    source.connect(processor);
+    processor.connect(ctx.destination);
+
+    voiceCaptureStreamRef.current = stream;
+    voiceCaptureAudioContextRef.current = ctx;
+    voiceCaptureSourceRef.current = source;
+    voiceCaptureProcessorRef.current = processor;
+  };
+
+  const parseToolArgs = (call) => {
+    if (call?.args && typeof call.args === "object") return call.args;
+    if (call?.arguments && typeof call.arguments === "object") return call.arguments;
+    if (typeof call?.args === "string") {
+      try {
+        const parsed = JSON.parse(call.args);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+    if (typeof call?.arguments === "string") {
+      try {
+        const parsed = JSON.parse(call.arguments);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+    return {};
+  };
+
+  const buildToolCallSignature = (call) => {
+    const args = parseToolArgs(call);
+    const keys = Object.keys(args).sort();
+    const stableArgs = {};
+    for (const key of keys) stableArgs[key] = args[key];
+    return `${String(call?.name || "").trim()}:${JSON.stringify(stableArgs)}`;
   };
 
   const handleVoiceProxyMessage = async (event) => {
@@ -1413,12 +1903,22 @@ function App() {
 
     if (payload.type === "proxy_ready") {
       voiceProxyAuthorizedRef.current = true;
+      const mode = studentVoiceMode;
       const setupTools = ENABLE_GROUNDING
         ? {
-          function_declarations: buildVoiceToolDeclarations(),
+          function_declarations: buildVoiceToolDeclarations(mode),
           google_search: {},
         }
-        : { function_declarations: buildVoiceToolDeclarations() };
+        : { function_declarations: buildVoiceToolDeclarations(mode) };
+      const modeScopeInstruction = mode === "class_selection"
+        ? "This session is on course home. Only use course-home tools."
+        : mode === "presentation"
+          ? "This session is on presentation page. Use presentation/slide, playback, language, and back-to-home tools only."
+          : "Tools are limited to safe student commands.";
+      const sessionLanguage = voiceSessionLanguageRef.current || "auto";
+      const languageInstruction = sessionLanguage === "auto"
+        ? "Detect the user's spoken language each turn and reply in that language. You may switch languages naturally across turns."
+        : `Prefer ${sessionLanguage} for speech unless the user explicitly asks to switch language.`;
       const setupMessage = {
         setup: {
           model: `projects/${GCP_PROJECT_ID}/locations/${LIVE_MODEL_LOCATION}/publishers/google/models/${LIVE_MODEL}`,
@@ -1434,18 +1934,27 @@ function App() {
           },
           system_instruction: {
             parts: [{
-              text: `You are an accessibility-first classroom voice assistant for visually impaired students.
-Use ${listenLang || "en-US"} for spoken responses.
-Use tool calls whenever you need current app state or slide data.
-Never invent slide content. If context is missing, call get_current_state or get_slide_content first.
+              text: `You are an accessibility-first student voice assistant for visually impaired students.
+${languageInstruction}
+Use tool calls for navigation, playback, and language actions.
+Never invent class IDs, presentation IDs, or slide IDs.
 When user intent matches an available function, call the function instead of describing steps.
-Narration and voice are allowed to run at the same time.
+Allowed scope only: tools declared in this session.
+${modeScopeInstruction}
+When the user asks about current slide content, first call get_current_slide_content.
 For each actionable user command, issue exactly one function call whenever possible.
-Do not bundle multiple function calls in one response unless absolutely required.
+Do not call tools outside this scope.
 Keep replies short and explicit about the action completed.`,
             }],
           },
           tools: setupTools,
+          realtime_input_config: {
+            automatic_activity_detection: {
+              disabled: false,
+              silence_duration_ms: 900,
+              prefix_padding_ms: 250,
+            },
+          },
           input_audio_transcription: {},
           output_audio_transcription: {},
         },
@@ -1457,16 +1966,15 @@ Keep replies short and explicit about the action completed.`,
 
     if (payload.setupComplete || payload.setup_complete) {
       setVoiceStatus("Gemini Live connected");
-      const recognition = speechRecognitionRef.current;
-      if (recognition && !voiceRecognitionStartedRef.current) {
+      if (!voiceRecognitionStartedRef.current) {
         try {
-          recognition.start();
+          await startRawVoiceInputCapture(voiceProxySocketRef.current);
           voiceRecognitionStartedRef.current = true;
           setVoiceStatus("Listening...");
         } catch (error) {
           setVoiceStatus(error?.message || "Failed to start microphone capture");
           stopVoiceCapture().catch((stopError) => {
-            console.error("Failed to stop voice after recognition start error:", stopError);
+            console.error("Failed to stop voice after microphone start error:", stopError);
           });
         }
       }
@@ -1495,23 +2003,38 @@ Keep replies short and explicit about the action completed.`,
       payload?.toolCall?.functionCalls
       || payload?.tool_call?.function_calls;
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-      for (const call of toolCalls) {
-        const result = await executeVoiceCommand(call);
-        if (voiceProxySocketRef.current?.readyState === WebSocket.OPEN) {
-          voiceProxySocketRef.current.send(JSON.stringify({
-            tool_response: {
-              function_responses: [
-                {
-                  id: call.id,
-                  name: call.name,
-                  response: result,
-                },
-              ],
-            },
-          }));
+      try {
+        voiceCommandPendingRef.current = true;
+        for (const call of toolCalls) {
+          const signature = buildToolCallSignature(call);
+          const now = Date.now();
+          let result;
+          if (
+            recentVoiceToolCallRef.current.signature === signature
+            && now - recentVoiceToolCallRef.current.time < 2500
+          ) {
+            result = recentVoiceToolCallRef.current.result || { ok: true, message: "Command already applied." };
+          } else {
+            result = await executeVoiceCommand(call);
+            recentVoiceToolCallRef.current = { signature, time: now, result };
+          }
+          if (voiceProxySocketRef.current?.readyState === WebSocket.OPEN) {
+            voiceProxySocketRef.current.send(JSON.stringify({
+              tool_response: {
+                function_responses: [
+                  {
+                    id: call.id,
+                    name: call.name,
+                    response: result,
+                  },
+                ],
+              },
+            }));
+          }
         }
+      } finally {
+        voiceCommandPendingRef.current = false;
       }
-      return;
     }
 
     const parts =
@@ -1524,13 +2047,14 @@ Keep replies short and explicit about the action completed.`,
         }
         const inlineData = part?.inlineData || part?.inline_data;
         if (inlineData?.data) {
-          await playProxyPcmAudio(inlineData.data, inlineData.mimeType || inlineData.mime_type || "");
+          await playProxyPcmAudio(inlineData.data, inlineData.mimeType || inlineData.mime_type || "audio/pcm");
         }
       }
     }
   };
 
   const startVoiceCapture = async () => {
+    unlockAudioPlayback().catch(() => {});
     if (!currentUser) {
       setVoiceStatus("Sign in to use voice chat");
       return;
@@ -1544,19 +2068,20 @@ Keep replies short and explicit about the action completed.`,
       return;
     }
     if (isListening || voiceBusy) return;
+    voiceSessionLanguageRef.current = "auto";
 
+    const mode = getStudentVoiceMode();
     const presentationId = viewingPptId || livePptId;
     const slideId = viewingSlideId || liveSlideId;
-    if (!presentationId || !slideId) {
+    if (mode === "disabled") {
+      setVoiceStatus("Voice tools are unavailable on this page");
+      return;
+    }
+    if (mode === "presentation" && (!presentationId || !slideId)) {
       setVoiceStatus("No active slide to discuss");
       return;
     }
 
-    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
-    if (!SpeechRecognitionCtor) {
-      setVoiceStatus("Browser speech recognition is not supported on this device");
-      return;
-    }
     if (!VOICE_PROXY_WS_URL) {
       setVoiceStatus("Voice proxy is not configured");
       return;
@@ -1569,14 +2094,16 @@ Keep replies short and explicit about the action completed.`,
     setVoiceBusy(true);
     setVoiceTranscript("");
     setVoiceAnswer("");
+    recentVoiceTranscriptRef.current = { text: "", time: 0 };
+    recentVoiceToolCallRef.current = { signature: "", time: 0, result: null };
     setAutoplay(true);
     setVoiceStatus("Authorizing voice session...");
     try {
       await startVoiceLease({
         user: currentUser,
-        courseIdValue: courseId,
-        presentationIdValue: presentationId,
-        slideIdValue: slideId,
+        courseIdValue: mode === "presentation" ? courseId : "",
+        presentationIdValue: mode === "presentation" ? presentationId : "",
+        slideIdValue: mode === "presentation" ? slideId : "",
       });
       const leaseSessionId = voiceLeaseRef.current?.session_id;
       if (!leaseSessionId) {
@@ -1587,50 +2114,6 @@ Keep replies short and explicit about the action completed.`,
       voiceProxySocketRef.current = ws;
       voiceProxyAuthorizedRef.current = false;
       voiceRecognitionStartedRef.current = false;
-
-      const recognition = new SpeechRecognitionCtor();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = listenLang || "en-US";
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event) => {
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const result = event.results[i];
-          if (!result?.isFinal) continue;
-          const transcript = (result[0]?.transcript || "").trim();
-          if (!transcript) continue;
-          setVoiceTranscript(transcript);
-          const sent = sendVoiceTextTurn(ws, transcript);
-          if (!sent) {
-            setVoiceStatus("Slide context unavailable for voice answer");
-            stopVoiceCapture().catch((stopError) => {
-              console.error("Failed to stop voice after missing context:", stopError);
-            });
-            return;
-          }
-        }
-      };
-
-      recognition.onerror = (event) => {
-        const code = String(event?.error || "unknown");
-        if (code === "not-allowed" || code === "service-not-allowed") {
-          setVoiceStatus("Microphone permission denied");
-        } else if (code !== "aborted") {
-          setVoiceStatus(`Voice recognition error: ${code}`);
-        }
-      };
-
-      recognition.onend = () => {
-        voiceRecognitionStartedRef.current = false;
-        if (!voiceCaptureActiveRef.current) return;
-        try {
-          recognition.start();
-          voiceRecognitionStartedRef.current = true;
-        } catch (_error) {
-          // no-op: browser is still stopping/starting recognition
-        }
-      };
 
       ws.onopen = async () => {
         try {
@@ -1657,6 +2140,10 @@ Keep replies short and explicit about the action completed.`,
         setVoiceStatus("Voice proxy connection error");
       };
       ws.onclose = () => {
+        if (voiceSuppressNextCloseRef.current) {
+          voiceSuppressNextCloseRef.current = false;
+          return;
+        }
         if (voiceCaptureActiveRef.current) {
           const authorized = voiceProxyAuthorizedRef.current;
           setVoiceStatus(authorized ? "Voice proxy disconnected" : "Voice chat access requires admin grant");
@@ -1666,14 +2153,15 @@ Keep replies short and explicit about the action completed.`,
         }
       };
 
-      speechRecognitionRef.current = recognition;
       voiceCaptureActiveRef.current = true;
+      activeVoiceModeRef.current = mode;
       setIsListening(true);
       setVoiceStatus("Connecting voice proxy...");
     } catch (error) {
       console.error("Voice session start failed:", error);
       voiceCaptureActiveRef.current = false;
       speechRecognitionRef.current = null;
+      await stopRawVoiceInputCapture();
       if (voiceProxySocketRef.current) {
         try {
           voiceProxySocketRef.current.close();
@@ -1694,8 +2182,12 @@ Keep replies short and explicit about the action completed.`,
     try {
       voiceCaptureActiveRef.current = false;
       voiceCommandPendingRef.current = false;
+      activeVoiceModeRef.current = "disabled";
+      recentVoiceTranscriptRef.current = { text: "", time: 0 };
+      recentVoiceToolCallRef.current = { signature: "", time: 0, result: null };
       voiceProxyAuthorizedRef.current = false;
       voiceRecognitionStartedRef.current = false;
+      await stopRawVoiceInputCapture();
       const recognition = speechRecognitionRef.current;
       speechRecognitionRef.current = null;
       if (recognition) {
@@ -1733,6 +2225,16 @@ Keep replies short and explicit about the action completed.`,
       await closeVoiceLease({ reason: "client_stop" });
       setVoiceBusy(false);
     }
+  };
+
+  const applyMp3LanguageChange = (requestedLanguage) => {
+    const normalized = normalizeVoiceLanguageCode(requestedLanguage);
+    if (!normalized) {
+      const raw = String(requestedLanguage || "").trim();
+      setVoiceStatus(`Unsupported narration language: ${raw || "unknown"}`);
+      return;
+    }
+    setListenLang(normalized);
   };
 
   useEffect(() => {
@@ -1794,16 +2296,18 @@ Keep replies short and explicit about the action completed.`,
     }
 
     lastNarratedAudioUrl.current = audioUrl;
-    setNarrationStatus("Playing MP3 narration");
+    setNarrationStatus("Playing narration");
     audioRef.current.play()
       .then(() => {
+        userPausedNarrationRef.current = false;
         setIsPlaying(true);
         setNarrationStatus("Narrating");
       })
       .catch((error) => {
         console.error("Narration playback blocked:", error);
         setIsPlaying(false);
-        setNarrationStatus("Narration playback blocked");
+        pendingNarrationRetryRef.current = true;
+        setNarrationStatus("Tap screen once to enable narration audio");
       });
   };
 
@@ -1822,25 +2326,36 @@ Keep replies short and explicit about the action completed.`,
       audioRef.current.currentTime = startTime;
       setAudioCurrentTime(startTime);
     }
-    setNarrationStatus("Playing MP3 narration");
+    setNarrationStatus("Playing narration");
     try {
       await audioRef.current.play();
+      userPausedNarrationRef.current = false;
       setIsPlaying(true);
       setNarrationStatus("Narrating");
       return { ok: true, message: "Narration started." };
     } catch (error) {
       console.error("Narration playback blocked:", error);
       setIsPlaying(false);
-      setNarrationStatus("Narration playback blocked");
+      pendingNarrationRetryRef.current = true;
+      setNarrationStatus("Tap screen once to enable narration audio");
       return { ok: false, message: "Narration playback blocked." };
     }
   };
 
   const stopNarration = () => {
+    userPausedNarrationRef.current = true;
     audioRef.current.pause();
     audioRef.current.currentTime = 0;
     setAudioCurrentTime(0);
+    setIsPlaying(false);
     setNarrationStatus("Stopped");
+  };
+
+  const pauseNarration = () => {
+    userPausedNarrationRef.current = true;
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setNarrationStatus("Paused");
   };
 
   const playNarrationAfterVoiceStop = () => {
@@ -1880,7 +2395,16 @@ Keep replies short and explicit about the action completed.`,
   };
 
   useEffect(() => {
+    const onUserActivation = () => {
+      unlockAudioPlayback().catch(() => {});
+    };
+    window.addEventListener("pointerdown", onUserActivation, { passive: true });
+    window.addEventListener("touchstart", onUserActivation, { passive: true });
+    window.addEventListener("keydown", onUserActivation);
     return () => {
+      window.removeEventListener("pointerdown", onUserActivation);
+      window.removeEventListener("touchstart", onUserActivation);
+      window.removeEventListener("keydown", onUserActivation);
       clearVoiceLeaseTimers();
       voiceCaptureActiveRef.current = false;
       voiceCommandPendingRef.current = false;
@@ -1893,6 +2417,7 @@ Keep replies short and explicit about the action completed.`,
         }
         speechRecognitionRef.current = null;
       }
+      stopRawVoiceInputCapture().catch(() => {});
       if (voiceProxySocketRef.current) {
         try {
           voiceProxySocketRef.current.close(1000, "component_unmount");
@@ -1931,6 +2456,35 @@ Keep replies short and explicit about the action completed.`,
     }
 
     startAudioPlayback(audioUrl, { restart: true });
+  };
+
+  const startNarration = ({ restart = false } = {}) => {
+    const audioUrl = resolveActiveAudioUrl();
+    if (!audioUrl) {
+      setNarrationStatus("Narration audio unavailable");
+      return;
+    }
+    const currentSrc = String(audioRef.current.src || "");
+    const sameSource = currentSrc === audioUrl || currentSrc.endsWith(audioUrl);
+    userPausedNarrationRef.current = false;
+    if (restart || !audioRef.current.src || !sameSource) {
+      startAudioPlayback(audioUrl, { restart });
+      return;
+    }
+    if (audioRef.current.ended) {
+      audioRef.current.currentTime = 0;
+      setAudioCurrentTime(0);
+    }
+    audioRef.current.play()
+      .then(() => {
+        setIsPlaying(true);
+        setNarrationStatus("Narrating");
+      })
+      .catch((error) => {
+        console.error("Playback failed:", error);
+        pendingNarrationRetryRef.current = true;
+        setNarrationStatus("Tap screen once to enable narration audio");
+      });
   };
 
   // --- 1. Listen to Root Broadcast (Live State) ---
@@ -2133,7 +2687,7 @@ Keep replies short and explicit about the action completed.`,
   useEffect(() => {
       const narrationBlockedByVoice = isNarrationBlockedByVoice();
       const shouldFollowSlideAudio = Boolean(audioRef.current.src) || isPlaying || autoplay;
-      if (!activeAudioUrl || !shouldFollowSlideAudio || narrationBlockedByVoice) return;
+      if (!activeAudioUrl || !shouldFollowSlideAudio || narrationBlockedByVoice || userPausedNarrationRef.current) return;
 
       if (lastPlayedHash.current !== activeAudioUrl) {
           lastPlayedHash.current = activeAudioUrl;
@@ -2184,32 +2738,12 @@ Keep replies short and explicit about the action completed.`,
         return;
       }
 
-      if (isPlaying) {
-        audioRef.current.pause();
+      const isCurrentlyPlaying = !audioRef.current.paused && !audioRef.current.ended;
+      if (isCurrentlyPlaying) {
+        pauseNarration();
         return;
       }
-
-      const audioUrl = resolveActiveAudioUrl();
-      if (!audioRef.current.src || audioRef.current.src !== audioUrl) {
-        if (!audioUrl) {
-          setNarrationStatus("Narration audio unavailable");
-          return;
-        }
-        startAudioPlayback(audioUrl, { restart: false });
-        return;
-      }
-
-      if (audioRef.current.ended) {
-        audioRef.current.currentTime = 0;
-        setAudioCurrentTime(0);
-      }
-
-      audioRef.current.play()
-        .then(() => setIsPlaying(true))
-        .catch((error) => {
-          console.error("Playback failed:", error);
-          setNarrationStatus("Narration playback blocked");
-        });
+      startNarration({ restart: false });
   };
 
   const seekAudio = (seconds) => {
@@ -2288,106 +2822,273 @@ Keep replies short and explicit about the action completed.`,
       return {};
     })();
     try {
-      if (name === "get_current_state") {
-        const snapshot = getCurrentSlideSnapshot();
-        if (!snapshot) {
-          return { ok: false, message: "No active slide context available." };
-        }
-        return {
-          ok: true,
-          message: `On slide ${snapshot.slideId} of ${snapshot.presentationId}.`,
-          data: snapshot,
-        };
+      const mode = getStudentVoiceMode();
+      const allowedTools = new Set(buildVoiceToolDeclarations(mode).map((item) => item.name));
+      if (mode === "disabled") {
+        return { ok: false, message: "Student voice tools are unavailable on this page." };
+      }
+      if (!allowedTools.has(name)) {
+        return { ok: false, message: `Unsupported command: ${name}` };
       }
 
-      if (name === "get_slide_content") {
+      if (name === "get_student_state") {
         const state = voiceStateRef.current;
-        const targetPresentationId = String(args.presentation_id || state.viewingPptId || state.livePptId || "");
-        const targetSlideId = String(args.slide_id || state.viewingSlideId || state.liveSlideId || "");
-        const targetLanguage = String(args.language || state.listenLang || listenLang || "").trim();
-        if (!targetPresentationId || !targetSlideId) {
-          return { ok: false, message: "Missing presentation or slide id." };
-        }
-        const slideRef = doc(
-          db,
-          "presentation_broadcast",
-          courseId,
-          "presentations",
-          targetPresentationId,
-          "slides",
-          targetSlideId,
+        const classes = (state.studentClasses || []).map((row) => ({
+          class_id: row.class_id,
+          title: row.title || "",
+          course_id: row.course_id || "",
+          course_title: row.course_title || "",
+          is_public: row.is_public === true,
+        }));
+        const courses = Array.from(
+          new Map(
+            classes
+              .filter((row) => row.course_id)
+              .map((row) => [row.course_id, { course_id: row.course_id, course_title: row.course_title || row.course_id }]),
+          ).values(),
         );
-        const snap = await getDoc(slideRef);
-        if (!snap.exists()) {
-          return { ok: false, message: "Slide not found." };
-        }
-        const slideDoc = snap.data() || {};
-        const languages = slideDoc.languages || {};
-        const langEntry = pickLanguageContent(languages, targetLanguage);
-        const slideText = (langEntry?.text || "").trim();
-        if (!slideText) {
-          return { ok: false, message: "Slide text is unavailable for requested language." };
-        }
         return {
           ok: true,
-          message: `Fetched content for slide ${targetSlideId}.`,
+          message: mode === "class_selection"
+            ? `On student course home with ${classes.length} available course access entr${classes.length === 1 ? "y" : "ies"}.`
+            : `On presentation ${state.viewingPptId || state.livePptId || ""}, slide ${state.viewingSlideId || state.liveSlideId || ""}.`,
           data: {
-            course_id: courseId,
-            presentation_id: targetPresentationId,
-            slide_id: targetSlideId,
-            language: targetLanguage || null,
-            text: slideText,
-            image_url: langEntry?.image_url || null,
+            mode,
+            class_id: hasClassParam ? courseId : null,
+            classes,
+            courses,
+            presentation_id: state.viewingPptId || state.livePptId || null,
+            slide_id: state.viewingSlideId || state.liveSlideId || null,
+            available_presentations: state.presentationList || [],
+            slide_first_page: state.slideList?.[0] ?? null,
+            slide_last_page: state.slideList?.[state.slideList.length - 1] ?? null,
+            slide_total_pages: state.slideList?.length ?? 0,
+            available_slide_pages: state.slideList || [],
+            read_aloud_enabled: autoplay,
+            fullscreen_open: isFullScreen,
+            narration_playing: isPlaying,
           },
         };
       }
 
-      if (name === "search_slides") {
-        const query = String(args.query || "").trim();
-        if (!query) {
-          return { ok: false, message: "Query is required." };
-        }
+      if (name === "list_available_classes") {
         const state = voiceStateRef.current;
-        const targetPresentationId = String(args.presentation_id || state.viewingPptId || state.livePptId || "");
-        if (!targetPresentationId) {
-          return { ok: false, message: "Presentation id is required." };
-        }
-        const targetLanguage = String(args.language || state.listenLang || listenLang || "").trim();
-        const maxResults = Math.min(10, Math.max(1, Number(args.limit) || 3));
-        const slidesRef = collection(
-          db,
-          "presentation_broadcast",
-          courseId,
-          "presentations",
-          targetPresentationId,
-          "slides",
+        const classes = (state.studentClasses || []).map((row) => ({
+          class_id: row.class_id,
+          class_title: row.title || row.class_id,
+          course_id: row.course_id || "",
+          course_title: row.course_title || row.course_id || "",
+          is_public: row.is_public === true,
+        }));
+        const courses = Array.from(
+          new Map(
+            classes
+              .filter((row) => row.course_id)
+              .map((row) => [row.course_id, { course_id: row.course_id, course_title: row.course_title || row.course_id }]),
+          ).values(),
         );
-        const snapshot = await getDocs(slidesRef);
-        const lowered = query.toLowerCase();
-        const matches = [];
-        for (const slide of snapshot.docs) {
-          const data = slide.data() || {};
-          const langEntry = pickLanguageContent(data.languages || {}, targetLanguage);
-          const text = (langEntry?.text || "").trim();
-          if (!text) continue;
-          if (!text.toLowerCase().includes(lowered)) continue;
-          matches.push({
-            slide_id: slide.id,
-            snippet: text.slice(0, 220),
-          });
-          if (matches.length >= maxResults) break;
-        }
-        if (matches.length === 0) {
-          return { ok: true, message: "No matching slides found.", data: { matches: [] } };
-        }
         return {
           ok: true,
-          message: `Found ${matches.length} matching slide(s).`,
-          data: { query, matches },
+          message: classes.length === 1
+            ? "This student account has one course access entry."
+            : `This student account has ${classes.length} course access entries.`,
+          data: {
+            courses,
+            classes,
+          },
         };
       }
 
+      if (name === "open_class") {
+        if (mode !== "class_selection") {
+          return { ok: false, message: "open_class is only available on student course home." };
+        }
+        const requestedClassId = String(args.class_id || args.classId || "").trim();
+        const requestedClassTitle = String(args.class_title || args.title || "").trim().toLowerCase();
+        const requestedCourseId = String(args.course_id || args.courseId || "").trim();
+        let candidate = null;
+        if (requestedClassId) {
+          candidate = studentClasses.find((row) => String(row.class_id || "") === requestedClassId) || null;
+        }
+        if (!candidate && requestedClassTitle) {
+          candidate = studentClasses.find((row) => String(row.title || "").trim().toLowerCase() === requestedClassTitle) || null;
+        }
+        if (!candidate && requestedCourseId) {
+          candidate = studentClasses.find((row) => String(row.course_id || "") === requestedCourseId) || null;
+        }
+        if (!candidate) {
+          if (studentClasses.length === 1) {
+            candidate = studentClasses[0];
+          } else {
+            return { ok: false, message: "Course entry not found. Provide class_id." };
+          }
+        }
+        await enrollAndOpenClass(candidate.class_id);
+        return { ok: true, message: `Opening course ${(candidate.course_title || candidate.course_id || candidate.class_id)}.` };
+      }
+
+      if (name === "back_to_class_selection") {
+        window.location.href = "/";
+        return { ok: true, message: "Returning to course home." };
+      }
+
+      if (name === "select_presentation") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "select_presentation is only available on presentation page." };
+        }
+        const targetPresentationId = String(args.presentation_id || args.presentationId || "").trim();
+        if (!targetPresentationId) {
+          return { ok: false, message: "presentation_id is required." };
+        }
+        if (!presentationList.includes(targetPresentationId)) {
+          return { ok: false, message: `Presentation ${targetPresentationId} is not available.` };
+        }
+        setViewingPptId(targetPresentationId);
+        setIsLiveMode(false);
+        return { ok: true, message: `Presentation switched to ${targetPresentationId}.` };
+      }
+
+      if (name === "list_presentations") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "list_presentations is only available on presentation page." };
+        }
+        const state = voiceStateRef.current;
+        const latestPresentations = Array.isArray(state.presentationList) ? state.presentationList : [];
+        const currentPresentationId = state.viewingPptId || state.livePptId || null;
+        return {
+          ok: true,
+          message: latestPresentations.length === 0
+            ? "No topic slide sets are available."
+            : `There are ${latestPresentations.length} topic slide sets available.`,
+          data: {
+            current_presentation_id: currentPresentationId,
+            available_presentations: latestPresentations,
+          },
+        };
+      }
+
+      if (name === "get_slide_range") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "get_slide_range is only available on presentation page." };
+        }
+        const { slideList: latestSlideList, viewingSlideId: latestViewingSlideId, viewingPptId: latestViewingPptId, livePptId: latestLivePptId } = voiceStateRef.current;
+        if (!Array.isArray(latestSlideList) || latestSlideList.length === 0) {
+          return { ok: false, message: "No slide pages are available for the current topic." };
+        }
+        const firstPage = latestSlideList[0];
+        const lastPage = latestSlideList[latestSlideList.length - 1];
+        return {
+          ok: true,
+          message: `Current page range is ${firstPage} to ${lastPage}.`,
+          data: {
+            presentation_id: latestViewingPptId || latestLivePptId || null,
+            current_page: Number.parseInt(latestViewingSlideId, 10) || null,
+            first_page: firstPage,
+            last_page: lastPage,
+            total_pages: latestSlideList.length,
+            available_pages: latestSlideList,
+          },
+        };
+      }
+
+      if (name === "list_slide_pages") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "list_slide_pages is only available on presentation page." };
+        }
+        const { slideList: latestSlideList, viewingSlideId: latestViewingSlideId, viewingPptId: latestViewingPptId, livePptId: latestLivePptId } = voiceStateRef.current;
+        if (!Array.isArray(latestSlideList) || latestSlideList.length === 0) {
+          return { ok: false, message: "No slide pages are available for the current topic." };
+        }
+        return {
+          ok: true,
+          message: `Current topic has ${latestSlideList.length} slide pages.`,
+          data: {
+            presentation_id: latestViewingPptId || latestLivePptId || null,
+            current_page: Number.parseInt(latestViewingSlideId, 10) || null,
+            available_pages: latestSlideList,
+          },
+        };
+      }
+
+      if (name === "get_current_slide_content") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "get_current_slide_content is only available on presentation page." };
+        }
+        const state = voiceStateRef.current;
+        const presentationId = state.viewingPptId || state.livePptId || null;
+        const slideId = state.viewingSlideId || state.liveSlideId || null;
+        if (!presentationId || !slideId) {
+          return { ok: false, message: "No active presentation slide is available." };
+        }
+        const sourceLanguages = state.isLiveMode
+          ? (state.liveData || state.slideData?.languages || {})
+          : (state.slideData?.languages || state.liveData || {});
+        const availableLanguageCodes = Object.keys(sourceLanguages || {});
+        if (availableLanguageCodes.length === 0) {
+          return { ok: false, message: "Current slide content is unavailable." };
+        }
+
+        const activeDisplayLanguage = normalizeDisplayLanguageCode(viewLang) || viewLang;
+        const activeNarrationLanguage = normalizeVoiceLanguageCode(listenLang) || listenLang;
+        const displayContent = getLangContent(sourceLanguages, activeDisplayLanguage);
+        const narrationContent = getLangContent(sourceLanguages, activeNarrationLanguage);
+
+        const languages = availableLanguageCodes.map((code) => {
+          const content = sourceLanguages[code] || {};
+          return {
+            code,
+            text: String(content.text || "").trim(),
+            image_url: content.image_url || null,
+            audio_url: content.audio_url || null,
+          };
+        });
+
+        return {
+          ok: true,
+          message: `Loaded current slide content for slide ${slideId}.`,
+          data: {
+            mode: state.isLiveMode ? "live" : "manual",
+            presentation_id: String(presentationId),
+            slide_id: String(slideId),
+            display_language: activeDisplayLanguage,
+            narration_language: activeNarrationLanguage,
+            display_content: {
+              text: String(displayContent?.text || "").trim(),
+              image_url: displayContent?.image_url || null,
+              audio_url: displayContent?.audio_url || null,
+            },
+            narration_content: {
+              text: String(narrationContent?.text || "").trim(),
+              image_url: narrationContent?.image_url || null,
+              audio_url: narrationContent?.audio_url || null,
+            },
+            available_languages: languages,
+          },
+        };
+      }
+
+      if (name === "jump_to_slide_boundary") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "jump_to_slide_boundary is only available on presentation page." };
+        }
+        const { slideList: latestSlideList } = voiceStateRef.current;
+        if (!Array.isArray(latestSlideList) || latestSlideList.length === 0) {
+          return { ok: false, message: "No slide pages are available for the current topic." };
+        }
+        const boundary = String(args.boundary || "").toLowerCase();
+        if (boundary !== "first" && boundary !== "last") {
+          return { ok: false, message: "boundary must be first or last." };
+        }
+        const target = boundary === "first" ? latestSlideList[0] : latestSlideList[latestSlideList.length - 1];
+        setViewingSlideId(String(target));
+        setIsLiveMode(false);
+        return { ok: true, message: `Moved to ${boundary} slide ${target}.` };
+      }
+
       if (name === "navigate_slide") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "navigate_slide is only available on presentation page." };
+        }
         const { slideList: latestSlideList, viewingSlideId: latestViewingSlideId } = voiceStateRef.current;
         const currentNum = parseInt(latestViewingSlideId, 10);
         if (!Number.isFinite(currentNum) || latestSlideList.length === 0) {
@@ -2428,12 +3129,27 @@ Keep replies short and explicit about the action completed.`,
       }
 
       if (name === "go_to_slide") {
-        const { slideList: latestSlideList } = voiceStateRef.current;
-        const directTarget = Number(args.slide_number ?? args.page_number ?? args.slide ?? args.page);
-        if (!Number.isFinite(directTarget)) {
-          return { ok: false, message: "slide_number is required." };
+        if (mode !== "presentation") {
+          return { ok: false, message: "go_to_slide is only available on presentation page." };
         }
-        const target = Math.trunc(directTarget);
+        const { slideList: latestSlideList } = voiceStateRef.current;
+        if (!Array.isArray(latestSlideList) || latestSlideList.length === 0) {
+          return { ok: false, message: "No slide pages are available for the current topic." };
+        }
+        const rawTarget = args.slide_number ?? args.page_number ?? args.slide ?? args.page ?? args.position;
+        const rawLabel = String(rawTarget ?? "").trim().toLowerCase();
+        let target;
+        if (rawLabel === "first") {
+          target = latestSlideList[0];
+        } else if (rawLabel === "last") {
+          target = latestSlideList[latestSlideList.length - 1];
+        } else {
+          const directTarget = Number(rawTarget);
+          if (!Number.isFinite(directTarget)) {
+            return { ok: false, message: "slide_number is required (or use first/last)." };
+          }
+          target = Math.trunc(directTarget);
+        }
         if (!latestSlideList.includes(target)) {
           return { ok: false, message: `Slide ${target} is not available.` };
         }
@@ -2442,131 +3158,217 @@ Keep replies short and explicit about the action completed.`,
         return { ok: true, message: `Moved to slide ${target}.` };
       }
 
-      if (name === "set_live_sync") {
-        const enabled = parseBooleanArg(args.enabled);
-        if (enabled === null) {
-          return { ok: false, message: "Enabled must be true or false." };
+      if (name === "select_slide") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "select_slide is only available on presentation page." };
         }
-        const { isLiveMode: latestIsLiveMode, livePptId: latestLivePptId, liveSlideId: latestLiveSlideId } = voiceStateRef.current;
-        if (enabled && !latestIsLiveMode) {
-          setViewingPptId(latestLivePptId);
-          setViewingSlideId(latestLiveSlideId);
+        const { slideList: latestSlideList } = voiceStateRef.current;
+        if (!Array.isArray(latestSlideList) || latestSlideList.length === 0) {
+          return { ok: false, message: "No slide pages are available for the current topic." };
+        }
+        const rawTarget = args.slide_number ?? args.page_number ?? args.slide ?? args.page ?? args.position;
+        const rawLabel = String(rawTarget ?? "").trim().toLowerCase();
+        let target;
+        if (rawLabel === "first") {
+          target = latestSlideList[0];
+        } else if (rawLabel === "last") {
+          target = latestSlideList[latestSlideList.length - 1];
+        } else {
+          const directTarget = Number(rawTarget);
+          if (!Number.isFinite(directTarget)) {
+            return { ok: false, message: "slide_number is required (or use first/last)." };
+          }
+          target = Math.trunc(directTarget);
+        }
+        if (!latestSlideList.includes(target)) {
+          return { ok: false, message: `Slide ${target} is not available.` };
+        }
+        setViewingSlideId(String(target));
+        setIsLiveMode(false);
+        return { ok: true, message: `Moved to slide ${target}.` };
+      }
+
+      if (name === "list_slide_languages") {
+        const displayOptions = getDisplayLanguageOptions();
+        return {
+          ok: true,
+          message: "Slide display and narration languages can be changed.",
+          data: {
+            narration_current_language: listenLang,
+            display_current_language: viewLang,
+            narration_available_languages: availableVoiceLanguages.map((code) => ({ code, name: getAudioLangName(code) })),
+            display_available_languages: displayOptions.map((code) => ({ code, name: getTextLangName(code) })),
+          },
+        };
+      }
+
+      if (name === "toggle_live_mode") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "toggle_live_mode is only available on presentation page." };
+        }
+        const targetMode = String(args.mode || "toggle").toLowerCase();
+        if (targetMode === "live" && !isLiveMode) {
+          setViewingPptId(livePptId);
+          setViewingSlideId(liveSlideId);
           setIsLiveMode(true);
-        }
-        if (!enabled && latestIsLiveMode) {
+        } else if (targetMode === "manual" && isLiveMode) {
           setIsLiveMode(false);
+        } else if (targetMode === "toggle") {
+          toggleLiveMode();
         }
-        return { ok: true, message: enabled ? "Live sync enabled." : "Live sync disabled." };
+        const nextMode = targetMode === "toggle" ? !isLiveMode : targetMode === "manual" ? false : true;
+        return { ok: true, message: nextMode ? "Switched to LIVE mode." : "Switched to manual mode." };
       }
 
-      if (name === "set_audio_language") {
-        const code = normalizeVoiceLanguageCode(args.language);
-        const { supportedLangs: latestSupportedLangs } = voiceStateRef.current;
-        if (latestSupportedLangs.length > 0 && !latestSupportedLangs.includes(code)) {
-          return { ok: false, message: "Requested audio language is not available on current slide." };
+      if (name === "playback_control") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "playback_control is only available on presentation page." };
         }
-        if (!code) {
-          return { ok: false, message: "Unsupported audio language." };
+        const action = String(args.action || "play_pause").toLowerCase();
+        if (action === "start") {
+          startNarration({ restart: false });
+          return { ok: true, message: "Started narration." };
         }
-        voiceStateRef.current.listenLang = code;
-        setListenLang(code);
-        return { ok: true, message: `Audio language set to ${getAudioLangName(code)}.` };
-      }
-
-      if (name === "set_display_language") {
-        const code = normalizeVoiceLanguageCode(args.language);
-        const { supportedLangs: latestSupportedLangs } = voiceStateRef.current;
-        if (latestSupportedLangs.length > 0 && !latestSupportedLangs.includes(code)) {
-          return { ok: false, message: "Requested display language is not available on current slide." };
+        if (action === "pause") {
+          pauseNarration();
+          return { ok: true, message: "Paused narration." };
         }
-        if (!code) {
-          return { ok: false, message: "Unsupported display language." };
-        }
-        setViewLang(code);
-        return { ok: true, message: `Display language set to ${getTextLangName(code)}.` };
-      }
-
-      if (name === "narration_control") {
-        const rawAction = String(args.action || "").toLowerCase().trim();
-        const action = rawAction.includes("restart")
-          ? "restart"
-          : (rawAction.includes("resume") || rawAction.includes("play"))
-            ? "resume"
-            : rawAction.includes("pause")
-              ? "pause"
-              : rawAction.includes("stop")
-                ? "stop"
-                : rawAction;
-        if (action === "pause" || action === "stop") {
-          audioRef.current.pause();
-          setIsPlaying(false);
-          setNarrationStatus(action === "stop" ? "Stopped" : "Paused");
-          return { ok: true, message: action === "stop" ? "Narration stopped." : "Narration paused." };
+        if (action === "play_pause") {
+          togglePlay();
+          return { ok: true, message: "Toggled narration playback." };
         }
         if (action === "restart") {
-          const url = resolveAudioUrlFromVoiceState();
-          setAutoplay(true);
-          return await playAudioUrlNow({ audioUrl: url, restart: true });
+          narrateCurrentSlide();
+          return { ok: true, message: "Restarted narration from the current slide." };
         }
-        if (action === "play" || action === "resume") {
-          const url = resolveAudioUrlFromVoiceState();
-          const checkpoint = narrationCheckpointRef.current;
-          const sameUrl = Boolean(checkpoint.url && checkpoint.url === url);
-          const startTime = sameUrl ? checkpoint.time : null;
-          setAutoplay(true);
-          return await playAudioUrlNow({ audioUrl: url, restart: false, startTime });
+        if (action === "stop") {
+          stopNarration();
+          return { ok: true, message: "Stopped narration." };
         }
-        return { ok: false, message: "Unknown narration action." };
+        if (action === "seek") {
+          const seconds = Number(args.seconds);
+          if (!Number.isFinite(seconds) || seconds === 0) {
+            return { ok: false, message: "For seek, provide a non-zero seconds value." };
+          }
+          seekAudio(seconds);
+          return { ok: true, message: `Seeked narration by ${Math.trunc(seconds)} seconds.` };
+        }
+        if (action === "seek_to") {
+          const targetTime = Number(args.position_seconds ?? args.seconds);
+          if (!Number.isFinite(targetTime) || targetTime < 0) {
+            return { ok: false, message: "For seek_to, provide position_seconds >= 0." };
+          }
+          if (!Number.isFinite(audioDuration) || audioDuration <= 0) {
+            return { ok: false, message: "Cannot seek to position because narration duration is unavailable." };
+          }
+          const clamped = Math.min(targetTime, audioDuration);
+          audioRef.current.currentTime = clamped;
+          setAudioCurrentTime(clamped);
+          return { ok: true, message: `Moved narration position to ${Math.round(clamped)} seconds.` };
+        }
+        if (action === "jump_start") {
+          jumpToAudioStart();
+          return { ok: true, message: "Jumped narration to start." };
+        }
+        return { ok: false, message: "Unsupported playback action." };
+      }
+
+      if (name === "set_read_aloud") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "set_read_aloud is only available on presentation page." };
+        }
+        const modeArg = String(args.mode || "").toLowerCase();
+        let nextValue = autoplay;
+        if (modeArg === "toggle") {
+          nextValue = !autoplay;
+        } else if (modeArg === "on") {
+          nextValue = true;
+        } else if (modeArg === "off") {
+          nextValue = false;
+        } else {
+          const parsed = parseBooleanArg(args.enabled);
+          if (parsed === null) {
+            return { ok: false, message: "Provide mode (on/off/toggle) or enabled boolean." };
+          }
+          nextValue = parsed;
+        }
+        setAutoplay(nextValue);
+        return { ok: true, message: `Read aloud is now ${nextValue ? "on" : "off"}.` };
+      }
+
+      if (name === "set_fullscreen_mode") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "set_fullscreen_mode is only available on presentation page." };
+        }
+        const modeArg = String(args.mode || "toggle").toLowerCase();
+        if (modeArg !== "open" && modeArg !== "close" && modeArg !== "toggle") {
+          return { ok: false, message: "mode must be open, close, or toggle." };
+        }
+        const nextValue = modeArg === "toggle" ? !isFullScreen : modeArg === "open";
+        setIsFullScreen(nextValue);
+        return { ok: true, message: nextValue ? "Opened full-screen slide view." : "Closed full-screen slide view." };
+      }
+
+      if (name === "change_display_language") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "change_display_language is only available on presentation page." };
+        }
+        const requestedLanguage = String(args.language || "").trim();
+        if (requestedLanguage) {
+          const normalized = normalizeDisplayLanguageCode(requestedLanguage);
+          if (!normalized) {
+            return { ok: false, message: `Unsupported display language: ${requestedLanguage}` };
+          }
+          setViewLang(normalized);
+          return { ok: true, message: `Display language changed to ${getTextLangName(normalized)}.` };
+        }
+        const direction = String(args.direction || "next").toLowerCase();
+        const step = direction === "previous" ? -1 : 1;
+        const displayOptions = getDisplayLanguageOptions();
+        const currentIndex = displayOptions.indexOf(viewLang);
+        const baseIndex = currentIndex === -1 ? 0 : currentIndex;
+        const nextLanguage = displayOptions[(baseIndex + step + displayOptions.length) % displayOptions.length] || viewLang;
+        setViewLang(nextLanguage);
+        return { ok: true, message: `Display language changed to ${getTextLangName(nextLanguage)}.` };
+      }
+
+      if (name === "change_narration_language") {
+        if (mode !== "presentation") {
+          return { ok: false, message: "Narration language change is only available on presentation page." };
+        }
+        const requestedLanguage = String(args.language || "").trim();
+        if (requestedLanguage) {
+          const normalized = normalizeVoiceLanguageCode(requestedLanguage);
+          if (!normalized) {
+            return { ok: false, message: `Unsupported narration language: ${requestedLanguage}` };
+          }
+          applyMp3LanguageChange(normalized);
+          return { ok: true, message: `Narration language changed to ${getAudioLangName(normalized)}.` };
+        }
+        const direction = String(args.direction || "next").toLowerCase();
+        const step = direction === "previous" ? -1 : 1;
+        const current = normalizeVoiceLanguageCode(listenLang) || "en-US";
+        const nextLanguage = cycleLanguage(current, step);
+        applyMp3LanguageChange(nextLanguage);
+        return { ok: true, message: `Narration language changed to ${getAudioLangName(nextLanguage)}.` };
+      }
+
+      if (name === "list_shortcuts") {
+        return {
+          ok: true,
+          message: mode === "class_selection"
+            ? "Shortcut: M to start/stop voice."
+            : "Shortcuts: Left/Right slide, Space play/pause, L live/manual, R restart narration, S stop narration, A/D seek, Home jump start, Alt+V display language, Alt+A narration language, M voice start/stop, click slide to open full-screen.",
+        };
       }
 
       if (name === "help_commands") {
         return {
           ok: true,
-          message: "Try: next slide, previous slide, go to slide 5, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, next audio language, previous display language, seek forward 10 seconds, seek back 30 seconds, jump narration to start, pause narration, or resume narration.",
+          message: mode === "class_selection"
+            ? "Try: list available courses, open class by class id, list slide languages, or list shortcuts."
+            : "Try: list slide pages, get current slide content, list presentations, get slide range, jump to last slide, set read aloud off, playback control seek_to position 90, set fullscreen mode open, or list shortcuts.",
         };
-      }
-
-      if (name === "cycle_language") {
-        const target = String(args.target || "").toLowerCase();
-        const direction = String(args.direction || "").toLowerCase();
-        const step = direction === "previous" ? -1 : direction === "next" ? 1 : 0;
-        if (!step) {
-          return { ok: false, message: "Direction must be next or previous." };
-        }
-        if (target === "audio") {
-          const nextCode = cycleLanguage(voiceStateRef.current.listenLang || listenLang, step);
-          if (!nextCode) return { ok: false, message: "No audio language available." };
-          setListenLang(nextCode);
-          voiceStateRef.current.listenLang = nextCode;
-          return { ok: true, message: `Audio language switched to ${getAudioLangName(nextCode)}.` };
-        }
-        if (target === "display") {
-          const nextCode = cycleLanguage(viewLang, step);
-          if (!nextCode) return { ok: false, message: "No display language available." };
-          setViewLang(nextCode);
-          return { ok: true, message: `Display language switched to ${getTextLangName(nextCode)}.` };
-        }
-        return { ok: false, message: "Target must be audio or display." };
-      }
-
-      if (name === "seek_narration") {
-        const seconds = Number(args.seconds);
-        if (!Number.isFinite(seconds) || seconds === 0) {
-          return { ok: false, message: "Seconds must be a non-zero number." };
-        }
-        if (!audioRef.current.src) {
-          return { ok: false, message: "Narration is not loaded yet." };
-        }
-        seekAudio(seconds);
-        return { ok: true, message: `Narration moved ${seconds > 0 ? "forward" : "backward"} ${Math.abs(seconds)} seconds.` };
-      }
-
-      if (name === "jump_narration_start") {
-        if (!audioRef.current.src) {
-          return { ok: false, message: "Narration is not loaded yet." };
-        }
-        jumpToAudioStart();
-        return { ok: true, message: "Narration moved to start." };
       }
 
       return { ok: false, message: `Unsupported command: ${name}` };
@@ -2650,7 +3452,8 @@ Keep replies short and explicit about the action completed.`,
               setViewLang((prev) => cycleLanguage(prev, event.shiftKey ? -1 : 1));
           } else if (event.key.toLowerCase() === "a") {
               event.preventDefault();
-              setListenLang((prev) => cycleLanguage(prev, event.shiftKey ? -1 : 1));
+              const nextLanguage = cycleLanguage(normalizeVoiceLanguageCode(listenLang) || "en-US", event.shiftKey ? -1 : 1);
+              applyMp3LanguageChange(nextLanguage);
           }
       };
 
@@ -2673,6 +3476,16 @@ Keep replies short and explicit about the action completed.`,
         studentClasses={studentClasses}
         loadStudentClasses={loadStudentClasses}
         enrollAndOpenClass={enrollAndOpenClass}
+        canUseVoiceChat={Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason)}
+        voiceStatus={voiceStatus}
+        voiceAccessLoading={voiceAccessLoading}
+        isListening={isListening}
+        voiceBusy={voiceBusy}
+        voiceTranscript={voiceTranscript}
+        voiceAnswer={voiceAnswer}
+        startVoiceCapture={startVoiceCapture}
+        stopVoiceCapture={stopVoiceCapture}
+        MicIcon={MicIcon}
       />
     );
   }
@@ -2681,14 +3494,19 @@ Keep replies short and explicit about the action completed.`,
     return (
       <div className="container" style={{ padding: "24px" }}>
         <h2 style={{ marginBottom: "10px" }}>Sign in required</h2>
-        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only enrolled students, class teacher, and admins can open this class.</p>
+        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only public classes, enrolled students, class teacher, and admins can open this class.</p>
         <div className="controls">
           <button type="button" className="account-action-btn" onClick={handleSignIn}>
             <UserIcon />
             <span>Sign in</span>
           </button>
-          <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
-            Back to classes
+          <button
+            type="button"
+            className="account-action-btn"
+            onClick={() => { window.location.href = "/"; }}
+            aria-label="Back to course home page"
+          >
+            Back to course home
           </button>
         </div>
       </div>
@@ -2709,10 +3527,15 @@ Keep replies short and explicit about the action completed.`,
       <div className="container" style={{ padding: "24px" }}>
         <h2 style={{ marginBottom: "10px" }}>Class access denied</h2>
         <p style={{ color: "#b91c1c", marginBottom: "12px" }}>{classAccessDeniedMessage}</p>
-        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only enrolled students, class teacher, and admins can open this class.</p>
+        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only public classes, enrolled students, class teacher, and admins can open this class.</p>
         <div className="controls">
-          <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
-            Back to classes
+          <button
+            type="button"
+            className="account-action-btn"
+            onClick={() => { window.location.href = "/"; }}
+            aria-label="Back to course home page"
+          >
+            Back to course home
           </button>
         </div>
       </div>
@@ -2741,6 +3564,8 @@ Keep replies short and explicit about the action completed.`,
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
   const canUseVoiceChat = Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason);
+  const activeClass = studentClasses.find((row) => String(row.class_id || "") === String(courseId)) || null;
+  const activeCourseLabel = activeClass?.course_title || activeClass?.course_id || "-";
   const backToSlidesHref = searchParams.toString() ? `/?${searchParams.toString()}` : "/";
   const ADMIN_PAGE_SIZE = 20;
   const userQuery = adminUserQuery.trim().toLowerCase();
@@ -2792,8 +3617,22 @@ Keep replies short and explicit about the action completed.`,
         setTeacherCloneCourseId={setTeacherCloneCourseId}
         teacherCloneClassTitle={teacherCloneClassTitle}
         setTeacherCloneClassTitle={setTeacherCloneClassTitle}
+        teacherClassIsPublic={teacherClassIsPublic}
+        setTeacherClassIsPublic={setTeacherClassIsPublic}
+        teacherPackageBucket={teacherPackageBucket}
+        setTeacherPackageBucket={setTeacherPackageBucket}
+        teacherPackagePrefix={teacherPackagePrefix}
+        setTeacherPackagePrefix={setTeacherPackagePrefix}
+        teacherPackageManifestUrl={teacherPackageManifestUrl}
+        setTeacherPackageManifestUrl={setTeacherPackageManifestUrl}
+        teacherUploadFilePaths={teacherUploadFilePaths}
+        setTeacherUploadFilePaths={setTeacherUploadFilePaths}
+        teacherUploadUrls={teacherUploadUrls}
         createTeacherCourse={createTeacherCourse}
         cloneTeacherClass={cloneTeacherClass}
+        linkTeacherCoursePackage={linkTeacherCoursePackage}
+        createClassFromPackage={createClassFromPackage}
+        createTeacherUploadSession={createTeacherUploadSession}
         updateTeacherCourseTitle={updateTeacherCourseTitle}
         loadTeacherWorkspace={loadTeacherWorkspace}
         handleSignOut={handleSignOut}
@@ -2829,6 +3668,15 @@ Keep replies short and explicit about the action completed.`,
               onClick={() => { window.location.href = backToSlidesHref; }}
             >
               Back to Slides
+            </button>
+            <button
+              type="button"
+              className="account-action-btn"
+              onClick={() => { window.location.href = "/"; }}
+              title="Back to class selection"
+              aria-label="Back to class selection page"
+            >
+              Back to class selection
             </button>
             <button
               type="button"
@@ -3170,15 +4018,23 @@ Keep replies short and explicit about the action completed.`,
                     {supportedLangs.map(lang => <option key={lang} value={lang}>{getTextLangName(lang)}</option>)}
                 </select>
             </div>
-            <div className="lang-select" title="Audio Language">
+            <div className="lang-select" title="Narration Language">
                 <span className="lang-select-icon">🔊</span>
-                    <select 
-                        value={listenLang} 
-                        onChange={(e) => setListenLang(e.target.value)}
-                    >
-                        {supportedLangs.map(lang => <option key={lang} value={lang}>{getAudioLangName(lang)}</option>)}
-                    </select>
+                <select
+                    value={normalizeVoiceLanguageCode(listenLang) || "en-US"}
+                    onChange={(e) => applyMp3LanguageChange(e.target.value)}
+                >
+                    {availableVoiceLanguages.map(lang => <option key={lang} value={lang}>{getAudioLangName(lang)}</option>)}
+                </select>
             </div>
+            <button
+              type="button"
+              className="account-action-btn"
+              onClick={() => { window.location.href = "/"; }}
+              aria-label="Back to course home page"
+            >
+              Back to course home
+            </button>
             <button
               type="button"
               className="account-action-btn"
@@ -3189,42 +4045,31 @@ Keep replies short and explicit about the action completed.`,
             </button>
                             </div>
                         </header>      
-      <div className="identity-status">
-        {authStatus}
-      </div>
-      {canUseVoiceChat ? (
-        <div className="voice-assistant-panel">
-          <div className="voice-assistant-top">
-            <span className="voice-assistant-label">Voice Assistant</span>
-            <div className="voice-assistant-actions">
-              <button
-                type="button"
-                className={`voice-action-btn ${isListening || voiceBusy ? "active" : ""}`}
-                onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
-              >
-                <MicIcon />
-                <span>{isListening || voiceBusy ? "Stop" : "Start"}</span>
-              </button>
-            </div>
+      <div className="identity-course-row" aria-label="Current account and course">
+        <div className="identity-course-main">
+          <span>{authStatus}</span>
+          <span><strong>Course:</strong> {activeCourseLabel}</span>
+        </div>
+        <details className="identity-shortcuts">
+          <summary>Shortcuts</summary>
+          <div className="identity-shortcuts-body">
+            <div>Keys: Alt+V/A language · ←/→ slides · L live/manual · Space play/pause · R restart · S stop · A/D seek (Shift=30s) · Home start · Esc close</div>
+            <div>{isListening ? "Voice chat active: player shortcuts are blocked." : "Voice: M start/stop · open class · select presentation · next/previous slide."}</div>
           </div>
-          <div className="voice-assistant-status">{voiceStatus}</div>
-          {voiceTranscript && (
-            <div className="voice-transcript">
-              <strong>You said:</strong> {voiceTranscript}
-            </div>
-          )}
-          {voiceAnswer && (
-            <div className="voice-answer">
-              <strong>Assistant:</strong> {voiceAnswer}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="voice-assistant-inline">
-          <MicIcon />
-          <span>{voiceStatus}</span>
-        </div>
-      )}
+        </details>
+      </div>
+      <VoiceAssistantCard
+        canUseVoiceChat={canUseVoiceChat}
+        voiceStatus={voiceStatus}
+        voiceAccessLoading={voiceAccessLoading}
+        isListening={isListening}
+        voiceBusy={voiceBusy}
+        startVoiceCapture={startVoiceCapture}
+        stopVoiceCapture={stopVoiceCapture}
+        MicIcon={MicIcon}
+        voiceTranscript={voiceTranscript}
+        voiceAnswer={voiceAnswer}
+      />
       <div className="sub-header">
         <div className="nav-controls">
             {/* Presentation Selector */}
@@ -3310,7 +4155,7 @@ Keep replies short and explicit about the action completed.`,
           <div className="narration-controls">
             <button
               className={`narration-btn ${autoplay ? 'active' : ''}`}
-              title="Automatically play new MP3s"
+              title="Automatically play new narration"
               onClick={() => {
                 setAutoplay((prev) => !prev);
               }}
@@ -3354,21 +4199,6 @@ Keep replies short and explicit about the action completed.`,
             <span className="audio-time">{formatTime(audioDuration)}</span>
           </div>
           <div className="compact-meta">
-            <span className="shortcut-hint">
-              Language: Alt+V view · Alt+A audio
-            </span>
-            <span className="shortcut-hint">
-              Navigation: ←/→ slide · L sync/live · Esc close/stop
-            </span>
-            <span className="shortcut-hint">
-              Player: Space play/pause · R restart · A/D seek (Shift=30s) · S stop · Home start
-            </span>
-            <span className="shortcut-hint">
-              Voice chat active: player shortcuts are blocked
-            </span>
-            <span className="shortcut-hint">
-              Voice: M start/stop
-            </span>
             <span className="compact-status-line">Narration: {narrationStatus}</span>
           </div>
         </div>

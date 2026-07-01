@@ -66,6 +66,44 @@ h1 {
     margin: 0 20px 8px;
 }
 
+.identity-course-row {
+    margin: 0 20px 8px;
+    font-size: 0.85rem;
+    color: #4b5563;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.identity-course-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.identity-shortcuts {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: #5f6368;
+}
+
+.identity-shortcuts summary {
+    cursor: pointer;
+    user-select: none;
+}
+
+.identity-shortcuts-body {
+    margin-top: 4px;
+    max-width: min(78vw, 760px);
+    line-height: 1.25;
+}
+
 .voice-assistant-panel {
     margin: 0 20px 10px;
     border: 1px solid #e5e7eb;
@@ -77,9 +115,11 @@ h1 {
 .voice-assistant-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 10px;
     margin-bottom: 4px;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 .voice-assistant-actions {
@@ -120,6 +160,16 @@ h1 {
 .voice-assistant-status {
     font-size: 0.8rem;
     color: #4b5563;
+}
+
+.voice-assistant-status-inline {
+    font-size: 0.8rem;
+    color: #4b5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .voice-transcript,
@@ -281,14 +331,15 @@ select {
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 2px;
+    gap: 1px 6px;
     min-width: 0;
     flex-wrap: wrap;
     flex: 1 1 100%;
+    line-height: 1.15;
 }
 
 .shortcut-hint {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     color: #5f6368;
 }
 

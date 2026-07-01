@@ -1,5 +1,47 @@
 import React from "react";
 
+export const VoiceAssistantCard = ({
+  canUseVoiceChat,
+  voiceStatus,
+  voiceAccessLoading,
+  isListening,
+  voiceBusy,
+  startVoiceCapture,
+  stopVoiceCapture,
+  MicIcon,
+  voiceTranscript = "",
+  voiceAnswer = "",
+}) => (
+  <div className="voice-assistant-panel">
+    <div className="voice-assistant-top">
+      <span className="voice-assistant-label">Voice Assistant</span>
+      <div className="voice-assistant-actions">
+        <button
+          type="button"
+          className={`voice-action-btn ${isListening || voiceBusy ? "active" : ""}`}
+          onClick={isListening || voiceBusy ? stopVoiceCapture : startVoiceCapture}
+          disabled={voiceAccessLoading || !canUseVoiceChat || voiceBusy}
+          aria-label={isListening || voiceBusy ? "Stop voice assistant" : "Start voice assistant"}
+        >
+          <MicIcon />
+          <span>{voiceAccessLoading ? "Checking..." : (isListening || voiceBusy ? "Stop" : "Start")}</span>
+        </button>
+      </div>
+      <span className="voice-assistant-status-inline">{voiceStatus}</span>
+    </div>
+    {voiceTranscript ? (
+      <div className="voice-transcript">
+        <strong>You said:</strong> {voiceTranscript}
+      </div>
+    ) : null}
+    {voiceAnswer ? (
+      <div className="voice-answer">
+        <strong>Assistant:</strong> {voiceAnswer}
+      </div>
+    ) : null}
+  </div>
+);
+
 export const ClassSelectionPage = ({
   currentUser,
   teacherEnabled,
@@ -13,10 +55,20 @@ export const ClassSelectionPage = ({
   studentClasses,
   loadStudentClasses,
   enrollAndOpenClass,
+  canUseVoiceChat,
+  voiceStatus,
+  voiceAccessLoading,
+  isListening,
+  voiceBusy,
+  voiceTranscript,
+  voiceAnswer,
+  startVoiceCapture,
+  stopVoiceCapture,
+  MicIcon,
 }) => (
   <div className="container" style={{ padding: "18px", overflow: "auto" }}>
     <header style={{ padding: 0, borderBottom: "none", marginBottom: "12px" }}>
-      <h1>📚 Select Class</h1>
+      <h1>📚 Course Home</h1>
       <div className="controls">
         {currentUser && teacherEnabled && (
           <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/teacher-courses"; }}>
@@ -35,11 +87,23 @@ export const ClassSelectionPage = ({
       </div>
     </header>
     <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
-    {!currentUser && <div style={{ color: "#4b5563" }}>Sign in to view available classes.</div>}
+    <VoiceAssistantCard
+      canUseVoiceChat={canUseVoiceChat}
+      voiceStatus={voiceStatus}
+      voiceAccessLoading={voiceAccessLoading}
+      isListening={isListening}
+      voiceBusy={voiceBusy}
+      voiceTranscript={voiceTranscript}
+      voiceAnswer={voiceAnswer}
+      startVoiceCapture={startVoiceCapture}
+      stopVoiceCapture={stopVoiceCapture}
+      MicIcon={MicIcon}
+    />
+    {!currentUser && <div style={{ color: "#4b5563" }}>Sign in to view your course.</div>}
     {currentUser && (
       <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-          <strong>Available classes</strong>
+          <strong>Available courses</strong>
           <button
             type="button"
             onClick={() => loadStudentClasses()}
@@ -50,14 +114,13 @@ export const ClassSelectionPage = ({
           </button>
         </div>
         {studentStatus && <div style={{ fontSize: "0.9rem", color: "#4b5563", marginBottom: "8px" }}>{studentStatus}</div>}
-        {studentLoading && <div style={{ color: "#6b7280" }}>Loading classes...</div>}
-        {!studentLoading && studentClasses.length === 0 && <div style={{ color: "#6b7280" }}>No classes available</div>}
+        {studentLoading && <div style={{ color: "#6b7280" }}>Loading your courses...</div>}
+        {!studentLoading && studentClasses.length === 0 && <div style={{ color: "#6b7280" }}>No course available</div>}
         {!studentLoading && studentClasses.length > 0 && (
           <div style={{ maxHeight: "420px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
               <thead>
                 <tr style={{ background: "#fafafa" }}>
-                  <th style={{ textAlign: "left", padding: "8px" }}>Class</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Course</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Teacher</th>
                   <th style={{ textAlign: "left", padding: "8px" }}>Status</th>
@@ -67,10 +130,14 @@ export const ClassSelectionPage = ({
               <tbody>
                 {studentClasses.map((item) => (
                   <tr key={item.class_id}>
-                    <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>{item.title || item.class_id}</td>
-                    <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>{item.course_title || item.course_id || "-"}</td>
+                    <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>
+                      <div>{item.course_title || item.course_id || "-"}</div>
+                      <div style={{ color: "#6b7280", fontSize: "0.8rem" }}>Class ID: {item.class_id}</div>
+                    </td>
                     <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>{item.teacher_email || item.teacher_uid || "-"}</td>
-                    <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>{item.enrolled ? "enrolled" : "not enrolled"}</td>
+                    <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6" }}>
+                      {item.is_public ? "public" : (item.enrolled ? "enrolled" : "not enrolled")}
+                    </td>
                     <td style={{ padding: "8px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
                       <button
                         type="button"
@@ -78,7 +145,7 @@ export const ClassSelectionPage = ({
                         disabled={studentLoading}
                         style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
                       >
-                        Open
+                        Open course
                       </button>
                     </td>
                   </tr>
@@ -107,8 +174,22 @@ export const TeacherWorkspacePage = ({
   setTeacherCloneCourseId,
   teacherCloneClassTitle,
   setTeacherCloneClassTitle,
+  teacherClassIsPublic,
+  setTeacherClassIsPublic,
+  teacherPackageBucket,
+  setTeacherPackageBucket,
+  teacherPackagePrefix,
+  setTeacherPackagePrefix,
+  teacherPackageManifestUrl,
+  setTeacherPackageManifestUrl,
+  teacherUploadFilePaths,
+  setTeacherUploadFilePaths,
+  teacherUploadUrls,
   createTeacherCourse,
   cloneTeacherClass,
+  linkTeacherCoursePackage,
+  createClassFromPackage,
+  createTeacherUploadSession,
   updateTeacherCourseTitle,
   loadTeacherWorkspace,
   handleSignOut,
@@ -159,7 +240,7 @@ export const TeacherWorkspacePage = ({
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
           <label style={{ fontSize: "0.9rem" }}>
-            Clone from course
+            Select course
             <select
               value={teacherCloneCourseId}
               onChange={(e) => setTeacherCloneCourseId(e.target.value)}
@@ -183,8 +264,76 @@ export const TeacherWorkspacePage = ({
               style={{ marginLeft: "6px", width: "180px" }}
             />
           </label>
-          <button type="button" onClick={cloneTeacherClass} disabled={teacherLoading}>Create class</button>
+          <label style={{ fontSize: "0.9rem", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <input
+              type="checkbox"
+              checked={teacherClassIsPublic}
+              onChange={(e) => setTeacherClassIsPublic(e.target.checked)}
+            />
+            Public class
+          </label>
+          <button type="button" onClick={createClassFromPackage} disabled={teacherLoading}>Create class from package</button>
+          <button type="button" onClick={cloneTeacherClass} disabled={teacherLoading}>Legacy clone</button>
           <button type="button" onClick={() => loadTeacherWorkspace()} disabled={teacherLoading}>Refresh</button>
+        </div>
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "10px" }}>
+          <div style={{ fontWeight: 600, marginBottom: "6px" }}>Course package</div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+            <label style={{ fontSize: "0.9rem" }}>
+              Bucket
+              <input
+                type="text"
+                value={teacherPackageBucket}
+                onChange={(e) => setTeacherPackageBucket(e.target.value)}
+                placeholder="course-package-bucket"
+                style={{ marginLeft: "6px", width: "220px" }}
+              />
+            </label>
+            <label style={{ fontSize: "0.9rem" }}>
+              Prefix
+              <input
+                type="text"
+                value={teacherPackagePrefix}
+                onChange={(e) => setTeacherPackagePrefix(e.target.value)}
+                placeholder="course-packages/course_id/v20260701"
+                style={{ marginLeft: "6px", width: "260px" }}
+              />
+            </label>
+            <label style={{ fontSize: "0.9rem" }}>
+              Manifest URL
+              <input
+                type="text"
+                value={teacherPackageManifestUrl}
+                onChange={(e) => setTeacherPackageManifestUrl(e.target.value)}
+                placeholder="https://cdn.example.com/course/manifest.json"
+                style={{ marginLeft: "6px", width: "320px" }}
+              />
+            </label>
+            <button type="button" onClick={linkTeacherCoursePackage} disabled={teacherLoading}>Link & validate package</button>
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>
+            <label style={{ fontSize: "0.9rem" }}>
+              Upload file paths (one per line)
+              <textarea
+                value={teacherUploadFilePaths}
+                onChange={(e) => setTeacherUploadFilePaths(e.target.value)}
+                placeholder={"manifest.json\nassets/en/slide_1.png\naudio/en/slide_1.audio"}
+                rows={4}
+                style={{ marginLeft: "6px", width: "300px", resize: "vertical" }}
+              />
+            </label>
+            <button type="button" onClick={createTeacherUploadSession} disabled={teacherLoading}>Create upload session</button>
+          </div>
+          {Array.isArray(teacherUploadUrls) && teacherUploadUrls.length > 0 && (
+            <div style={{ marginTop: "8px", maxHeight: "140px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px", padding: "6px", fontSize: "0.8rem" }}>
+              {teacherUploadUrls.map((item) => (
+                <div key={item.object_name} style={{ marginBottom: "4px" }}>
+                  <strong>{item.path}</strong>
+                  <div style={{ wordBreak: "break-all" }}>{item.upload_url}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         {teacherStatus && <div style={{ color: "#4b5563", marginBottom: "10px" }}>{teacherStatus}</div>}
         <div style={{ fontWeight: 600, marginBottom: "6px" }}>Courses</div>
@@ -194,6 +343,7 @@ export const TeacherWorkspacePage = ({
               <tr style={{ background: "#fafafa" }}>
                 <th style={{ textAlign: "left", padding: "6px" }}>Course</th>
                 <th style={{ textAlign: "left", padding: "6px" }}>Languages</th>
+                <th style={{ textAlign: "left", padding: "6px" }}>Package</th>
                 <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
               </tr>
             </thead>
@@ -202,14 +352,17 @@ export const TeacherWorkspacePage = ({
                 <tr key={course.course_id}>
                   <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{course.title || course.course_id}</td>
                   <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{(course.languages || []).join(", ")}</td>
+                  <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>
+                    {course.package_manifest_url || "-"}
+                  </td>
                   <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
                     <button type="button" onClick={() => updateTeacherCourseTitle(course)} disabled={teacherLoading}>Rename</button>
                   </td>
                 </tr>
               ))}
-              {teacherCourses.length === 0 && (
-                <tr><td colSpan={3} style={{ padding: "8px", color: "#6b7280" }}>No courses</td></tr>
-              )}
+            {teacherCourses.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: "8px", color: "#6b7280" }}>No courses</td></tr>
+            )}
             </tbody>
           </table>
         </div>
