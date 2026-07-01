@@ -10,6 +10,7 @@ The infrastructure code is located in `backend/cdktf/`.
 - **Stack**: `LangBridgeApiStack`
 - **Resources**:
     - **Cloud Functions (Gen 2)**: Python 3.11 runtimes.
+    - **Cloud Run**: `voice-live-proxy` WebSocket bridge for Gemini Live.
     - **API Gateway**: Routes requests to functions.
     - **Firestore**: NoSQL database for state and cache.
     - **Cloud Storage**: Stores function source code.
@@ -116,6 +117,21 @@ sequenceDiagram
 - **Purpose**: Converts selected welcome/presentation text to speech (TTS) and returns `voiceUrl`.
 - **Storage**: Uses the configured `SPEECH_FILE_BUCKET` and reuses cached MP3 files by content hash.
 
+### 7. Voice Access (`voice-chat-access`)
+- **Path**: `/api/voice-chat-access`
+- **Method**: GET
+- **Purpose**: Verifies signed-in user access for voice chat (`voice_chat_users`).
+
+### 8. Voice Admin (`voice-chat-admin`)
+- **Path**: `/api/voice-chat-admin`
+- **Method**: GET/POST
+- **Purpose**: Voice usage dashboard and limit controls.
+
+### 9. Voice Live Session Lease (`voice-live-session`)
+- **Path**: `/api/voice-live-session`
+- **Method**: POST
+- **Purpose**: Lease lifecycle (`open`, `heartbeat`, `close`) for Gemini Live sessions.
+
 ## Request Authentication
 
 Runtime auth behavior is split between API Gateway and function-level checks:
@@ -131,10 +147,32 @@ Runtime auth behavior is split between API Gateway and function-level checks:
 flowchart LR
     A[Incoming request] --> B{Endpoint is /api/config?}
     B -->|Yes| C[API Gateway API key check]
-    B -->|No| D[Function header signature check<br/>X-Timestamp + X-Key + X-Sign]
-    C --> E[Function logic]
-    D --> E
-    E --> F[Firestore/Storage operations]
+    B -->|No| D{Voice endpoint?}
+    D -->|Yes| E[Firebase ID token + allowlist/lease checks]
+    D -->|No| F[Function header signature check<br/>X-Timestamp + X-Key + X-Sign]
+    C --> G[Function logic]
+    E --> G
+    F --> G
+    G --> H[Firestore/Storage operations]
+```
+
+## Voice Live proxy flow
+
+```mermaid
+sequenceDiagram
+    participant Web as web-student
+    participant Lease as /api/voice-live-session
+    participant Proxy as voice-live-proxy (Cloud Run)
+    participant Gemini as Gemini Live API
+
+    Web->>Lease: POST open (Bearer token)
+    Lease-->>Web: session_id + expiry
+    Web->>Proxy: WS auth(id_token, lease_session_id)
+    Proxy->>Lease: validate active lease + access
+    Proxy->>Gemini: open upstream WS
+    Gemini-->>Web: audio and tool calls (proxied)
+    Web->>Gemini: tool_response (proxied)
+    Web->>Lease: heartbeat/close
 ```
 
 ## Data Model (Firestore)

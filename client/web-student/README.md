@@ -24,9 +24,12 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 ### 🎤 Voice Chat (Login Required)
 *   **Optional Sign-In**: The web app still works without login for normal slide viewing.
 *   **Access Control**: Signed-in users must be explicitly granted in `voice_chat_users`.
-*   **Gemini Live API**: Uses Firebase AI Logic Live session for realtime audio conversation.
-*   **Client-side Tool Calling**: Uses Firebase Live `functionCallingHandler` in the web client (no extra backend voice-command function).
-*   **Slide-Aware Context**: Active slide context is sent to the live session and updated when pages change.
+*   **Gemini Live Proxy Policy**: Direct browser calls to Gemini Live are disabled. Voice chat must use a backend proxy path.
+*   **Current Status**: Voice Start uses a Cloud Run WebSocket proxy to Gemini Live. Browser speech recognition sends text turns through the proxy, Gemini audio replies stream back, and tool-calling commands are executed in the web client.
+*   **Slide-Aware Context**: Every user turn is enriched with the active course/presentation/slide/language and current slide text.
+*   **Strict Auth Gate**: WebSocket session is allowed only after Firebase ID token + voice grant + active lease validation.
+*   **No Fallback**: If proxy/auth/context is invalid, the session stops immediately. No direct browser Gemini path and no fallback model path.
+*   **Server Lease Enforcement**: Live session start/heartbeat/close must pass backend lease checks (`/api/voice-live-session`) with expiry enforcement.
 *   **Admin Controls**: Admin users can view voice-chat usage and tune per-minute/per-day limits in-app.
 *   **iOS Chrome Limitation**: Voice chat is intentionally blocked on iPad/iPhone Chrome (`CriOS`). Use Safari on iOS devices.
 
@@ -53,19 +56,17 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 
 ```mermaid
 flowchart TD
-    A[User action] --> B{Voice chat active/connecting?}
-    B -- Yes --> C[Block player shortcuts and controls]
-    C --> D[Show 'Narration paused during voice chat']
-    B -- No --> E{Action type}
-
-    E -- Restart R --> F[Use activeAudioUrl from listenLang]
-    E -- Play Space --> G[Play/Pause current MP3]
-    E -- A/D, Shift+A/D, Home --> H[Seek or jump in current MP3]
-    E -- Start Voice Chat --> I[Stop MP3 and set Read aloud Off]
-    I --> J[Connect Gemini Live session]
-    J --> K[Voice conversation]
-    K --> L[Stop Voice Chat]
-    L --> M[Do not auto-resume MP3]
+    A[User clicks Start Voice] --> B[GET /api/voice-chat-access]
+    B --> C[POST /api/voice-live-session open]
+    C --> D[Open WebSocket to Cloud Run voice-live-proxy]
+    D --> E[Send auth: id_token + lease_session_id]
+    E --> F{proxy_ready + setupComplete?}
+    F -- No --> G[Fail fast and stop voice session]
+    F -- Yes --> H[Start browser speech recognition]
+    H --> I[Send enriched turn with slide context]
+    I --> J[Gemini Live response audio + tool calls]
+    J --> K[Client executes tools + returns tool_response]
+    K --> L[Continue with heartbeat]
 ```
 
 Admin users can be managed from backend with:
@@ -123,6 +124,9 @@ For voice chat, the env also needs:
 ```bash
 VITE_API_BASE_URL=https://<api-gateway-hostname>
 VITE_FIREBASE_APPCHECK_SITE_KEY=<recaptcha-enterprise-site-key>
+VITE_VOICE_LIVE_PROXY_WS_URL=wss://<voice-live-proxy-host>
+VITE_GCP_PROJECT_ID=<backend-project-id>
+VITE_VOICE_LIVE_MODEL_LOCATION=us-central1
 ```
 
 ### 3. Run Locally

@@ -292,6 +292,27 @@ class LangBridgeApiStack extends TerraformStack {
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
+    const voiceChatFunction = await CloudFunctionConstruct.create(this, "voiceChatFunction", {
+      functionName: "voice-chat",
+      runtime: "python311",
+      entryPoint: "voice_chat",
+      timeout: 60,
+      availableMemory: "512Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "GOOGLE_CLOUD_LOCATION": "global",
+        "SPEECH_FILE_BUCKET": speechFileBucket.name,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "CLIENT_FIRESTORE_PROJECT_ID": clientProjectId,
+        "CLIENT_FIRESTORE_DATABASE_ID": "(default)",
+        "VOICE_CHAT_REQUESTS_PER_MINUTE": "10",
+        "VOICE_CHAT_REQUESTS_PER_DAY": "200",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
     const voiceChatAdminFunction = await CloudFunctionConstruct.create(this, "voiceChatAdminFunction", {
       functionName: "voice-chat-admin",
       runtime: "python311",
@@ -325,6 +346,23 @@ class LangBridgeApiStack extends TerraformStack {
       },
       additionalDependencies: [artifactRegistryIamMember],
     });
+    const voiceLiveSessionFunction = await CloudFunctionConstruct.create(this, "voiceLiveSessionFunction", {
+      functionName: "voice-live-session",
+      runtime: "python311",
+      entryPoint: "voice_live_session",
+      timeout: 30,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_LIVE_MAX_SESSION_SECONDS": "3600",
+        "VOICE_LIVE_HEARTBEAT_SECONDS": "30",
+      },
+      additionalDependencies: [artifactRegistryIamMember],
+    });
 
     const apigatewayConstruct = await ApigatewayConstruct.create(this, "api-gateway", {
       api: "langbridgeapi",
@@ -337,8 +375,10 @@ class LangBridgeApiStack extends TerraformStack {
         "GOODBYE": goodbyeFunction.cloudFunction.url,
         "RECQUESTIONS": recquestionsFunction.cloudFunction.url,
         "CONFIG": configFunction.cloudFunction.url,
+        "VOICE_CHAT": voiceChatFunction.cloudFunction.url,
         "VOICE_CHAT_ADMIN": voiceChatAdminFunction.cloudFunction.url,
-        "VOICE_CHAT_ACCESS": voiceChatAccessFunction.cloudFunction.url
+        "VOICE_CHAT_ACCESS": voiceChatAccessFunction.cloudFunction.url,
+        "VOICE_LIVE_SESSION": voiceLiveSessionFunction.cloudFunction.url
       },
       servicesAccount: talkStreamFunction.serviceAccount,
       dependsOn: [timeSleep],

@@ -28,13 +28,15 @@ flowchart TD
     A[Run ./deploy.sh] --> B[Load backend/cdktf/.env]
     B --> C[cdktn deploy]
     C --> D[Provision GCP resources<br/>Functions, Gateway, Firestore, Storage, IAM]
-    C --> E[Deploy web client to Firebase Hosting]
-    D --> F[Generate cdktn outputs]
-    F --> G[Sync local configs]
-    G --> H[backend/admin_tools/config.py]
-    G --> I[backend/presentation-preloader/config.py]
-    G --> J[backend/tests/.env.test]
-    G --> K[client/web-student/.env]
+    D --> E[Generate cdktn outputs]
+    E --> F[Sync local configs]
+    F --> G[Deploy Cloud Run voice-live-proxy script]
+    G --> H[Inject VITE_VOICE_LIVE_PROXY_WS_URL into client env]
+    H --> I[Build and deploy web client to Firebase Hosting]
+    F --> J[backend/admin_tools/config.py]
+    F --> K[backend/presentation-preloader/config.py]
+    F --> L[backend/tests/.env.test]
+    F --> M[client/web-student/.env]
 ```
 
 ## Prerequisites
@@ -86,7 +88,7 @@ The system uses an environment file in `backend/cdktf/` as source of truth (for 
 
 Current deployment should be treated as a 3-phase workflow.
 
-### Phase 1: Provision infra + web hosting
+### Phase 1: Provision infra + proxy + web hosting
 
 Run from repo root:
 
@@ -94,7 +96,7 @@ Run from repo root:
 ./deploy.sh --env-file backend/cdktf/.env.dev
 ```
 
-This provisions backend/client projects, API Gateway, Cloud Functions, storage buckets, and deploys the web app to Firebase Hosting.
+This provisions backend/client projects, API Gateway, Cloud Functions, storage buckets, deploys `voice-live-proxy` (Cloud Run), and deploys the web app to Firebase Hosting.
 
 ### Phase 2: Initialize client auth
 
@@ -135,6 +137,7 @@ After all 3 phases, verify:
 1.  **Web app is live**: open hosting URL (dev example: `https://langbridge-presenter-d2-client.web.app/?courseId=showcase`)
 2.  **Gateway is reachable**: check API endpoints from your network
 3.  **Seed data exists**: `presentation_broadcast/showcase` and media URLs are populated
+4.  **Voice proxy is reachable**: `wss://<voice-live-proxy-host>` from `client/web-student/.env`
 
 Optionally run integration tests:
     ```bash
@@ -164,13 +167,13 @@ Optionally run integration tests:
 *   Try a clean network (hotspot/VPN) or allowlist `*.gateway.dev` in your network security policy.
 
 ### Live API handshake error (`setupComplete` missing / `AI/response-error`)
-*   If voice chat shows: `Server connection handshake failed... setupComplete message`, Firebase AI Logic is not fully enabled for the **client project** yet.
-*   In Firebase Console (client project), open **Build → AI Logic** and complete the enable/setup flow.
-*   Also ensure API is enabled:
+*   For proxy-based voice flow, check `voice-live-proxy` Cloud Run logs first.
+*   Confirm `VITE_VOICE_LIVE_PROXY_WS_URL` and `VITE_GCP_PROJECT_ID` are present in `client/web-student/.env`.
+*   Confirm user is granted in `voice_chat_users` and the lease endpoint (`/api/voice-live-session`) is healthy.
+*   If needed, redeploy proxy:
     ```bash
-    gcloud services enable firebasevertexai.googleapis.com --project <client-project-id>
+    PROJECTID=<backend-project-id> REGION=us-east1 bash backend/deploy_voice_proxy.sh
     ```
-*   Then hard refresh the web app and retry voice chat.
 
 ### Voice chat not available on iPad/iPhone Chrome
 *   Current web client intentionally blocks voice chat on iOS Chrome (`CriOS`) due iOS WebKit limitations for the Live audio flow.

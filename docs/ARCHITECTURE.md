@@ -35,7 +35,8 @@ graph TD
     end
 
     subgraph "AI Services"
-        CF -->|Inference| Gemini[Gemini 1.5 Flash]
+        CF -->|Inference| Gemini[Gemini models]
+        Proxy[Cloud Run voice-live-proxy] -->|Bidi WS| GeminiLive[Gemini Live native audio]
     end
 ```
 
@@ -59,7 +60,7 @@ flowchart LR
 - **API**: Google API Gateway for routing and security (API Keys).
 - **Database**: Firestore for storing configuration, session state, and cached messages.
 - **Storage**: Cloud Storage for artifacts.
-- **AI**: Integration with Gemini 1.5 Flash for text generation.
+- **AI**: Integration with Gemini models for text generation and Gemini Live native-audio streaming (via proxy).
 
 ### 2. Clients
 - **VBA Client (PowerPoint)**: 
@@ -75,6 +76,30 @@ flowchart LR
 - **Web Student Client**:
     - Subscribes to live Firestore pointers for the current slide.
     - Provides a slide narration mode that plays the pre-generated MP3 narration for the current slide.
+    - Provides a proxy-only voice assistant path with strict auth and lease validation.
+
+```mermaid
+sequenceDiagram
+    participant Student as Web Student Client
+    participant Access as /api/voice-chat-access
+    participant Lease as /api/voice-live-session
+    participant Proxy as Cloud Run voice-live-proxy
+    participant Gemini as Gemini Live
+    participant UI as Client tool handlers
+
+    Student->>Access: GET (Bearer Firebase ID token)
+    Access-->>Student: granted true/false
+    Student->>Lease: POST open
+    Lease-->>Student: session_id + expires_at
+    Student->>Proxy: WS auth(id_token, lease_session_id)
+    Proxy->>Lease: validate lease + user grant
+    Proxy->>Gemini: open upstream WS
+    Student->>Gemini: send user turn with slide context (via proxy)
+    Gemini-->>Student: audio + tool calls (via proxy)
+    Student->>UI: execute tool calls (navigate/language/narration/context lookups)
+    Student->>Gemini: tool_response (via proxy)
+    Student->>Lease: heartbeat / close
+```
 
 ```mermaid
 sequenceDiagram
@@ -147,4 +172,6 @@ The system supports multiple AI presenters that can share presentation context:
 - **Request Authentication**:
   - Talk/welcome/goodbye/recquestions/speech endpoints validate signed headers (`X-Timestamp`, `X-Key`, `X-Sign`).
   - Config updates are protected at API Gateway using API key enforcement.
+  - Voice Live path requires Firebase auth + `voice_chat_users` grant + active lease on every session.
+  - Direct browser-to-Gemini Live is disabled; all live voice traffic must pass Cloud Run proxy.
 - **Firestore Rules**: Data access is controlled via security rules.

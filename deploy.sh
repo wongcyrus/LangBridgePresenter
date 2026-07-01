@@ -78,9 +78,31 @@ else
     echo "Warning: bootstrap_client_auth.py not found at $BOOTSTRAP_AUTH_SCRIPT"
 fi
 
+echo "Deploying voice live proxy (Cloud Run)..."
+VOICE_PROXY_DEPLOY_SCRIPT="$SCRIPT_DIR/backend/deploy_voice_proxy.sh"
+if [ -f "$VOICE_PROXY_DEPLOY_SCRIPT" ]; then
+    VOICE_PROXY_URL="$(bash "$VOICE_PROXY_DEPLOY_SCRIPT" | tail -n 1)"
+    if [ -z "$VOICE_PROXY_URL" ]; then
+        echo "Error: voice proxy deploy did not return a URL"
+        exit 1
+    fi
+    VOICE_PROXY_WS_URL="${VOICE_PROXY_URL/https:/wss:}"
+    CLIENT_ENV_FILE="$SCRIPT_DIR/client/web-student/.env"
+    if [ -f "$CLIENT_ENV_FILE" ]; then
+        grep -v '^VITE_VOICE_LIVE_PROXY_WS_URL=' "$CLIENT_ENV_FILE" > "$CLIENT_ENV_FILE.tmp" || true
+        mv "$CLIENT_ENV_FILE.tmp" "$CLIENT_ENV_FILE"
+        echo "VITE_VOICE_LIVE_PROXY_WS_URL=$VOICE_PROXY_WS_URL" >> "$CLIENT_ENV_FILE"
+        grep -v '^VITE_GCP_PROJECT_ID=' "$CLIENT_ENV_FILE" > "$CLIENT_ENV_FILE.tmp" || true
+        mv "$CLIENT_ENV_FILE.tmp" "$CLIENT_ENV_FILE"
+        echo "VITE_GCP_PROJECT_ID=$PROJECTID" >> "$CLIENT_ENV_FILE"
+    fi
+else
+    echo "Warning: voice proxy deploy script not found at $VOICE_PROXY_DEPLOY_SCRIPT"
+fi
+
 echo "
 --- Deploying Web Client Hosting ---"
-CLIENT_PROJECT_ID=$(jq -r '.cdktf["client-project-id"] // empty' "$OUTPUT_FILE")
+CLIENT_PROJECT_ID=$(jq -r '.cdktf["client-project-id"] // .cdktf["cdktf-langbridge-presenter-d2"]["client-project-id"] // .cdktf["cdktf-langbridge-presenter-dev"]["client-project-id"] // empty' "$OUTPUT_FILE")
 if [ -z "$CLIENT_PROJECT_ID" ]; then
     echo "Error: client-project-id not found in $OUTPUT_FILE"
     exit 1

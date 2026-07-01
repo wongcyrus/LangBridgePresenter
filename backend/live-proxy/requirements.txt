@@ -1,0 +1,5 @@
+websockets==12.*
+firebase-admin==6.*
+google-auth==2.*
+google-cloud-firestore==2.*
+certifi==2025.*

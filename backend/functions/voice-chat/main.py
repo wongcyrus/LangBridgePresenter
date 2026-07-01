@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -59,6 +60,10 @@ def _canonical_language_code(language_code: str) -> str:
 
 
 def _extract_bearer_token(request: Request) -> str:
+    forwarded_auth = request.headers.get("X-Forwarded-Authorization", "")
+    if forwarded_auth.startswith("Bearer "):
+        return forwarded_auth.split(" ", 1)[1].strip()
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return ""
@@ -70,6 +75,131 @@ def _verify_firebase_user(request: Request):
     if not token:
         raise PermissionError("Missing bearer token")
     return firebase_auth.verify_id_token(token)
+
+
+def _has_voice_access(decoded_token: dict, db: firestore.Client) -> bool:
+    uid = decoded_token.get("uid")
+    email = (decoded_token.get("email") or "").strip().lower()
+
+    if uid:
+        snap = db.collection("voice_chat_users").document(f"uid:{uid}").get()
+        if snap.exists and (snap.to_dict() or {}).get("active") is True:
+            return True
+    if email:
+        snap = db.collection("voice_chat_users").document(f"email:{email}").get()
+        if snap.exists and (snap.to_dict() or {}).get("active") is True:
+            return True
+    return False
+
+
+def _parse_iso8601(ts: str) -> datetime:
+    normalized = (ts or "").replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized).astimezone(timezone.utc)
+
+
+def _validate_live_lease(db: firestore.Client, uid: str, lease_session_id: str):
+    lease_ref = db.collection("voice_live_sessions").document(uid)
+    lease_snap = lease_ref.get()
+    lease = lease_snap.to_dict() if lease_snap.exists else {}
+    if not lease or lease.get("active") is not True:
+        raise PermissionError("No active voice live lease")
+    if not lease_session_id or lease_session_id != str(lease.get("session_id") or ""):
+        raise PermissionError("Invalid voice live lease")
+    expires_at = lease.get("expires_at")
+    if not expires_at:
+        raise PermissionError("Voice live lease expired")
+    if datetime.now(timezone.utc) >= _parse_iso8601(expires_at):
+        raise PermissionError("Voice live lease expired")
+    return lease
+
+
+def _extract_voice_commands(question: str):
+    text = re.sub(r"\s+", " ", (question or "").strip().lower())
+    if not text:
+        return []
+
+    commands = []
+
+    if any(phrase in text for phrase in ["next slide", "go to next slide", "slide forward"]):
+        commands.append({"name": "navigate_slide", "args": {"direction": "next"}})
+    elif any(phrase in text for phrase in ["previous slide", "prev slide", "go back slide", "last slide"]):
+        commands.append({"name": "navigate_slide", "args": {"direction": "previous"}})
+
+    if any(phrase in text for phrase in ["enable live sync", "turn on live sync", "follow live"]):
+        commands.append({"name": "set_live_sync", "args": {"enabled": True}})
+    elif any(phrase in text for phrase in ["disable live sync", "turn off live sync", "stop live sync"]):
+        commands.append({"name": "set_live_sync", "args": {"enabled": False}})
+
+    lang_match = re.search(r"set\s+(audio|display)\s+language\s+to\s+([a-zA-Z\-\s]+)", text)
+    if lang_match:
+        target, language = lang_match.groups()
+        commands.append(
+            {
+                "name": "set_audio_language" if target == "audio" else "set_display_language",
+                "args": {"language": language.strip()},
+            }
+        )
+
+    if "next audio language" in text:
+        commands.append({"name": "cycle_language", "args": {"target": "audio", "direction": "next"}})
+    elif "previous audio language" in text:
+        commands.append({"name": "cycle_language", "args": {"target": "audio", "direction": "previous"}})
+
+    if "next display language" in text:
+        commands.append({"name": "cycle_language", "args": {"target": "display", "direction": "next"}})
+    elif "previous display language" in text:
+        commands.append({"name": "cycle_language", "args": {"target": "display", "direction": "previous"}})
+
+    if "restart narration" in text:
+        commands.append({"name": "narration_control", "args": {"action": "restart"}})
+    elif any(phrase in text for phrase in ["pause narration", "stop narration"]):
+        commands.append({"name": "narration_control", "args": {"action": "pause"}})
+    elif any(phrase in text for phrase in ["resume narration", "play narration"]):
+        commands.append({"name": "narration_control", "args": {"action": "resume"}})
+
+    seek_match = re.search(r"(forward|back|backward|rewind)\s+(\d{1,3})\s*(second|seconds|sec|s)\b", text)
+    if seek_match:
+        direction, amount, _unit = seek_match.groups()
+        seconds = int(amount)
+        if direction in {"back", "backward", "rewind"}:
+            seconds = -seconds
+        commands.append({"name": "seek_narration", "args": {"seconds": seconds}})
+
+    if any(phrase in text for phrase in ["jump narration to start", "narration to start", "start narration over"]):
+        commands.append({"name": "jump_narration_start", "args": {}})
+
+    if any(phrase in text for phrase in ["what can i say", "help commands", "voice help"]):
+        commands.append({"name": "help_commands", "args": {}})
+
+    deduped = []
+    seen = set()
+    for command in commands:
+        key = json.dumps(command, sort_keys=True, ensure_ascii=False)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(command)
+    return deduped
+
+
+def _build_command_reply(commands: list[dict]) -> str:
+    if not commands:
+        return ""
+    first = commands[0]
+    name = first.get("name")
+    if name == "navigate_slide":
+        direction = first.get("args", {}).get("direction", "next")
+        return f"Okay, moving to the {direction} slide."
+    if name == "set_live_sync":
+        enabled = first.get("args", {}).get("enabled")
+        return "Okay, live sync updated."
+    if name in {"set_audio_language", "set_display_language"}:
+        return "Okay, updating language now."
+    if name in {"cycle_language", "narration_control", "seek_narration", "jump_narration_start"}:
+        return "Okay, done."
+    if name == "help_commands":
+        return "You can say next slide, previous slide, enable live sync, set audio language, or pause narration."
+    return "Okay."
 
 
 def _enforce_usage_limit(db: firestore.Client, uid: str):
@@ -254,14 +384,32 @@ def voice_chat(request: Request):
     if not question:
         return (json.dumps({"error": "question is required"}), 400, headers)
 
-    course_id = payload.get("courseId", "showcase")
-    presentation_id = payload.get("presentationId")
-    slide_id = payload.get("slideId")
-    language_code = payload.get("languageCode", "en-US")
-    stream_mode = bool(payload.get("stream"))
+    lease_session_id = str(
+        payload.get("lease_session_id") or payload.get("leaseSessionId") or payload.get("session_id") or ""
+    ).strip()
+    if not lease_session_id:
+        return (json.dumps({"error": "lease_session_id is required"}), 400, headers)
+
+    db = firestore.Client(database="langbridge")
+    if not _has_voice_access(decoded, db):
+        return (json.dumps({"error": "Voice chat access requires admin grant"}), 403, headers)
 
     try:
-        db = firestore.Client(database="langbridge")
+        lease = _validate_live_lease(db, uid, lease_session_id)
+    except PermissionError as e:
+        return (json.dumps({"error": str(e)}), 403, headers)
+    except Exception:
+        logger.exception("Lease validation failed")
+        return (json.dumps({"error": "Lease validation failed"}), 500, headers)
+
+    course_id = payload.get("courseId") or lease.get("course_id") or "showcase"
+    presentation_id = payload.get("presentationId") or lease.get("presentation_id")
+    slide_id = payload.get("slideId") or lease.get("slide_id")
+    language_code = payload.get("languageCode", "en-US")
+    stream_mode = bool(payload.get("stream"))
+    commands = _extract_voice_commands(question)
+
+    try:
         usage = _enforce_usage_limit(db, uid)
     except RuntimeError as e:
         msg = str(e)
@@ -271,18 +419,21 @@ def voice_chat(request: Request):
         return (json.dumps({"error": "Usage validation failed"}), 500, headers)
 
     try:
-        client_project_id = os.environ.get("CLIENT_FIRESTORE_PROJECT_ID")
-        if not client_project_id:
-            raise RuntimeError("CLIENT_FIRESTORE_PROJECT_ID env var missing")
+        if not commands:
+            client_project_id = os.environ.get("CLIENT_FIRESTORE_PROJECT_ID")
+            if not client_project_id:
+                raise RuntimeError("CLIENT_FIRESTORE_PROJECT_ID env var missing")
 
-        client_db = firestore.Client(
-            project=client_project_id,
-            database=os.environ.get("CLIENT_FIRESTORE_DATABASE_ID", "(default)"),
-        )
-        slide_data = _fetch_slide_context(client_db, course_id, presentation_id, slide_id)
-        prompt = _build_prompt(question, language_code, slide_data)
+            client_db = firestore.Client(
+                project=client_project_id,
+                database=os.environ.get("CLIENT_FIRESTORE_DATABASE_ID", "(default)"),
+            )
+            slide_data = _fetch_slide_context(client_db, course_id, presentation_id, slide_id)
+            prompt = _build_prompt(question, language_code, slide_data)
+        else:
+            prompt = ""
 
-        if stream_mode:
+        if stream_mode and not commands:
             headers["Content-Type"] = "text/event-stream"
             headers["Cache-Control"] = "no-cache"
             headers["Connection"] = "keep-alive"
@@ -309,12 +460,14 @@ def voice_chat(request: Request):
                         "question": question,
                         "answer": answer,
                         "audioUrl": audio_url,
+                        "commands": [],
                         "courseId": course_id,
                         "presentationId": presentation_id,
                         "slideId": str(slide_id),
                         "languageCode": _canonical_language_code(language_code),
                         "usage": usage,
                         "uid": uid,
+                        "lease_session_id": lease_session_id,
                     })
                 except GeneratorExit:
                     logger.info("voice_chat stream closed by client")
@@ -324,7 +477,7 @@ def voice_chat(request: Request):
 
             return Response(generate(), status=200, headers=headers)
 
-        answer = _generate_answer(prompt)
+        answer = _build_command_reply(commands) if commands else _generate_answer(prompt)
         audio_url = _synthesize_answer_audio(answer, language_code, course_id)
     except Exception as e:
         logger.exception("voice_chat failed")
@@ -334,11 +487,13 @@ def voice_chat(request: Request):
         "question": question,
         "answer": answer,
         "audioUrl": audio_url,
+        "commands": commands,
         "courseId": course_id,
         "presentationId": presentation_id,
         "slideId": str(slide_id),
         "languageCode": _canonical_language_code(language_code),
         "usage": usage,
         "uid": uid,
+        "lease_session_id": lease_session_id,
     }
     return (json.dumps(response, ensure_ascii=False), 200, headers)

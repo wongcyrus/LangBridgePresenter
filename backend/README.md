@@ -12,8 +12,13 @@ functions/
 ├── recquestions/    # Recommended questions endpoint
 ├── speech/          # TTS endpoint
 ├── config/          # Config + presentation broadcast endpoint
+├── voice-chat/      # Backend voice assistant text/audio + command fallback
 ├── voice-chat-access/# Voice chat access check for signed-in users
-└── voice-chat-admin/# Admin usage dashboard + limit controls API
+├── voice-chat-admin/# Admin usage dashboard + limit controls API
+└── voice-live-session/# Open/heartbeat/close lease API for Live voice sessions
+
+live-proxy/
+└── server.py         # Cloud Run WebSocket proxy to Gemini Live (auth + lease enforced)
 
 cdktf/              # Infrastructure as Code
 ├── main.ts         # Main deployment stack
@@ -65,13 +70,47 @@ Then complete:
 - `POST /api/recquestions` - Recommended questions
 - `POST /api/speech` - Text-to-speech and voice URL
 - `POST /api/config` - Update Firestore config and live presentation broadcast
+- `POST /api/voice-chat` - Backend voice assistant request (speech transcript -> answer/audio + commands)
 - `GET /api/voice-chat-access` - Check if signed-in user is granted voice chat access
 - `GET/POST /api/voice-chat-admin` - Admin usage and limit management
+- `POST /api/voice-live-session` - Open/heartbeat/close short-lived voice live session lease
 
 `talk-stream`, `welcome`, `goodbye`, `recquestions`, and `speech` use header-based request signature validation. `/api/config` is exposed through API Gateway key protection and updates Firestore-backed runtime state.
 
 `/api/voice-chat-access` requires Firebase ID token authentication and returns whether the user is active in `voice_chat_users`.
 `/api/voice-chat-admin` requires Firebase ID token authentication (`Authorization: Bearer <idToken>`) and admin access (custom claim, allowlist, or `admin_users` records).
+`/api/voice-live-session` requires Firebase ID token authentication and active `voice_chat_users` access for every `open`, `heartbeat`, and `close` operation.
+`/api/voice-chat` requires Firebase ID token authentication, active `voice_chat_users` access, and a valid lease session id issued by `/api/voice-live-session`.
+`voice-live-proxy` (Cloud Run WebSocket service) bridges browser requests to Gemini Live after verifying Firebase ID token + live lease (`voice_live_sessions`).
+
+```mermaid
+sequenceDiagram
+    participant Web as web-student
+    participant Access as /api/voice-chat-access
+    participant Lease as /api/voice-live-session
+    participant Proxy as Cloud Run voice-live-proxy
+    participant Gemini as Gemini Live API
+
+    Web->>Access: GET (Bearer idToken)
+    Access-->>Web: granted=true/false
+    Web->>Lease: POST open
+    Lease-->>Web: session_id + expires_at
+    Web->>Proxy: WS connect + auth(id_token, lease_session_id)
+    Proxy->>Lease: validate active lease + user grant
+    Proxy->>Gemini: open upstream WS
+    Gemini-->>Proxy: setupComplete / audio / toolCall
+    Proxy-->>Web: stream responses
+    Web->>Proxy: tool_response (client-executed tools)
+    Web->>Lease: heartbeat / close
+```
+
+## Voice Live proxy deployment
+
+`voice-live-proxy` is deployed to Cloud Run by script (not as a first-class CDKTF resource yet):
+
+```bash
+PROJECTID=<backend-project-id> REGION=us-east1 bash backend/deploy_voice_proxy.sh
+```
 # xiaoice_class_assistant
 
 ### Login your GCP account

@@ -194,6 +194,7 @@ def main():
             "VITE_FIREBASE_APP_ID": webapp_app_id,
             "VITE_FIREBASE_HOSTING_URL": hosting_url,
             "VITE_API_BASE_URL": f"https://{api_url}",
+            "VITE_GCP_PROJECT_ID": project_id,
             "VITE_FIREBASE_APPCHECK_SITE_KEY": appcheck_site_key,
         }
         update_test_env(client_env_path, client_env_data)
