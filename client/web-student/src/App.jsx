@@ -259,7 +259,6 @@ function App() {
   const narrationCheckpointRef = useRef({ url: "", time: 0 });
   const pendingNarrationAfterVoiceRef = useRef(null);
   const activeAudioUrlRef = useRef(null);
-  const voiceSessionLanguageRef = useRef("auto");
   const audioUnlockedRef = useRef(false);
   const pendingNarrationRetryRef = useRef(false);
   const userPausedNarrationRef = useRef(false);
@@ -1921,10 +1920,6 @@ function App() {
         : mode === "presentation"
           ? "This session is on presentation page. Use presentation/slide, playback, language, and back-to-home tools only."
           : "Tools are limited to safe student commands.";
-      const sessionLanguage = voiceSessionLanguageRef.current || "auto";
-      const languageInstruction = sessionLanguage === "auto"
-        ? "Detect the user's spoken language each turn and reply in that language. You may switch languages naturally across turns."
-        : `Prefer ${sessionLanguage} for speech unless the user explicitly asks to switch language.`;
       const currentStudentName = getUserLabel(currentUser);
       const setupMessage = {
         setup: {
@@ -1942,7 +1937,7 @@ function App() {
           system_instruction: {
             parts: [{
               text: `You are an accessibility-first student voice assistant for visually impaired students.
-${languageInstruction}
+Detect the user's spoken language each turn and reply in that language. You may switch languages naturally across turns.
 The signed-in student name is ${currentStudentName}. Use this name naturally in greetings when appropriate.
 Use tool calls for navigation, playback, and language actions.
 Never invent class IDs, presentation IDs, or slide IDs.
@@ -2076,8 +2071,6 @@ Keep replies short and explicit about the action completed.`,
       return;
     }
     if (isListening || voiceBusy) return;
-    voiceSessionLanguageRef.current = "auto";
-
     const mode = getStudentVoiceMode();
     const presentationId = viewingPptId || livePptId;
     const slideId = viewingSlideId || liveSlideId;
