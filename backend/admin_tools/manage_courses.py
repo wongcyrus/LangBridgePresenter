@@ -24,7 +24,18 @@ def _get_db():
         raise RuntimeError("FIRESTORE_DATABASE is not configured.")
     return firestore.Client(project=project_id, database=db_name)
 
-def create_or_update_course(course_id, title, languages, voice_configs, styles=None):
+def create_or_update_course(
+    course_id,
+    title,
+    languages,
+    voice_configs,
+    styles=None,
+    package_id=None,
+    package_bucket=None,
+    package_prefix=None,
+    package_manifest_url=None,
+    package_version=None,
+):
     db = _get_db()
     doc_ref = db.collection('courses').document(course_id)
     
@@ -40,6 +51,20 @@ def create_or_update_course(course_id, title, languages, voice_configs, styles=N
     if styles:
         data["available_styles"] = styles
         data["default_style"] = styles[0] if styles else "professional"
+
+    if package_id:
+        data["package_id"] = package_id
+    if package_bucket:
+        data["package_bucket"] = package_bucket
+    if package_prefix:
+        data["package_prefix"] = package_prefix
+    data["package_manifest_path"] = ""
+    if package_manifest_url:
+        data["package_manifest_url"] = package_manifest_url
+    if package_version:
+        data["package_version"] = package_version
+    if package_id or package_bucket or package_prefix or package_manifest_url:
+        data["package_status"] = "ready"
     
     doc_ref.set(data, merge=True)
     logger.info(f"Successfully updated course: {course_id}")
@@ -63,6 +88,45 @@ def list_styles():
     for style in AVAILABLE_STYLES:
         print(f"  - {style}")
 
+
+def link_course_package(course_id, package_id, package_bucket="", package_prefix="", manifest_url="", package_version="", status="ready"):
+    if not manifest_url:
+        raise ValueError("manifest_url is required")
+    db = _get_db()
+    now = firestore.SERVER_TIMESTAMP
+    package_ref = db.collection("course_packages").document(package_id)
+    package_ref.set(
+        {
+            "package_id": package_id,
+            "course_id": course_id,
+            "package_bucket": package_bucket,
+            "package_prefix": package_prefix,
+            "manifest_path": "",
+            "manifest_url": manifest_url,
+            "package_version": package_version,
+            "status": status,
+            "source": "admin_script",
+            "updated_at": now,
+            "created_at": now,
+        },
+        merge=True,
+    )
+    db.collection("courses").document(course_id).set(
+        {
+            "package_id": package_id,
+            "package_bucket": package_bucket,
+            "package_prefix": package_prefix,
+            "package_manifest_path": "",
+            "package_manifest_url": manifest_url,
+            "package_version": package_version,
+            "package_status": status,
+            "updated_at": now,
+        },
+        merge=True,
+    )
+    logger.info(f"Linked course {course_id} to package {package_id}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage LangBridge Courses")
     parser.add_argument("--project-id", required=True, help="Target GCP project")
@@ -75,12 +139,27 @@ def main():
     parser_add.add_argument('--title', required=True, help='Course Title')
     parser_add.add_argument('--langs', required=True, help='Comma-separated languages (e.g., en-US,zh-CN,yue-HK)')
     parser_add.add_argument('--styles', help='Comma-separated list of available styles for this course')
+    parser_add.add_argument('--package-id', help='Optional linked package ID')
+    parser_add.add_argument('--package-bucket', help='Optional package bucket')
+    parser_add.add_argument('--package-prefix', help='Optional package prefix')
+    parser_add.add_argument('--package-manifest-url', help='Optional package manifest URL')
+    parser_add.add_argument('--package-version', help='Optional package version')
     
     # LIST Command
     subparsers.add_parser('list', help='List all courses')
     
     # LIST STYLES Command
     subparsers.add_parser('styles', help='List all available presentation styles')
+
+    # LINK PACKAGE Command
+    parser_link = subparsers.add_parser('link-package', help='Create/update course_packages doc and link it to a course')
+    parser_link.add_argument('--course-id', required=True, help='Course ID')
+    parser_link.add_argument('--package-id', required=True, help='Immutable package ID')
+    parser_link.add_argument('--package-bucket', default='', help='Package bucket (optional metadata)')
+    parser_link.add_argument('--package-prefix', default='', help='Package prefix (optional metadata)')
+    parser_link.add_argument('--manifest-url', required=True, help='Manifest URL (HTTP/HTTPS)')
+    parser_link.add_argument('--package-version', default='', help='Human-readable package version')
+    parser_link.add_argument('--status', default='ready', help='Package status')
 
     args = parser.parse_args()
     os.environ["ADMIN_TOOLS_PROJECT_ID"] = args.project_id
@@ -101,12 +180,33 @@ def main():
         if args.styles:
             styles_list = [s.strip() for s in args.styles.split(',')]
         
-        create_or_update_course(args.id, args.title, langs, voice_configs, styles_list)
+        create_or_update_course(
+            args.id,
+            args.title,
+            langs,
+            voice_configs,
+            styles_list,
+            package_id=args.package_id,
+            package_bucket=args.package_bucket,
+            package_prefix=args.package_prefix,
+            package_manifest_url=args.package_manifest_url,
+            package_version=args.package_version,
+        )
         
     elif args.command == 'list':
         list_courses()
     elif args.command == 'styles':
         list_styles()
+    elif args.command == 'link-package':
+        link_course_package(
+            course_id=args.course_id,
+            package_id=args.package_id,
+            package_bucket=args.package_bucket,
+            package_prefix=args.package_prefix,
+            manifest_url=args.manifest_url,
+            package_version=args.package_version,
+            status=args.status,
+        )
     else:
         parser.print_help()
 

@@ -1,0 +1,12 @@
+{
+  "cdktf-langbridge-presenter-d2": {
+    "api-service-name": "langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog",
+    "api-url": "gateway-8a43c3hd.ue.gateway.dev",
+    "client-project-id": "langbridge-presenter-d2-client",
+    "firebase-api-key": "AIzaSyDL4B61FhkZPcKFMzgBCepIt4Bhi9rU9w0",
+    "hosting-url": "https://langbridge-presenter-d2-client.web.app",
+    "project-id": "langbridge-presenter-d2",
+    "speech-file-bucket": "speechfileco3m59510",
+    "webapp-app-id": "1:601085229013:web:3093db5b55eaaf4ed6af5c"
+  }
+}

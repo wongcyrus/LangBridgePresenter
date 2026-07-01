@@ -34,11 +34,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/classes/$(classId)/students/$(request.auth.uid)).data.active == true;
     }
 
-    function canReadClass(classId) {
-      return isAdmin() || isClassTeacher(classId) || isClassStudent(classId);
+    function isPublicClass(classId) {
+      return isSignedIn()
+        && classExists(classId)
+        && classDoc(classId).data.active == true
+        && classDoc(classId).data.is_public == true;
     }
 
-    // Restrict class broadcast reads to enrolled students, class teacher, or admins
+    function canReadClass(classId) {
+      return isAdmin() || isClassTeacher(classId) || isClassStudent(classId) || isPublicClass(classId);
+    }
+
+    // Restrict class broadcast reads to public/enrolled students, class teacher, or admins
     match /presentation_broadcast/{classId} {
       allow read: if canReadClass(classId);
       allow write: if false;

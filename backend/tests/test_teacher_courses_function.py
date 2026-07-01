@@ -38,11 +38,15 @@ def teacher_courses_module(monkeypatch):
     firestore_mod = types.ModuleType("google.cloud.firestore")
     firestore_mod.Client = MagicMock()
     firestore_mod.SERVER_TIMESTAMP = object()
+    storage_mod = types.ModuleType("google.cloud.storage")
+    storage_mod.Client = MagicMock()
     cloud_mod.firestore = firestore_mod
+    cloud_mod.storage = storage_mod
     google_mod.cloud = cloud_mod
     monkeypatch.setitem(sys.modules, "google", google_mod)
     monkeypatch.setitem(sys.modules, "google.cloud", cloud_mod)
     monkeypatch.setitem(sys.modules, "google.cloud.firestore", firestore_mod)
+    monkeypatch.setitem(sys.modules, "google.cloud.storage", storage_mod)
 
     module_name = "teacher_courses_main_under_test"
     module_path = os.path.abspath(
@@ -187,3 +191,167 @@ def test_teacher_courses_set_student_status_uses_uid_when_auth_user_exists(teach
     assert payload["student_uid"] == "student-uid"
     assert set_uid_mock.called
     assert not set_email_mock.called
+
+
+def test_teacher_courses_link_course_package_updates_metadata(teacher_courses_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {
+        "action": "link_course_package",
+        "course_id": "course-1",
+        "package_bucket": "pkg-bucket",
+        "package_prefix": "course-packages/course-1/v1",
+        "manifest_url": "https://cdn.example.com/pkg/manifest.json",
+    }
+    monkeypatch.setattr(teacher_courses_module, "_verify_user", lambda _request: {"uid": "t-1", "email": "t@example.com"})
+    monkeypatch.setattr(teacher_courses_module, "_is_admin", lambda _decoded, _db: False)
+    monkeypatch.setattr(teacher_courses_module, "_is_teacher", lambda _decoded, _db: True)
+    monkeypatch.setattr(teacher_courses_module, "_load_package_manifest_from_url", lambda **_kwargs: {"presentations": [{"presentation_id": "deck-1", "slides": [{"slide_id": "1", "languages": {"en-US": {"text": "hello", "audio_url": "https://cdn.example.com/audio1.mp3", "image_url": "https://cdn.example.com/image1.png"}}}]}]})
+    monkeypatch.setattr(teacher_courses_module, "_validate_package_manifest", lambda **_kwargs: {"presentations": 1, "slides": 1, "languages": 1})
+
+    db = MagicMock()
+    course_ref = MagicMock()
+    course_snap = MagicMock()
+    course_snap.exists = True
+    course_snap.to_dict.return_value = {"teacher_uid": "t-1"}
+    course_ref.get.return_value = course_snap
+    courses_collection = MagicMock()
+    courses_collection.document.return_value = course_ref
+
+    def _collection(name):
+        if name == "courses":
+            return courses_collection
+        return MagicMock()
+
+    db.collection.side_effect = _collection
+    teacher_courses_module.firestore.Client.return_value = db
+
+    body, status, _headers = teacher_courses_module.teacher_courses(mock_request)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["manifest_url"].endswith("manifest.json")
+    assert course_ref.set.called
+
+
+def test_teacher_courses_create_upload_session_returns_urls(teacher_courses_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {
+        "action": "create_upload_session",
+        "course_id": "course-1",
+        "package_bucket": "pkg-bucket",
+        "package_prefix": "course-packages/course-1",
+        "file_paths": ["manifest.json", "assets/en/slide_1.png"],
+    }
+    monkeypatch.setattr(teacher_courses_module, "_verify_user", lambda _request: {"uid": "t-1", "email": "t@example.com"})
+    monkeypatch.setattr(teacher_courses_module, "_is_admin", lambda _decoded, _db: False)
+    monkeypatch.setattr(teacher_courses_module, "_is_teacher", lambda _decoded, _db: True)
+
+    db = MagicMock()
+    course_ref = MagicMock()
+    course_snap = MagicMock()
+    course_snap.exists = True
+    course_snap.to_dict.return_value = {"teacher_uid": "t-1"}
+    course_ref.get.return_value = course_snap
+    courses_collection = MagicMock()
+    courses_collection.document.return_value = course_ref
+
+    def _collection(name):
+        if name == "courses":
+            return courses_collection
+        return MagicMock()
+
+    db.collection.side_effect = _collection
+    teacher_courses_module.firestore.Client.return_value = db
+
+    blob = MagicMock()
+    blob.generate_signed_url.return_value = "https://signed.example/upload"
+    bucket = MagicMock()
+    bucket.blob.return_value = blob
+    storage_client = MagicMock()
+    storage_client.bucket.return_value = bucket
+    teacher_courses_module.storage.Client.return_value = storage_client
+
+    body, status, _headers = teacher_courses_module.teacher_courses(mock_request)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert len(payload["upload_urls"]) == 2
+
+
+def test_teacher_courses_link_course_package_supports_manifest_url(teacher_courses_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {
+        "action": "link_course_package",
+        "course_id": "course-1",
+        "manifest_url": "https://cdn.example.com/pkg/manifest.json",
+    }
+    monkeypatch.setattr(teacher_courses_module, "_verify_user", lambda _request: {"uid": "t-1", "email": "t@example.com"})
+    monkeypatch.setattr(teacher_courses_module, "_is_admin", lambda _decoded, _db: False)
+    monkeypatch.setattr(teacher_courses_module, "_is_teacher", lambda _decoded, _db: True)
+    monkeypatch.setattr(
+        teacher_courses_module,
+        "_load_package_manifest_from_url",
+        lambda **_kwargs: {
+            "presentations": [
+                {
+                    "presentation_id": "deck-1",
+                    "slides": [{"slide_id": "1", "languages": {"en-US": {"text": "hello", "audio_url": "https://cdn.example.com/a.mp3"}}}],
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(teacher_courses_module, "_validate_package_manifest", lambda **_kwargs: {"presentations": 1, "slides": 1, "languages": 1})
+
+    db = MagicMock()
+    course_ref = MagicMock()
+    course_snap = MagicMock()
+    course_snap.exists = True
+    course_snap.to_dict.return_value = {"teacher_uid": "t-1"}
+    course_ref.get.return_value = course_snap
+    courses_collection = MagicMock()
+    courses_collection.document.return_value = course_ref
+    course_packages_collection = MagicMock()
+
+    def _collection(name):
+        if name == "courses":
+            return courses_collection
+        if name == "course_packages":
+            return course_packages_collection
+        return MagicMock()
+
+    db.collection.side_effect = _collection
+    teacher_courses_module.firestore.Client.return_value = db
+
+    body, status, _headers = teacher_courses_module.teacher_courses(mock_request)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["manifest_url"] == "https://cdn.example.com/pkg/manifest.json"
+
+
+def test_teacher_courses_link_course_package_rejects_manifest_path_only(teacher_courses_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {
+        "action": "link_course_package",
+        "course_id": "course-1",
+        "manifest_path": "manifest.json",
+    }
+    monkeypatch.setattr(teacher_courses_module, "_verify_user", lambda _request: {"uid": "t-1", "email": "t@example.com"})
+    monkeypatch.setattr(teacher_courses_module, "_is_admin", lambda _decoded, _db: False)
+    monkeypatch.setattr(teacher_courses_module, "_is_teacher", lambda _decoded, _db: True)
+
+    db = MagicMock()
+    course_ref = MagicMock()
+    course_snap = MagicMock()
+    course_snap.exists = True
+    course_snap.to_dict.return_value = {"teacher_uid": "t-1"}
+    course_ref.get.return_value = course_snap
+    courses_collection = MagicMock()
+    courses_collection.document.return_value = course_ref
+    db.collection.side_effect = lambda _name: courses_collection
+    teacher_courses_module.firestore.Client.return_value = db
+
+    body, status, _headers = teacher_courses_module.teacher_courses(mock_request)
+    payload = json.loads(body)
+    assert status == 400
+    assert "manifest_url is required" in payload["error"]

@@ -181,3 +181,27 @@ def test_student_courses_access_check_denied(student_courses_module, mock_reques
     payload = json.loads(body)
     assert status == 403
     assert payload["error"] == "Class access denied"
+
+
+def test_student_courses_access_check_public_class(student_courses_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {"action": "access_check", "class_id": "class-public"}
+    monkeypatch.setattr(student_courses_module, "_verify_user", lambda _request: {"uid": "s-9", "email": "s9@example.com"})
+    monkeypatch.setattr(student_courses_module, "_is_admin", lambda _decoded, _db: False)
+    monkeypatch.setattr(student_courses_module, "_is_teacher", lambda _decoded, _db: False)
+    monkeypatch.setattr(
+        student_courses_module,
+        "_resolve_class_access",
+        lambda _db, uid, email, class_id, is_admin: {
+            "allowed": True,
+            "role": "public",
+            "class_data": {"course_id": "course-demo", "is_public": True},
+        },
+    )
+    student_courses_module.firestore.Client.return_value = MagicMock()
+
+    body, status, _headers = student_courses_module.student_courses(mock_request)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["role"] == "public"

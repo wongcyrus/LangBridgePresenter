@@ -3,13 +3,17 @@ import logging
 import os
 import secrets
 import sys
+import uuid
+import hashlib
 from datetime import datetime, timezone
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 import firebase_admin
 import functions_framework
 from firebase_admin import auth as firebase_auth
 from flask import Request
-from google.cloud import firestore
+from google.cloud import firestore, storage
 
 
 _level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
@@ -141,6 +145,162 @@ def _normalize_languages(raw_languages):
     return list(dict.fromkeys(normalized))
 
 
+def _default_package_bucket():
+    return (os.environ.get("COURSE_PACKAGE_BUCKET") or os.environ.get("SPEECH_FILE_BUCKET") or "").strip()
+
+
+def _to_public_gcs_url(bucket_name: str, object_name: str):
+    return f"https://storage.googleapis.com/{bucket_name}/{object_name}"
+
+
+def _normalize_object_path(path_value: str):
+    return str(path_value or "").strip().lstrip("/")
+
+
+def _is_http_url(value: str):
+    parsed = urlparse(str(value or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _manifest_content_hash(manifest: dict):
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _package_id_from_manifest(manifest: dict):
+    candidate = str(manifest.get("package_id") or "").strip()
+    if candidate:
+        return candidate
+    return f"pkg_{_manifest_content_hash(manifest)[:16]}"
+
+
+def _resolve_manifest_object_path(prefix: str, raw_path: str):
+    normalized = _normalize_object_path(raw_path)
+    if not normalized:
+        return ""
+    if normalized.startswith("gs://"):
+        trimmed = normalized[5:]
+        return trimmed.split("/", 1)[1] if "/" in trimmed else ""
+    clean_prefix = _normalize_object_path(prefix)
+    if clean_prefix and not normalized.startswith(clean_prefix):
+        return f"{clean_prefix}/{normalized}"
+    return normalized
+
+
+def _load_package_manifest_from_url(*, manifest_url: str):
+    if not _is_http_url(manifest_url):
+        raise ValueError("Invalid manifest_url: must be http(s)")
+    try:
+        with urlopen(manifest_url, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise ValueError(f"Failed to load manifest_url: {e}") from e
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid package manifest: root must be an object")
+    presentations = payload.get("presentations")
+    if not isinstance(presentations, list) or not presentations:
+        raise ValueError("Invalid package manifest: presentations must be a non-empty list")
+    return payload
+
+
+def _validate_package_manifest(*, bucket_name: str, package_prefix: str, manifest: dict):
+    missing = []
+    slides_total = 0
+    languages_total = 0
+    for presentation in manifest.get("presentations", []):
+        presentation_id = str(presentation.get("presentation_id") or "").strip()
+        slides = presentation.get("slides")
+        if not presentation_id:
+            raise ValueError("Invalid package manifest: presentation_id is required")
+        if not isinstance(slides, list) or not slides:
+            raise ValueError(f"Invalid package manifest: slides required for presentation {presentation_id}")
+        for slide in slides:
+            slide_id = str(slide.get("slide_id") or "").strip()
+            lang_map = slide.get("languages")
+            if not slide_id:
+                raise ValueError(f"Invalid package manifest: slide_id required in presentation {presentation_id}")
+            if not isinstance(lang_map, dict) or not lang_map:
+                raise ValueError(f"Invalid package manifest: languages required for slide {presentation_id}/{slide_id}")
+            slides_total += 1
+            for _lang_code, lang_entry in lang_map.items():
+                if not isinstance(lang_entry, dict):
+                    raise ValueError(f"Invalid package manifest: language entry must be object for {presentation_id}/{slide_id}")
+                text_value = str(lang_entry.get("text") or "").strip()
+                if not text_value:
+                    raise ValueError(f"Invalid package manifest: text required for {presentation_id}/{slide_id}")
+                languages_total += 1
+                for url_field in ("audio_url", "image_url"):
+                    raw_url = str(lang_entry.get(url_field) or "").strip()
+                    if raw_url and not _is_http_url(raw_url):
+                        raise ValueError(
+                            f"Invalid package manifest: {url_field} must be http(s) URL for {presentation_id}/{slide_id}"
+                        )
+                for legacy_field in ("audio_path", "image_path"):
+                    if str(lang_entry.get(legacy_field) or "").strip():
+                        raise ValueError(
+                            f"Invalid package manifest: {legacy_field} is not supported; use audio_url/image_url for {presentation_id}/{slide_id}"
+                        )
+    if missing:
+        first = missing[0]
+        raise ValueError(
+            "Package validation failed: missing object "
+            f"{first['path']} ({first['field']} at {first['presentation_id']}/{first['slide_id']})"
+        )
+    return {"presentations": len(manifest.get("presentations", [])), "slides": slides_total, "languages": languages_total}
+
+
+def _build_class_broadcast_from_manifest(*, db: firestore.Client, class_id: str, bucket_name: str, package_prefix: str, manifest: dict):
+    root_ref = db.collection("presentation_broadcast").document(class_id)
+    presentations = manifest.get("presentations", [])
+    first_presentation = presentations[0]
+    first_slide = first_presentation.get("slides", [])[0]
+    current_presentation_id = str(manifest.get("current_presentation_id") or first_presentation.get("presentation_id") or "")
+    current_slide_id = str(manifest.get("current_slide_id") or first_slide.get("slide_id") or "")
+    root_ref.set(
+        {
+            "current_presentation_id": current_presentation_id,
+            "current_slide_id": current_slide_id,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "package_bucket": bucket_name,
+            "package_prefix": package_prefix,
+        },
+        merge=False,
+    )
+    for presentation in presentations:
+        presentation_id = str(presentation.get("presentation_id") or "").strip()
+        if not presentation_id:
+            continue
+        ppt_ref = root_ref.collection("presentations").document(presentation_id)
+        ppt_ref.set({"updated_at": firestore.SERVER_TIMESTAMP}, merge=False)
+        for slide in presentation.get("slides", []):
+            slide_id = str(slide.get("slide_id") or "").strip()
+            if not slide_id:
+                continue
+            languages_payload = {}
+            for lang_code, lang_entry in (slide.get("languages") or {}).items():
+                if not isinstance(lang_entry, dict):
+                    continue
+                lang_obj = {"text": str(lang_entry.get("text") or "")}
+                audio_url = str(lang_entry.get("audio_url") or "").strip()
+                image_url = str(lang_entry.get("image_url") or "").strip()
+                if audio_url:
+                    lang_obj["audio_url"] = audio_url
+                if image_url:
+                    lang_obj["slide_link"] = image_url
+                languages_payload[lang_code] = lang_obj
+            ppt_ref.collection("slides").document(slide_id).set(
+                {
+                    "languages": languages_payload,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "course_id": class_id,
+                    "presentation_id": presentation_id,
+                    "slide_id": slide_id,
+                },
+                merge=False,
+            )
+    return {"current_presentation_id": current_presentation_id, "current_slide_id": current_slide_id}
+
+
 def _course_from_doc(doc):
     data = doc.to_dict() or {}
     return {
@@ -151,6 +311,13 @@ def _course_from_doc(doc):
         "voice_configs": data.get("voice_configs") or {},
         "teacher_uid": data.get("teacher_uid"),
         "teacher_email": data.get("teacher_email"),
+        "package_bucket": data.get("package_bucket"),
+        "package_prefix": data.get("package_prefix"),
+        "package_manifest_path": data.get("package_manifest_path"),
+        "package_manifest_url": data.get("package_manifest_url"),
+        "package_version": data.get("package_version"),
+        "package_id": data.get("package_id"),
+        "package_status": data.get("package_status"),
         "active": data.get("active") is not False,
         "created_at": _to_iso8601(data.get("created_at")),
         "updated_at": _to_iso8601(data.get("updated_at")),
@@ -166,6 +333,11 @@ def _class_from_doc(doc):
         "source_presentation_course_id": data.get("source_presentation_course_id"),
         "teacher_uid": data.get("teacher_uid"),
         "teacher_email": data.get("teacher_email"),
+        "is_public": data.get("is_public") is True,
+        "package_id": data.get("package_id"),
+        "package_manifest_path": data.get("package_manifest_path"),
+        "package_manifest_url": data.get("package_manifest_url"),
+        "package_version": data.get("package_version"),
         "active": data.get("active") is not False,
         "current_presentation_id": data.get("current_presentation_id"),
         "current_slide_id": data.get("current_slide_id"),
@@ -372,6 +544,194 @@ def teacher_courses(request: Request):
         course_ref.set(updates, merge=True)
         return (json.dumps({"ok": True, "course_id": course_id}, ensure_ascii=False), 200, headers)
 
+    if action == "create_upload_session":
+        course_id = str(payload.get("course_id") or "").strip()
+        if not course_id:
+            return (json.dumps({"error": "course_id is required"}), 400, headers)
+        course_ref = db.collection("courses").document(course_id)
+        course_snap = course_ref.get()
+        if not course_snap.exists:
+            return (json.dumps({"error": "Course not found"}), 404, headers)
+        course_data = course_snap.to_dict() or {}
+        if not admin and course_data.get("teacher_uid") != uid:
+            return (json.dumps({"error": "Forbidden"}), 403, headers)
+
+        bucket_name = str(payload.get("package_bucket") or _default_package_bucket()).strip()
+        package_prefix = _normalize_object_path(str(payload.get("package_prefix") or f"course-packages/{course_id}"))
+        file_paths = payload.get("file_paths") or []
+        if isinstance(file_paths, str):
+            file_paths = [line.strip() for line in file_paths.splitlines() if line.strip()]
+        if not bucket_name:
+            return (json.dumps({"error": "package_bucket is required"}), 400, headers)
+        if not isinstance(file_paths, list) or not file_paths:
+            return (json.dumps({"error": "file_paths is required"}), 400, headers)
+
+        upload_id = secrets.token_hex(8)
+        upload_prefix = f"{package_prefix}/incoming/{upload_id}"
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        upload_urls = []
+        for raw_path in file_paths:
+            relative_path = _normalize_object_path(str(raw_path))
+            if not relative_path:
+                continue
+            object_name = f"{upload_prefix}/{relative_path}"
+            blob = bucket.blob(object_name)
+            try:
+                signed_url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=3600,
+                    method="PUT",
+                    content_type="application/octet-stream",
+                )
+            except Exception as e:
+                return (json.dumps({"error": f"Failed to generate signed URL for {relative_path}: {e}"}), 500, headers)
+            upload_urls.append({"path": relative_path, "object_name": object_name, "upload_url": signed_url})
+        return (
+            json.dumps(
+                {
+                    "ok": True,
+                    "course_id": course_id,
+                    "package_bucket": bucket_name,
+                    "upload_prefix": upload_prefix,
+                    "upload_urls": upload_urls,
+                },
+                ensure_ascii=False,
+            ),
+            200,
+            headers,
+        )
+
+    if action == "link_course_package":
+        course_id = str(payload.get("course_id") or "").strip()
+        if not course_id:
+            return (json.dumps({"error": "course_id is required"}), 400, headers)
+        course_ref = db.collection("courses").document(course_id)
+        course_snap = course_ref.get()
+        if not course_snap.exists:
+            return (json.dumps({"error": "Course not found"}), 404, headers)
+        course_data = course_snap.to_dict() or {}
+        if not admin and course_data.get("teacher_uid") != uid:
+            return (json.dumps({"error": "Forbidden"}), 403, headers)
+
+        bucket_name = str(payload.get("package_bucket") or _default_package_bucket()).strip()
+        package_prefix = _normalize_object_path(str(payload.get("package_prefix") or f"course-packages/{course_id}"))
+        manifest_url_input = str(payload.get("manifest_url") or "").strip()
+        if not _is_http_url(manifest_url_input):
+            return (json.dumps({"error": "manifest_url is required and must be http(s) URL"}), 400, headers)
+        manifest_url = manifest_url_input
+        manifest = _load_package_manifest_from_url(manifest_url=manifest_url)
+        validation = _validate_package_manifest(bucket_name=bucket_name, package_prefix=package_prefix, manifest=manifest)
+        package_id = _package_id_from_manifest(manifest)
+        package_hash = _manifest_content_hash(manifest)
+        package_version = str(payload.get("package_version") or "").strip() or datetime.now(timezone.utc).strftime("v%Y%m%d-%H%M%S")
+        db.collection("course_packages").document(package_id).set(
+            {
+                "package_id": package_id,
+                "course_id": course_id,
+                "package_bucket": bucket_name,
+                "package_prefix": package_prefix,
+                "manifest_path": "",
+                "manifest_url": manifest_url,
+                "package_version": package_version,
+                "status": "ready",
+                "content_hash": package_hash,
+                "created_by": uid,
+                "updated_by": uid,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        course_ref.set(
+            {
+                "package_id": package_id,
+                "package_bucket": bucket_name,
+                "package_prefix": package_prefix,
+                "package_manifest_path": "",
+                "package_manifest_url": manifest_url,
+                "package_version": package_version,
+                "package_status": "ready",
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return (
+            json.dumps(
+                {
+                    "ok": True,
+                    "course_id": course_id,
+                    "package_id": package_id,
+                    "package_bucket": bucket_name,
+                    "package_prefix": package_prefix,
+                    "manifest_path": "",
+                    "manifest_url": manifest_url,
+                    "package_version": package_version,
+                    "validation": validation,
+                },
+                ensure_ascii=False,
+            ),
+            200,
+            headers,
+        )
+
+    if action == "clone_class_from_package":
+        course_id = str(payload.get("course_id") or "").strip()
+        if not course_id:
+            return (json.dumps({"error": "course_id is required"}), 400, headers)
+        course_ref = db.collection("courses").document(course_id)
+        course_snap = course_ref.get()
+        if not course_snap.exists:
+            return (json.dumps({"error": "Course not found"}), 404, headers)
+        course_data = course_snap.to_dict() or {}
+        if not admin and course_data.get("teacher_uid") != uid:
+            return (json.dumps({"error": "Forbidden"}), 403, headers)
+
+        bucket_name = str(course_data.get("package_bucket") or "").strip()
+        package_prefix = _normalize_object_path(str(course_data.get("package_prefix") or ""))
+        manifest_url = str(course_data.get("package_manifest_url") or "").strip()
+        if not manifest_url:
+            return (json.dumps({"error": "Course package is not linked"}), 400, headers)
+        if not _is_http_url(manifest_url):
+            return (json.dumps({"error": "Course package manifest_url is invalid"}), 400, headers)
+        manifest = _load_package_manifest_from_url(manifest_url=manifest_url)
+        _validate_package_manifest(bucket_name=bucket_name, package_prefix=package_prefix, manifest=manifest)
+
+        class_title = str(payload.get("class_title") or "").strip() or f"{course_data.get('title') or course_id} Class"
+        class_id = str(payload.get("class_id") or "").strip() or f"class_{secrets.token_hex(6)}"
+        is_public = bool(payload.get("is_public"))
+        pointers = _build_class_broadcast_from_manifest(
+            db=db,
+            class_id=class_id,
+            bucket_name=bucket_name,
+            package_prefix=package_prefix,
+            manifest=manifest,
+        )
+        db.collection("classes").document(class_id).set(
+            {
+                "class_id": class_id,
+                "title": class_title,
+                "course_id": course_id,
+                "teacher_uid": uid,
+                "teacher_email": email,
+                "is_public": is_public,
+                "source_presentation_course_id": course_id,
+                "current_presentation_id": pointers.get("current_presentation_id"),
+                "current_slide_id": pointers.get("current_slide_id"),
+                "package_id": course_data.get("package_id"),
+                "package_bucket": bucket_name,
+                "package_prefix": package_prefix,
+                "package_manifest_path": "",
+                "package_manifest_url": manifest_url,
+                "package_version": course_data.get("package_version"),
+                "active": True,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=False,
+        )
+        return (json.dumps({"ok": True, "class_id": class_id}, ensure_ascii=False), 200, headers)
+
     if action == "clone_class":
         course_id = str(payload.get("course_id") or "").strip()
         if not course_id:
@@ -385,6 +745,7 @@ def teacher_courses(request: Request):
 
         class_title = str(payload.get("class_title") or "").strip() or f"{course_data.get('title') or course_id} Class"
         class_id = str(payload.get("class_id") or "").strip() or f"class_{secrets.token_hex(6)}"
+        is_public = bool(payload.get("is_public"))
         source_presentation_course_id = str(payload.get("source_presentation_course_id") or "").strip() or course_id
         try:
             _clone_presentation_broadcast(
@@ -403,6 +764,7 @@ def teacher_courses(request: Request):
                 "course_id": course_id,
                 "teacher_uid": uid,
                 "teacher_email": email,
+                "is_public": is_public,
                 "source_presentation_course_id": source_presentation_course_id,
                 "current_presentation_id": root_broadcast.get("current_presentation_id"),
                 "current_slide_id": root_broadcast.get("current_slide_id"),

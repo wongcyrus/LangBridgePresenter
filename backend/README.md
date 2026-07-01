@@ -95,12 +95,16 @@ Then complete:
 - `GET`: list owned courses and classes
 - `POST action=create_course`: create a teacher-owned course
 - `POST action=update_course`: update course metadata
+- `POST action=create_upload_session`: create signed upload URLs for package files
+- `POST action=link_course_package`: validate package manifest and link package metadata to course (`course_packages` + `courses.package_id`)
+  - requires: `manifest_url` (HTTP/HTTPS)
+- `POST action=clone_class_from_package`: create class from linked package manifest
 - `POST action=clone_class`: clone a course into an independent class instance
 - `POST action=set_student_status`: update student status in class roster/enrollments by UID or email (email-only pending assignment supported before first login)
 `/api/student-courses` requires Firebase ID token authentication and supports:
 - `GET`: list selectable classes + enrollment state
 - `POST action=enroll`: enroll/select a class
-- `POST action=access_check`: verify class access (`enrolled student` / `class teacher` / `admin`)
+- `POST action=access_check`: verify class access (`public class` / `enrolled student` / `class teacher` / `admin`)
 - `POST action=current_view`: fetch class current presentation pointer (requires class access)
 `/api/teacher-student-records` requires Firebase ID token authentication + admin access and returns:
 - daily usage summary and top usage
@@ -109,6 +113,50 @@ Then complete:
 `/api/voice-live-session` requires Firebase ID token authentication and active `voice_chat_users` access for every `open`, `heartbeat`, and `close` operation.
 `/api/voice-chat` requires Firebase ID token authentication, active `voice_chat_users` access, and a valid lease session id issued by `/api/voice-live-session`.
 `voice-live-proxy` (Cloud Run WebSocket service) bridges browser requests to Gemini Live after verifying Firebase ID token + live lease (`voice_live_sessions`).
+
+## Course package registry + manifest contract
+
+The package source of truth is `course_packages/{package_id}` and each `courses/{course_id}` document stores `package_id` + active package metadata.
+
+- `course_packages/{package_id}`: immutable package reference (manifest location, hash, version, status)
+- `courses/{course_id}`: current active package linkage (`package_id`, manifest_url, status)
+- `classes/{class_id}` cloned from package: stores pinned package metadata (`package_id`, manifest_url, version)
+
+### Manifest schema (supported fields)
+
+- Required:
+  - `presentations[]`
+  - each presentation: `presentation_id`, `slides[]`
+  - each slide: `slide_id`, `languages`
+  - each language entry: `text`
+- Media references (required URL mode):
+  - `audio_url`, `image_url` (must be HTTP/HTTPS)
+
+Example (generic external package):
+
+```json
+{
+  "schema_version": "2.0",
+  "package_id": "pkg_cloudtech_2026_v1",
+  "presentations": [
+    {
+      "presentation_id": "cloudtech",
+      "slides": [
+        {
+          "slide_id": "1",
+          "languages": {
+            "en-US": {
+              "text": "Welcome",
+              "audio_url": "https://cdn.example.com/cloudtech/en/slide_1.mp3",
+              "image_url": "https://cdn.example.com/cloudtech/en/slide_1.png"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ```mermaid
 sequenceDiagram

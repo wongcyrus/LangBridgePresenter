@@ -18,8 +18,12 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 
 ### 🧭 Course/Class Selection + Teacher Workspace
 *   **Student class selection**: Signed-in students land on a class-selection page (`/`) and can enroll/open classes before entering slide view.
-*   **Class access control**: Class content reads are restricted to enrolled students, the class teacher, or admins.
+*   **Class access control**: Class content reads are restricted to public classes, enrolled students, the class teacher, or admins.
 *   **Teacher workspace**: Teacher users can open `/teacher-courses` to create courses, update course titles, and clone independent classes from courses.
+*   **Course package workflow**: Teacher workspace supports linking a validated package manifest and creating classes from package content.
+    * Required: `manifest_url` (HTTP/HTTPS) with `audio_url` / `image_url` entries
+*   **Package registry linkage**: Linked packages are registered as `course_packages/{package_id}`, and courses/classes keep `package_id` references for stable long-term tracking.
+*   **Self-upload support**: Teacher workspace can request signed upload URLs for package file paths, then link the uploaded package manifest.
 *   **Admin teacher grant**: Admin users can grant/revoke teacher role on `/voice-admin`, then teachers manage their own course/class scope.
 
 ### 🔊 Smart Audio Player (Text-to-Speech)
@@ -31,8 +35,8 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 *   **Sign-In Required for Class View**: Opening `/?class=...` requires sign-in and class access.
 *   **Access Control**: Signed-in users must be explicitly granted in `voice_chat_users`.
 *   **Gemini Live Proxy Policy**: Direct browser calls to Gemini Live are disabled. Voice chat must use a backend proxy path.
-*   **Current Status**: Voice Start uses a Cloud Run WebSocket proxy to Gemini Live. Browser speech recognition sends text turns through the proxy, Gemini audio replies stream back, and tool-calling commands are executed in the web client.
-*   **Slide-Aware Context**: Every user turn is enriched with the active course/presentation/slide/language and current slide text.
+*   **Current Status**: Voice Start uses a Cloud Run WebSocket proxy to Gemini Live. The browser streams raw microphone PCM audio (`audio/pcm`, 16kHz) through the proxy via `realtime_input.media_chunks`, Gemini audio replies stream back, and tool-calling commands are executed in the web client.
+*   **Gemini language behavior**: Voice chat is always auto-multilingual. There is no manual voice-chat language setting.
 *   **Strict Auth Gate**: WebSocket session is allowed only after Firebase ID token + voice grant + active lease validation.
 *   **No Fallback**: If proxy/auth/context is invalid, the session stops immediately. No direct browser Gemini path and no fallback model path.
 *   **Server Lease Enforcement**: Live session start/heartbeat/close must pass backend lease checks (`/api/voice-live-session`) with expiry enforcement.
@@ -41,25 +45,26 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 
 ### 🗣️ Voice Commands (Accessibility)
 
-*   **Navigation**: `next slide`, `previous slide`
-*   **Sync**: `enable live sync`, `disable live sync`
-*   **Language**: `set audio language to Cantonese`, `set display language to English`, `next audio language`, `previous display language`
-*   **Narration controls**: `pause narration`, `resume narration`, `restart narration`, `seek forward 10 seconds`, `seek back 30 seconds`, `jump narration to start`
-*   **Help**: `what can I say`
+Voice tools are mode-scoped and loaded per page:
+
+*   **Course selection page (`/`)**: `list available courses`, `open class <class_id>`, `list slide languages`, `list shortcuts`, `help commands`
+*   **Presentation page (`/?class=...`)**: slide navigation (`next/previous`, `go to slide`, `first/last`), topic selection (`list/select presentation`), language controls (`change display language`, `change narration language`), playback controls, fullscreen controls, and shortcuts/help tools
+
+When page mode changes, the active voice session is stopped and must be started again so Gemini gets the correct tool set for that page.
 
 ### ⌨️ Keyboard Shortcuts
 
 *   **Navigation**: `←` / `→` (prev/next slide), `L` (toggle Live Sync), `Esc` (close fullscreen or stop narration)
-*   **Languages**: `Alt+V` (cycle display language), `Alt+A` (cycle audio language)
-*   **Player**: `Space` (play/pause), `R` (restart current MP3), `S` (stop), `A`/`D` (seek -10s / +10s), `Shift+A`/`Shift+D` (seek -30s / +30s), `Home` (jump to start)
+*   **Languages**: `Alt+V` (cycle display language), `Alt+A` (cycle narration language)
+*   **Player**: `Space` (play/pause), `R` (restart narration), `S` (stop), `A`/`D` (seek -10s / +10s), `Shift+A`/`Shift+D` (seek -30s / +30s), `Home` (jump to start)
 *   **Voice**: `M` (toggle voice chat start/stop)
 
-### 🎧 MP3 + Voice Chat Interaction Rules
+### 🎧 Narration + Voice Chat Interaction Rules
 
-*   **Audio language source of truth**: MP3 playback always follows the Audio Language selector (`listenLang`), including `Restart (R)`.
-*   **Voice + MP3 run together by default**: narration is not blocked when voice chat starts.
+*   **Narration language source of truth**: narration playback always follows the Narration Language selector (`listenLang`), including `Restart (R)`.
+*   **Voice + narration run together by default**: narration is not blocked when voice chat starts.
 *   **After first play**: narration follows slide/audio changes continuously.
-*   **Voice narration commands** (`play/resume/restart`) trigger immediate MP3 playback and keep follow mode on.
+*   **Voice narration commands** (`play/resume/restart`) trigger immediate narration playback and keep follow mode on.
 
 ```mermaid
 flowchart TD
@@ -69,8 +74,8 @@ flowchart TD
     D --> E[Send auth: id_token + lease_session_id]
     E --> F{proxy_ready + setupComplete?}
     F -- No --> G[Fail fast and stop voice session]
-    F -- Yes --> H[Start browser speech recognition]
-    H --> I[Send enriched turn with slide context]
+    F -- Yes --> H[Start browser raw mic capture]
+    H --> I[Stream realtime_input audio chunks]
     I --> J[Gemini Live response audio + tool calls]
     J --> K[Client executes tools + returns tool_response]
     K --> L[Continue with heartbeat]

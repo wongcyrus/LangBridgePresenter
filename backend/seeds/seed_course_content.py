@@ -6,6 +6,7 @@ import sys
 import time
 import glob
 import hashlib
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.cloud import storage, firestore, texttospeech
 
@@ -128,6 +129,128 @@ def upload_to_bucket(bucket_name, source_file_path, destination_blob_name):
     except Exception as e:
         logger.error(f"❌ Failed to upload {source_file_path} to bucket: {e}")
         return None
+
+
+def upload_json_to_bucket(bucket_name, destination_blob_name, payload):
+    """Upload JSON payload to bucket and return public URL."""
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(destination_blob_name)
+        blob.upload_from_string(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            content_type="application/json"
+        )
+        return blob.public_url
+    except Exception as e:
+        logger.error(f"❌ Failed to upload JSON to bucket ({destination_blob_name}): {e}")
+        return None
+
+
+def normalize_presentation_id(ppt_filename):
+    safe_ppt_id = ppt_filename
+    try:
+        _ppt_norm = os.path.splitext(ppt_filename.lower())[0]
+        for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
+            if _ppt_norm.endswith(_s):
+                _ppt_norm = _ppt_norm[: -len(_s)]
+        safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
+    except Exception:
+        safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_').replace(' ', '_')
+    return safe_ppt_id
+
+
+def sort_slide_entries(slides):
+    def _key(item):
+        sid = str(item.get("slide_id", ""))
+        try:
+            return (0, int(sid))
+        except ValueError:
+            return (1, sid)
+    return sorted(slides, key=_key)
+
+
+def _manifest_content_hash(manifest_payload):
+    canonical = json.dumps(manifest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _db_name():
+    return (os.environ.get("FIRESTORE_DATABASE") or "langbridge").strip() or "langbridge"
+
+
+def upsert_course_package_registry(*, backend_project_id, course_id, bucket_name, package_prefix, manifest_url, package_version, manifest_payload):
+    package_hash = _manifest_content_hash(manifest_payload)
+    package_id = str(manifest_payload.get("package_id") or "").strip() or f"pkg_{package_hash[:16]}"
+    db = firestore.Client(project=backend_project_id, database=_db_name())
+    db.collection("course_packages").document(package_id).set(
+        {
+            "package_id": package_id,
+            "course_id": course_id,
+            "package_bucket": bucket_name,
+            "package_prefix": package_prefix,
+            "manifest_path": "",
+            "manifest_url": manifest_url,
+            "package_version": package_version,
+            "status": "ready",
+            "content_hash": package_hash,
+            "source": "seed_script",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    db.collection("courses").document(course_id).set(
+        {
+            "package_id": package_id,
+            "package_bucket": bucket_name,
+            "package_prefix": package_prefix,
+            "package_manifest_path": "",
+            "package_manifest_url": manifest_url,
+            "package_version": package_version,
+            "package_status": "ready",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    return package_id
+
+
+def upsert_public_demo_class(*, backend_project_id, client_project_id, class_id, class_title, course_id, current_presentation_id, current_slide_id):
+    now = firestore.SERVER_TIMESTAMP
+    backend_db = firestore.Client(project=backend_project_id, database=_db_name())
+    backend_db.collection("classes").document(class_id).set(
+        {
+            "class_id": class_id,
+            "title": class_title,
+            "course_id": course_id,
+            "source_presentation_course_id": course_id,
+            "teacher_uid": "seed",
+            "teacher_email": "seed@system.local",
+            "is_public": True,
+            "active": True,
+            "current_presentation_id": current_presentation_id,
+            "current_slide_id": current_slide_id,
+            "updated_at": now,
+            "created_at": now,
+        },
+        merge=True,
+    )
+    if client_project_id:
+        client_db = firestore.Client(project=client_project_id, database="(default)")
+        client_db.collection("classes").document(class_id).set(
+            {
+                "class_id": class_id,
+                "title": class_title,
+                "course_id": course_id,
+                "teacher_uid": "seed",
+                "is_public": True,
+                "active": True,
+                "updated_at": now,
+            },
+            merge=True,
+        )
+
 
 def load_notes_for_language(json_path, lang_code):
     """
@@ -533,6 +656,10 @@ def main():
     parser.add_argument("--data-dir", default="generate", help="Directory containing generated content (relative to script or absolute)")
     parser.add_argument("--languages", nargs="+", default=DEFAULT_LANGUAGES, help=f"List of languages (default: {' '.join(DEFAULT_LANGUAGES)})")
     parser.add_argument("--max-workers", type=int, default=10, help="Maximum number of parallel slide processing workers (default: 10)")
+    parser.add_argument("--package-prefix", default="", help="Package root prefix in bucket (default: course-packages/<course_id>)")
+    parser.add_argument("--package-version", default="", help="Package version folder (default: seed-<UTC timestamp>)")
+    parser.add_argument("--skip-manifest", action="store_true", help="Skip emitting package manifest")
+    parser.add_argument("--skip-public-demo-class", action="store_true", help="Skip creating/updating public demo class for this seeded course")
     
     args = parser.parse_args()
     
@@ -618,6 +745,15 @@ def main():
             ppt_filename = os.path.basename(ppt_path)
             
         ppt_basename = os.path.splitext(ppt_filename)[0]
+        safe_ppt_id = normalize_presentation_id(ppt_filename)
+        package_root_prefix = (args.package_prefix or f"course-packages/{args.course_id}").strip("/ ")
+        package_version = (args.package_version or f"seed-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}").strip("/ ")
+        package_presentation_prefix = f"{package_root_prefix}/{package_version}/{safe_ppt_id}"
+        presentation_manifest = {
+            "presentation_id": safe_ppt_id,
+            "source_ppt_filename": ppt_filename,
+            "slides": []
+        }
         
         # Load Structure (from EN)
         slides_structure = load_slides_structure(json_path)
@@ -681,6 +817,7 @@ def main():
             
             # Prepare visual links (parallel upload)
             visual_links = {}
+            manifest_languages = {}
             if bucket_name:
                 base_search_name = base_name
                 image_filename = f"slide_{slide_num}_reimagined.png"
@@ -713,6 +850,40 @@ def main():
                         if url:
                             visual_links[lang_code] = url
 
+            for lang_code in args.languages:
+                lang_assets = pre_gen.get(lang_code, {}) if isinstance(pre_gen.get(lang_code, {}), dict) else {}
+                text_value = str(lang_assets.get("text") or context or "").strip()
+                lang_manifest = {"text": text_value}
+
+                local_audio_file = lang_assets.get("audio_file_path")
+                if bucket_name and local_audio_file and os.path.exists(local_audio_file):
+                    audio_filename = os.path.basename(local_audio_file)
+                    audio_object_path = f"{package_presentation_prefix}/audio/{lang_code}/{audio_filename}"
+                    audio_url = upload_to_bucket(bucket_name, local_audio_file, audio_object_path)
+                    if audio_url:
+                        lang_manifest["audio_url"] = audio_url
+
+                image_filename = f"slide_{slide_num}_reimagined.png"
+                suffix = LANG_VISUAL_SUFFIX_MAP.get(lang_code, lang_code)
+                visuals_dir_candidates = [
+                    os.path.join(generate_dir, f"{base_name}_{suffix}_visuals"),
+                    os.path.join(generate_dir, f"{base_name}_visuals"),
+                    os.path.join(generate_dir, f"{base_name}_en_visuals"),
+                ]
+                found_image = None
+                for v_dir in visuals_dir_candidates:
+                    cand_p = os.path.join(v_dir, image_filename)
+                    if os.path.exists(cand_p):
+                        found_image = cand_p
+                        break
+                if bucket_name and found_image:
+                    image_object_path = f"{package_presentation_prefix}/assets/{lang_code}/{image_filename}"
+                    image_url = upload_to_bucket(bucket_name, found_image, image_object_path)
+                    if image_url:
+                        lang_manifest["image_url"] = image_url
+
+                manifest_languages[lang_code] = lang_manifest
+
             # Call logic locally
             process_slide_locally(
                 slide_number=slide_num,
@@ -726,17 +897,58 @@ def main():
                 visual_links=visual_links,
                 pre_generated_messages=pre_gen
             )
-            return slide_num
+            return {
+                "slide_id": str(slide_num),
+                "languages": manifest_languages
+            }
         
         # Process all slides in parallel
         with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             futures = {executor.submit(process_single_slide, slide): slide for slide in slides_structure}
             for future in as_completed(futures):
                 try:
-                    slide_num = future.result()
-                    logger.info(f"✅ Completed slide {slide_num}")
+                    slide_result = future.result()
+                    presentation_manifest["slides"].append(slide_result)
+                    logger.info(f"✅ Completed slide {slide_result['slide_id']}")
                 except Exception as e:
                     logger.error(f"❌ Failed to process slide: {e}", exc_info=True)
+
+        if not args.skip_manifest:
+            presentation_manifest["slides"] = sort_slide_entries(presentation_manifest["slides"])
+            manifest_payload = {
+                "schema_version": "1.0",
+                "course_id": args.course_id,
+                "package_version": package_version,
+                "package_prefix": package_presentation_prefix,
+                "presentations": [presentation_manifest],
+            }
+            local_manifest_path = os.path.join(generate_dir, f"{safe_ppt_id}_manifest.json")
+            with open(local_manifest_path, "w", encoding="utf-8") as manifest_file:
+                json.dump(manifest_payload, manifest_file, ensure_ascii=False, indent=2)
+            logger.info(f"✅ Wrote local manifest: {local_manifest_path}")
+
+            if bucket_name:
+                manifest_object_path = f"{package_presentation_prefix}/manifest.json"
+                manifest_url = upload_json_to_bucket(bucket_name, manifest_object_path, manifest_payload)
+                if manifest_url:
+                    logger.info(f"✅ Uploaded package manifest: gs://{bucket_name}/{manifest_object_path}")
+                    try:
+                        package_id = upsert_course_package_registry(
+                            backend_project_id=backend_project_id,
+                            course_id=args.course_id,
+                            bucket_name=bucket_name,
+                            package_prefix=package_presentation_prefix,
+                            manifest_url=manifest_url,
+                            package_version=package_version,
+                            manifest_payload=manifest_payload,
+                        )
+                        logger.info(f"✅ Linked course package: {package_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to link course package in Firestore: {e}")
+                        sys.exit(1)
+                else:
+                    logger.error("❌ Failed to upload package manifest")
+                    sys.exit(1)
 
     # Final Step: Set Live Pointer to the first slide of the last processed presentation
     # to ensure the client app shows something immediately.
@@ -751,16 +963,7 @@ def main():
             broadcast_ref = broadcast_db.collection('presentation_broadcast').document(doc_id)
             
             # Normalize for ID (Consistency with process_slide_locally)
-            safe_ppt_id = ppt_filename
-            try:
-                _ppt_norm = os.path.splitext(ppt_filename.lower())[0]
-                for _s in ("_with_visuals", "_with_notes", "_visuals", "_en", "_zh-cn", "_yue-hk"):
-                    if _ppt_norm.endswith(_s):
-                        _ppt_norm = _ppt_norm[: -len(_s)]
-                # Normalize: replace slashes, backslashes, and spaces with underscores
-                safe_ppt_id = _ppt_norm.replace('/', '_').replace('\\', '_').replace(' ', '_')
-            except:
-                safe_ppt_id = ppt_filename.replace('/', '_').replace('\\', '_').replace(' ', '_')
+            safe_ppt_id = normalize_presentation_id(ppt_filename)
 
             # Find first slide number
             first_slide = "0"
@@ -785,6 +988,21 @@ def main():
                 "updated_at": firestore.SERVER_TIMESTAMP
             }, merge=True)
             logger.info("✅ Live pointer set.")
+            if not args.skip_public_demo_class:
+                try:
+                    upsert_public_demo_class(
+                        backend_project_id=backend_project_id,
+                        client_project_id=client_project_id,
+                        class_id=args.course_id,
+                        class_title=f"{args.course_title} Demo",
+                        course_id=args.course_id,
+                        current_presentation_id=safe_ppt_id,
+                        current_slide_id=first_slide,
+                    )
+                    logger.info(f"✅ Public demo class ready: {args.course_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to upsert public demo class: {e}")
+                    sys.exit(1)
             
         except Exception as e:
             logger.error(f"Failed to set live pointer: {e}")

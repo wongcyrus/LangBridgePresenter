@@ -142,9 +142,10 @@ def _list_student_classes(db: firestore.Client, *, uid: str, email: str):
                 "course_title": course_title,
                 "teacher_uid": class_data.get("teacher_uid"),
                 "teacher_email": class_data.get("teacher_email"),
+                "is_public": class_data.get("is_public") is True,
                 "current_presentation_id": class_data.get("current_presentation_id"),
                 "current_slide_id": class_data.get("current_slide_id"),
-                "enrolled": enrollment.get("active") is True,
+                "enrolled": (enrollment.get("active") is True) or (class_data.get("is_public") is True),
                 "student_status": enrollment.get("status"),
                 "updated_at": _to_iso8601(class_data.get("updated_at")),
             }
@@ -261,6 +262,8 @@ def _resolve_class_access(db: firestore.Client, *, uid: str, email: str, class_i
         return {"allowed": True, "role": "admin", "class_data": class_data}
     if class_data.get("teacher_uid") == uid:
         return {"allowed": True, "role": "teacher", "class_data": class_data}
+    if class_data.get("is_public") is True:
+        return {"allowed": True, "role": "public", "class_data": class_data}
 
     enrollment = db.collection("student_enrollments").document(uid).collection("classes").document(class_id).get()
     if enrollment.exists and (enrollment.to_dict() or {}).get("active") is True:
