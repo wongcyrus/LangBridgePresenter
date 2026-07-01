@@ -72,13 +72,17 @@ Then complete:
 - `POST /api/config` - Update Firestore config and live presentation broadcast
 - `POST /api/voice-chat` - Backend voice assistant request (speech transcript -> answer/audio + commands)
 - `GET /api/voice-chat-access` - Check if signed-in user is granted voice chat access
-- `GET/POST /api/voice-chat-admin` - Admin usage and limit management
+- `GET/POST /api/voice-chat-admin` - Admin usage, limits, and voice-user grant/revoke management
 - `POST /api/voice-live-session` - Open/heartbeat/close short-lived voice live session lease
 
 `talk-stream`, `welcome`, `goodbye`, `recquestions`, and `speech` use header-based request signature validation. `/api/config` is exposed through API Gateway key protection and updates Firestore-backed runtime state.
 
 `/api/voice-chat-access` requires Firebase ID token authentication and returns whether the user is active in `voice_chat_users`.
-`/api/voice-chat-admin` requires Firebase ID token authentication (`Authorization: Bearer <idToken>`) and admin access (custom claim, allowlist, or `admin_users` records).
+`/api/voice-chat-admin` requires Firebase ID token authentication (`Authorization: Bearer <idToken>`) and admin access (custom claim, allowlist, or `admin_users` records). It supports:
+- `GET`: dashboard summary + usage + voice user list
+- `POST action=update_limits`: update per-minute/per-day limits
+- `POST action=grant_voice_user`: grant voice access by email
+- `POST action=revoke_voice_user`: revoke voice access by email
 `/api/voice-live-session` requires Firebase ID token authentication and active `voice_chat_users` access for every `open`, `heartbeat`, and `close` operation.
 `/api/voice-chat` requires Firebase ID token authentication, active `voice_chat_users` access, and a valid lease session id issued by `/api/voice-live-session`.
 `voice-live-proxy` (Cloud Run WebSocket service) bridges browser requests to Gemini Live after verifying Firebase ID token + live lease (`voice_live_sessions`).

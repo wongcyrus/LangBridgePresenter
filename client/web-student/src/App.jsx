@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { doc, onSnapshot, collection, getDocs, getDoc } from "firebase/firestore";
 import {
   onAuthStateChanged,
@@ -134,9 +134,11 @@ const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, has
 
 // --- Main App Component ---
 function App() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const hasClassParam = searchParams.has('class') || searchParams.has('courseId');
   const courseId = searchParams.get('class') || searchParams.get('courseId') || 'current';
+  const isAdminPage = location.pathname === "/voice-admin";
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
   const [viewLang, setViewLang] = useState('en');
@@ -182,8 +184,10 @@ function App() {
   const [adminStatus, setAdminStatus] = useState("");
   const [adminSummary, setAdminSummary] = useState(null);
   const [adminTopUsage, setAdminTopUsage] = useState([]);
-  const [limitPerMinute, setLimitPerMinute] = useState(10);
-  const [limitPerDay, setLimitPerDay] = useState(200);
+  const [adminUsageLogs, setAdminUsageLogs] = useState([]);
+  const [adminVoiceUsers, setAdminVoiceUsers] = useState([]);
+  const [adminGrantEmail, setAdminGrantEmail] = useState("");
+  const [limitMinutesPerDay, setLimitMinutesPerDay] = useState(120);
 
   // Refs
   const audioRef = useRef(new Audio());
@@ -223,6 +227,8 @@ function App() {
   const GCP_PROJECT_ID = (import.meta.env.VITE_GCP_PROJECT_ID || "").trim();
   const LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
   const LIVE_MODEL_LOCATION = (import.meta.env.VITE_VOICE_LIVE_MODEL_LOCATION || "us-central1").trim();
+  const VOICE_NAME = (import.meta.env.VITE_VOICE_NAME || "Aoede").trim();
+  const ENABLE_GROUNDING = true;
 
   const AUDIO_LANGUAGE_NAMES = {
     "en-US": "English",
@@ -393,9 +399,10 @@ function App() {
       setAdminStatus("");
       setAdminSummary(data.summary || null);
       setAdminTopUsage(Array.isArray(data.top_usage) ? data.top_usage : []);
+      setAdminUsageLogs(Array.isArray(data.usage_logs) ? data.usage_logs : []);
+      setAdminVoiceUsers(Array.isArray(data.voice_users) ? data.voice_users : []);
       if (data.limits) {
-        setLimitPerMinute(data.limits.requests_per_minute ?? 10);
-        setLimitPerDay(data.limits.requests_per_day ?? 200);
+        setLimitMinutesPerDay(data.limits.minutes_per_day ?? data.limits.requests_per_day ?? 120);
       }
     } catch (error) {
       setAdminEnabled(false);
@@ -461,8 +468,8 @@ function App() {
           "Authorization": `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          requests_per_minute: Number(limitPerMinute),
-          requests_per_day: Number(limitPerDay),
+          action: "update_limits",
+          minutes_per_day: Number(limitMinutesPerDay),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -474,6 +481,74 @@ function App() {
     } catch (error) {
       console.error("Admin limits update failed:", error);
       setAdminStatus(error.message || "Failed to update limits");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const grantVoiceUser = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const email = String(adminGrantEmail || "").trim().toLowerCase();
+    if (!email) {
+      setAdminStatus("Email is required");
+      return;
+    }
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "grant_voice_user",
+          email,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to grant voice user");
+      }
+      setAdminGrantEmail("");
+      setAdminStatus(data.message || "Voice user granted");
+      await loadAdminDashboard(currentUser);
+    } catch (error) {
+      console.error("Grant voice user failed:", error);
+      setAdminStatus(error?.message || "Failed to grant voice user");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const revokeVoiceUser = async (email) => {
+    if (!currentUser || !API_BASE_URL) return;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "revoke_voice_user",
+          email: normalizedEmail,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to revoke voice user");
+      }
+      setAdminStatus(data.message || "Voice user revoked");
+      await loadAdminDashboard(currentUser);
+    } catch (error) {
+      console.error("Revoke voice user failed:", error);
+      setAdminStatus(error?.message || "Failed to revoke voice user");
     } finally {
       setAdminLoading(false);
     }
@@ -717,6 +792,23 @@ function App() {
       },
     },
     {
+      name: "go_to_slide",
+      description: "Jump directly to a specific slide/page number.",
+      parameters: {
+        type: "object",
+        properties: {
+          slide_number: {
+            type: "number",
+            description: "Target slide/page number (for example 5).",
+          },
+          page_number: {
+            type: "number",
+            description: "Alias of slide_number.",
+          },
+        },
+      },
+    },
+    {
       name: "set_live_sync",
       description: "Enable or disable live sync mode.",
       parameters: {
@@ -874,6 +966,12 @@ function App() {
 
     if (payload.type === "proxy_ready") {
       voiceProxyAuthorizedRef.current = true;
+      const setupTools = ENABLE_GROUNDING
+        ? {
+          function_declarations: buildVoiceToolDeclarations(),
+          google_search: {},
+        }
+        : { function_declarations: buildVoiceToolDeclarations() };
       const setupMessage = {
         setup: {
           model: `projects/${GCP_PROJECT_ID}/locations/${LIVE_MODEL_LOCATION}/publishers/google/models/${LIVE_MODEL}`,
@@ -882,7 +980,7 @@ function App() {
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: {
-                  voice_name: "Puck",
+                  voice_name: VOICE_NAME,
                 },
               },
             },
@@ -900,9 +998,7 @@ Do not bundle multiple function calls in one response unless absolutely required
 Keep replies short and explicit about the action completed.`,
             }],
           },
-          tools: {
-            function_declarations: buildVoiceToolDeclarations(),
-          },
+          tools: setupTools,
           input_audio_transcription: {},
           output_audio_transcription: {},
         },
@@ -1845,7 +1941,32 @@ Keep replies short and explicit about the action completed.`,
           setIsLiveMode(false);
           return { ok: true, message: "Moved to previous slide." };
         }
+        const directTarget = Number(args.slide_number ?? args.page_number);
+        if (Number.isFinite(directTarget)) {
+          const target = Math.trunc(directTarget);
+          if (!latestSlideList.includes(target)) {
+            return { ok: false, message: `Slide ${target} is not available.` };
+          }
+          setViewingSlideId(String(target));
+          setIsLiveMode(false);
+          return { ok: true, message: `Moved to slide ${target}.` };
+        }
         return { ok: false, message: "Direction must be next or previous." };
+      }
+
+      if (name === "go_to_slide") {
+        const { slideList: latestSlideList } = voiceStateRef.current;
+        const directTarget = Number(args.slide_number ?? args.page_number ?? args.slide ?? args.page);
+        if (!Number.isFinite(directTarget)) {
+          return { ok: false, message: "slide_number is required." };
+        }
+        const target = Math.trunc(directTarget);
+        if (!latestSlideList.includes(target)) {
+          return { ok: false, message: `Slide ${target} is not available.` };
+        }
+        setViewingSlideId(String(target));
+        setIsLiveMode(false);
+        return { ok: true, message: `Moved to slide ${target}.` };
       }
 
       if (name === "set_live_sync") {
@@ -1928,7 +2049,7 @@ Keep replies short and explicit about the action completed.`,
       if (name === "help_commands") {
         return {
           ok: true,
-          message: "Try: next slide, previous slide, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, next audio language, previous display language, seek forward 10 seconds, seek back 30 seconds, jump narration to start, pause narration, or resume narration.",
+          message: "Try: next slide, previous slide, go to slide 5, enable live sync, disable live sync, set audio language to Cantonese, set display language to English, next audio language, previous display language, seek forward 10 seconds, seek back 30 seconds, jump narration to start, pause narration, or resume narration.",
         };
       }
 
@@ -2009,6 +2130,17 @@ Keep replies short and explicit about the action completed.`,
               return;
           }
 
+          const normalizedKey = (event.key || "").toLowerCase();
+          if (normalizedKey === "m" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              if (isListening || voiceBusy) {
+                  stopVoiceCapture();
+              } else {
+                  startVoiceCapture();
+              }
+              return;
+          }
+
           if (event.key === "ArrowLeft") {
               event.preventDefault();
               handlePrev();
@@ -2053,7 +2185,7 @@ Keep replies short and explicit about the action completed.`,
       return () => window.removeEventListener("keydown", onKeyDown);
   }, [isFullScreen, livePptId, liveSlideId, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList, togglePlay, narrateCurrentSlide, stopNarration, seekAudio, jumpToAudioStart, handlePrev, handleNext, toggleLiveMode, activeAudioUrl, isPlaying, isListening, voiceBusy]);
 
-  if (!isReady) {
+  if (!isReady && !isAdminPage) {
       return (
           <div className="splash-screen">
               <h1>LangBridge</h1>
@@ -2075,6 +2207,153 @@ Keep replies short and explicit about the action completed.`,
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
   const canUseVoiceChat = Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason);
+  const backToSlidesHref = searchParams.toString() ? `/?${searchParams.toString()}` : "/";
+
+  if (isAdminPage) {
+    return (
+      <div className="container" style={{ padding: "18px", overflow: "auto" }}>
+        <header style={{ padding: 0, borderBottom: "none", marginBottom: "12px" }}>
+          <h1>🎛️ Voice Chat Admin</h1>
+          <div className="controls">
+            <button
+              type="button"
+              className="account-action-btn"
+              onClick={() => { window.location.href = backToSlidesHref; }}
+            >
+              Back to Slides
+            </button>
+            <button
+              type="button"
+              className="account-action-btn"
+              onClick={currentUser ? handleSignOut : handleSignIn}
+            >
+              <UserIcon />
+              <span>{currentUser ? "Sign out" : "Sign in"}</span>
+            </button>
+            {currentUser && adminEnabled && (
+              <button
+                type="button"
+                className="account-action-btn"
+                onClick={() => { window.location.href = "/voice-admin"; }}
+              >
+                Voice Admin
+              </button>
+            )}
+          </div>
+        </header>      
+        <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
+        {!currentUser && (
+          <div style={{ color: "#4b5563" }}>Sign in with an admin account to manage voice-chat users and limits.</div>
+        )}
+        {currentUser && !adminEnabled && (
+          <div style={{ color: "#b91c1c" }}>This account does not have voice admin access.</div>
+        )}
+        {currentUser && adminEnabled && (
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+              <strong>Voice Chat Controls</strong>
+              <button
+                type="button"
+                onClick={() => loadAdminDashboard()}
+                disabled={adminLoading}
+                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+              >
+                Refresh
+              </button>
+            </div>
+            {adminSummary && (
+              <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
+                Tracked users: {adminSummary.tracked_users} · Today used: {adminSummary.total_today_minutes} minutes
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Minutes per day
+                <input
+                  type="number"
+                  min="1"
+                  value={limitMinutesPerDay}
+                  onChange={(e) => setLimitMinutesPerDay(e.target.value)}
+                  style={{ marginLeft: "6px", width: "110px" }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={saveAdminLimits}
+                disabled={adminLoading}
+                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+              >
+                Save limits
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Grant voice access (email)
+                <input
+                  type="email"
+                  value={adminGrantEmail}
+                  onChange={(e) => setAdminGrantEmail(e.target.value)}
+                  placeholder="student@example.com"
+                  style={{ marginLeft: "6px", width: "240px" }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={grantVoiceUser}
+                disabled={adminLoading}
+                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+              >
+                Grant user
+              </button>
+            </div>
+            {adminStatus && <div style={{ fontSize: "0.9rem", color: "#4b5563", marginBottom: "8px" }}>{adminStatus}</div>}
+            <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Voice chat users</div>
+              {adminVoiceUsers.length === 0 && (
+                <div style={{ color: "#6b7280" }}>No voice users configured</div>
+              )}
+              {adminVoiceUsers.map((user) => (
+                <div key={user.key} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "3px 0", alignItems: "center" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {user.value} {user.active ? "" : "(inactive)"}
+                  </span>
+                  {user.type === "email" && user.active && (
+                    <button
+                      type="button"
+                      onClick={() => revokeVoiceUser(user.value)}
+                      disabled={adminLoading}
+                      style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ maxHeight: "170px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Top usage today</div>
+              {adminTopUsage.slice(0, 20).map((row) => (
+                <div key={row.uid} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.email || row.uid}</span>
+                  <span>{row.used_minutes} min</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ maxHeight: "190px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
+              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Recent session logs</div>
+              {adminUsageLogs.length === 0 && <div style={{ color: "#6b7280" }}>No usage logs yet</div>}
+              {adminUsageLogs.slice(0, 30).map((log) => (
+                <div key={log.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{log.email || log.uid}</span>
+                  <span>{Math.round((log.duration_seconds || 0) / 60)} min · {log.ended_reason || "ended"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="container single-slide-view">
@@ -2158,67 +2437,6 @@ Keep replies short and explicit about the action completed.`,
         <div className="voice-assistant-inline">
           <MicIcon />
           <span>{voiceStatus}</span>
-        </div>
-      )}
-      {currentUser && adminEnabled && (
-        <div style={{ marginBottom: "10px", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "10px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-            <strong>Voice Chat Admin</strong>
-            <button
-              type="button"
-              onClick={() => loadAdminDashboard()}
-              disabled={adminLoading}
-              style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-            >
-              Refresh
-            </button>
-          </div>
-          <>
-              {adminSummary && (
-                <div style={{ fontSize: "0.85rem", marginBottom: "8px" }}>
-                  Tracked users: {adminSummary.tracked_users} · Today requests: {adminSummary.total_today_requests}
-                </div>
-              )}
-              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
-                <label style={{ fontSize: "0.85rem" }}>
-                  Per minute
-                  <input
-                    type="number"
-                    min="1"
-                    value={limitPerMinute}
-                    onChange={(e) => setLimitPerMinute(e.target.value)}
-                    style={{ marginLeft: "6px", width: "80px" }}
-                  />
-                </label>
-                <label style={{ fontSize: "0.85rem" }}>
-                  Per day
-                  <input
-                    type="number"
-                    min="1"
-                    value={limitPerDay}
-                    onChange={(e) => setLimitPerDay(e.target.value)}
-                    style={{ marginLeft: "6px", width: "90px" }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={saveAdminLimits}
-                  disabled={adminLoading}
-                  style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-                >
-                  Save limits
-                </button>
-              </div>
-              {adminStatus && <div style={{ fontSize: "0.82rem", color: "#4b5563", marginBottom: "6px" }}>{adminStatus}</div>}
-              <div style={{ maxHeight: "160px", overflow: "auto", fontSize: "0.8rem", borderTop: "1px solid #f3f4f6", paddingTop: "6px" }}>
-                {adminTopUsage.slice(0, 15).map((row) => (
-                  <div key={row.uid} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.uid}</span>
-                    <span>{row.day_count} today</span>
-                  </div>
-                ))}
-              </div>
-          </>
         </div>
       )}
       <div className="sub-header">
@@ -2361,6 +2579,9 @@ Keep replies short and explicit about the action completed.`,
             </span>
             <span className="shortcut-hint">
               Voice chat active: player shortcuts are blocked
+            </span>
+            <span className="shortcut-hint">
+              Voice: M start/stop
             </span>
             <span className="compact-status-line">Narration: {narrationStatus}</span>
           </div>

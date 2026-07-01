@@ -67,33 +67,57 @@ def _setup_admin_get_db(module):
     db = MagicMock()
     settings_collection = MagicMock()
     usage_collection = MagicMock()
+    usage_logs_collection = MagicMock()
+    users_collection = MagicMock()
     settings_ref = MagicMock()
     settings_snap = MagicMock()
     settings_snap.exists = True
     settings_snap.to_dict.return_value = {
-        "requests_per_minute": 15,
-        "requests_per_day": 500,
+        "minutes_per_day": 90,
     }
     settings_ref.get.return_value = settings_snap
     settings_collection.document.return_value = settings_ref
 
     usage_doc = MagicMock()
-    usage_doc.id = "user-1"
+    usage_doc.id = "user-1:20990101"
     usage_doc.to_dict.return_value = {
+        "uid": "user-1",
+        "email": "user-1@example.com",
         "day_key": "20990101",
-        "day_count": 42,
-        "minute_key": "209901010101",
-        "minute_count": 2,
+        "used_seconds": 3660,
     }
-    usage_query = MagicMock()
-    usage_query.limit.return_value.stream.return_value = [usage_doc]
-    usage_collection.order_by.return_value = usage_query
+    usage_collection.where.return_value.stream.return_value = [usage_doc]
+
+    usage_log_doc = MagicMock()
+    usage_log_doc.id = "user-1:session-a"
+    usage_log_doc.to_dict.return_value = {
+        "uid": "user-1",
+        "email": "user-1@example.com",
+        "session_id": "session-a",
+        "day_key": "20990101",
+        "duration_seconds": 180,
+        "ended_reason": "client_stop",
+        "started_at": "2099-01-01T00:00:00Z",
+        "ended_at": "2099-01-01T00:03:00Z",
+    }
+    usage_logs_collection.order_by.return_value.limit.return_value.stream.return_value = [usage_log_doc]
+    user_doc = MagicMock()
+    user_doc.id = "email:student@example.com"
+    user_doc.to_dict.return_value = {
+        "active": True,
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    users_collection.stream.return_value = [user_doc]
 
     def _collection(name):
         if name == "voice_chat_settings":
             return settings_collection
-        if name == "voice_chat_usage":
+        if name == "voice_live_usage_daily":
             return usage_collection
+        if name == "voice_live_usage_logs":
+            return usage_logs_collection
+        if name == "voice_chat_users":
+            return users_collection
         raise AssertionError(f"Unexpected collection: {name}")
 
     db.collection.side_effect = _collection
@@ -121,15 +145,20 @@ def test_voice_chat_admin_get_returns_limits_and_usage(voice_chat_admin_module, 
 
     assert status == 200
     payload = json.loads(body)
-    assert payload["limits"]["requests_per_minute"] == 15
-    assert payload["limits"]["requests_per_day"] == 500
+    assert payload["limits"]["minutes_per_day"] == 90
     assert payload["summary"]["tracked_users"] == 1
+    assert payload["summary"]["total_today_minutes"] == 61.0
     assert payload["top_usage"][0]["uid"] == "user-1"
+    assert payload["usage_logs"][0]["session_id"] == "session-a"
+    assert payload["voice_users"][0]["key"] == "email:student@example.com"
 
 
 def test_voice_chat_admin_post_updates_limits(voice_chat_admin_module, mock_request, monkeypatch):
     mock_request.method = "POST"
-    mock_request.get_json.return_value = {"requests_per_minute": 12, "requests_per_day": 300}
+    mock_request.get_json.return_value = {
+        "action": "update_limits",
+        "minutes_per_day": 300,
+    }
     monkeypatch.setattr(voice_chat_admin_module, "_verify_user", lambda _request: {"uid": "admin-1", "admin": True})
 
     db = MagicMock()
@@ -144,9 +173,92 @@ def test_voice_chat_admin_post_updates_limits(voice_chat_admin_module, mock_requ
     assert status == 200
     payload = json.loads(body)
     assert payload["ok"] is True
-    assert payload["limits"]["requests_per_minute"] == 12
-    assert payload["limits"]["requests_per_day"] == 300
+    assert payload["limits"]["minutes_per_day"] == 300
     assert settings_ref.set.called
+
+
+def test_voice_chat_admin_grants_voice_user(voice_chat_admin_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {"action": "grant_voice_user", "email": "student@example.com"}
+    monkeypatch.setattr(voice_chat_admin_module, "_verify_user", lambda _request: {"uid": "admin-1", "admin": True})
+
+    db = MagicMock()
+    users_collection = MagicMock()
+    user_ref = MagicMock()
+    user_snap = MagicMock()
+    user_snap.exists = False
+    user_ref.get.return_value = user_snap
+    users_collection.document.return_value = user_ref
+
+    settings_collection = MagicMock()
+    settings_collection.document.return_value = MagicMock()
+    usage_collection = MagicMock()
+    usage_collection.where.return_value.stream.return_value = []
+    usage_logs_collection = MagicMock()
+    usage_logs_collection.order_by.return_value.limit.return_value.stream.return_value = []
+
+    def _collection(name):
+        if name == "voice_chat_users":
+            return users_collection
+        if name == "voice_chat_settings":
+            return settings_collection
+        if name == "voice_live_usage_daily":
+            return usage_collection
+        if name == "voice_live_usage_logs":
+            return usage_logs_collection
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    db.collection.side_effect = _collection
+    voice_chat_admin_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_chat_admin_module.voice_chat_admin(mock_request)
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert "Granted voice access" in payload["message"]
+    assert user_ref.set.called
+
+
+def test_voice_chat_admin_revokes_voice_user(voice_chat_admin_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {"action": "revoke_voice_user", "email": "student@example.com"}
+    monkeypatch.setattr(voice_chat_admin_module, "_verify_user", lambda _request: {"uid": "admin-1", "admin": True})
+
+    db = MagicMock()
+    users_collection = MagicMock()
+    user_ref = MagicMock()
+    user_snap = MagicMock()
+    user_snap.exists = True
+    user_ref.get.return_value = user_snap
+    users_collection.document.return_value = user_ref
+
+    settings_collection = MagicMock()
+    settings_collection.document.return_value = MagicMock()
+    usage_collection = MagicMock()
+    usage_collection.where.return_value.stream.return_value = []
+    usage_logs_collection = MagicMock()
+    usage_logs_collection.order_by.return_value.limit.return_value.stream.return_value = []
+
+    def _collection(name):
+        if name == "voice_chat_users":
+            return users_collection
+        if name == "voice_chat_settings":
+            return settings_collection
+        if name == "voice_live_usage_daily":
+            return usage_collection
+        if name == "voice_live_usage_logs":
+            return usage_logs_collection
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    db.collection.side_effect = _collection
+    voice_chat_admin_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_chat_admin_module.voice_chat_admin(mock_request)
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert "Revoked voice access" in payload["message"]
+    assert user_ref.set.called
 
 
 def test_is_admin_via_firestore_uid_record(voice_chat_admin_module):

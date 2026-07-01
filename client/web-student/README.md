@@ -30,7 +30,7 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 *   **Strict Auth Gate**: WebSocket session is allowed only after Firebase ID token + voice grant + active lease validation.
 *   **No Fallback**: If proxy/auth/context is invalid, the session stops immediately. No direct browser Gemini path and no fallback model path.
 *   **Server Lease Enforcement**: Live session start/heartbeat/close must pass backend lease checks (`/api/voice-live-session`) with expiry enforcement.
-*   **Admin Controls**: Admin users can view voice-chat usage and tune per-minute/per-day limits in-app.
+*   **Admin Controls**: Admin users can manage voice-chat users and limits on a dedicated page: `/voice-admin` (not embedded in slide view).
 *   **iOS Chrome Limitation**: Voice chat is intentionally blocked on iPad/iPhone Chrome (`CriOS`). Use Safari on iOS devices.
 
 ### 🗣️ Voice Commands (Accessibility)
@@ -46,6 +46,7 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
 *   **Navigation**: `←` / `→` (prev/next slide), `L` (toggle Live Sync), `Esc` (close fullscreen or stop narration)
 *   **Languages**: `Alt+V` (cycle display language), `Alt+A` (cycle audio language)
 *   **Player**: `Space` (play/pause), `R` (restart current MP3), `S` (stop), `A`/`D` (seek -10s / +10s), `Shift+A`/`Shift+D` (seek -30s / +30s), `Home` (jump to start)
+*   **Voice**: `M` (toggle voice chat start/stop)
 
 ### 🎧 MP3 + Voice Chat Interaction Rules
 
@@ -127,7 +128,10 @@ VITE_FIREBASE_APPCHECK_SITE_KEY=<recaptcha-enterprise-site-key>
 VITE_VOICE_LIVE_PROXY_WS_URL=wss://<voice-live-proxy-host>
 VITE_GCP_PROJECT_ID=<backend-project-id>
 VITE_VOICE_LIVE_MODEL_LOCATION=us-central1
+VITE_VOICE_NAME=Aoede
 ```
+
+When grounding is enabled in code, the setup includes both `google_search` and `function_declarations` so web grounding and client tool-calling can run together in one Live session.
 
 ### 3. Run Locally
 

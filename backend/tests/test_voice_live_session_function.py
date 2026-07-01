@@ -77,6 +77,7 @@ def test_voice_live_session_open_returns_lease(voice_live_session_module, mock_r
         lambda _request: {"uid": "u-1", "email": "u1@example.com"},
     )
     monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
+    monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
 
     db = MagicMock()
     lease_ref = MagicMock()
@@ -102,6 +103,7 @@ def test_voice_live_session_heartbeat_rejects_invalid_session(voice_live_session
         lambda _request: {"uid": "u-2", "email": "u2@example.com"},
     )
     monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
+    monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
 
     db = MagicMock()
     lease_ref = MagicMock()
@@ -129,6 +131,7 @@ def test_voice_live_session_close_marks_inactive(voice_live_session_module, mock
         lambda _request: {"uid": "u-3", "email": "u3@example.com"},
     )
     monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
+    monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
 
     db = MagicMock()
     lease_ref = MagicMock()
@@ -148,3 +151,28 @@ def test_voice_live_session_close_marks_inactive(voice_live_session_module, mock
     assert status == 200
     assert payload["closed"] is True
     assert lease_ref.set.called
+
+
+def test_voice_live_session_open_rejects_quota_exceeded(voice_live_session_module, mock_request, monkeypatch):
+    mock_request.get_json.return_value = {"action": "open"}
+    monkeypatch.setattr(
+        voice_live_session_module,
+        "_verify_user",
+        lambda _request: {"uid": "u-4", "email": "u4@example.com"},
+    )
+    monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
+    monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 1)
+    monkeypatch.setattr(voice_live_session_module, "_current_used_seconds", lambda _db, _uid, _day_key: 61)
+
+    db = MagicMock()
+    lease_ref = MagicMock()
+    lease_snap = MagicMock()
+    lease_snap.exists = False
+    lease_ref.get.return_value = lease_snap
+    db.collection.return_value.document.return_value = lease_ref
+    voice_live_session_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_live_session_module.voice_live_session(mock_request)
+    payload = json.loads(body)
+    assert status == 403
+    assert payload["code"] == "quota_exceeded"

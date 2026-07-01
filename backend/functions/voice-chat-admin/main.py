@@ -87,9 +87,80 @@ def _is_admin(decoded_token: dict, db: firestore.Client) -> bool:
 
 def _default_limits():
     return {
-        "requests_per_minute": int(os.environ.get("VOICE_CHAT_REQUESTS_PER_MINUTE", "10")),
-        "requests_per_day": int(os.environ.get("VOICE_CHAT_REQUESTS_PER_DAY", "200")),
+        "minutes_per_day": int(os.environ.get("VOICE_LIVE_MINUTES_PER_DAY", "120")),
     }
+
+
+def _to_iso8601(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _normalize_email(raw_value: str) -> str:
+    return (raw_value or "").strip().lower()
+
+
+def _voice_user_from_doc(doc):
+    data = doc.to_dict() or {}
+    doc_id = doc.id
+    if ":" in doc_id:
+        key_type, key_value = doc_id.split(":", 1)
+    else:
+        key_type, key_value = "unknown", doc_id
+    return {
+        "key": doc_id,
+        "type": key_type,
+        "value": key_value,
+        "active": data.get("active") is True,
+        "note": data.get("note"),
+        "created_at": _to_iso8601(data.get("created_at")),
+        "updated_at": _to_iso8601(data.get("updated_at")),
+        "updated_by": data.get("updated_by"),
+    }
+
+
+def _list_voice_users(db: firestore.Client):
+    users = []
+    for doc in db.collection("voice_chat_users").stream():
+        users.append(_voice_user_from_doc(doc))
+    users.sort(
+        key=lambda item: (
+            item.get("active") is True,
+            item.get("updated_at") or "",
+            item.get("key") or "",
+        ),
+        reverse=True,
+    )
+    return users[:200]
+
+
+def _list_usage_logs(db: firestore.Client):
+    logs = []
+    docs = db.collection("voice_live_usage_logs").order_by("ended_at", direction=firestore.Query.DESCENDING).limit(50).stream()
+    for doc in docs:
+        data = doc.to_dict() or {}
+        logs.append(
+            {
+                "id": doc.id,
+                "uid": data.get("uid"),
+                "email": data.get("email"),
+                "session_id": data.get("session_id"),
+                "day_key": data.get("day_key"),
+                "duration_seconds": int(data.get("duration_seconds", 0)),
+                "ended_reason": data.get("ended_reason"),
+                "started_at": data.get("started_at"),
+                "ended_at": data.get("ended_at"),
+            }
+        )
+    return logs
 
 
 @functions_framework.http
@@ -114,40 +185,89 @@ def voice_chat_admin(request: Request):
 
     if request.method == "POST":
         payload = request.get_json(silent=True) or {}
-        if "requests_per_minute" not in payload or "requests_per_day" not in payload:
-            return (json.dumps({"error": "requests_per_minute and requests_per_day are required"}), 400, headers)
-        try:
-            per_min = int(payload["requests_per_minute"])
-            per_day = int(payload["requests_per_day"])
-        except (TypeError, ValueError):
-            return (json.dumps({"error": "Limit values must be integers"}), 400, headers)
-        if per_min <= 0 or per_day <= 0:
-            return (json.dumps({"error": "Limit values must be > 0"}), 400, headers)
-        if per_min > 1000 or per_day > 100000:
-            return (json.dumps({"error": "Limit values are too high"}), 400, headers)
+        action = str(payload.get("action") or "").strip().lower()
+        if not action:
+            if "minutes_per_day" in payload:
+                action = "update_limits"
+            else:
+                return (json.dumps({"error": "action is required"}), 400, headers)
 
-        settings_ref.set(
-            {
-                "requests_per_minute": per_min,
-                "requests_per_day": per_day,
-                "updated_at": firestore.SERVER_TIMESTAMP,
-                "updated_by": decoded.get("uid"),
-            },
-            merge=True,
-        )
-        return (
-            json.dumps(
+        if action == "update_limits":
+            minutes_per_day_raw = payload.get("minutes_per_day")
+            if minutes_per_day_raw is None and payload.get("requests_per_day") is not None:
+                minutes_per_day_raw = payload.get("requests_per_day")
+            if minutes_per_day_raw is None:
+                return (json.dumps({"error": "minutes_per_day is required"}), 400, headers)
+            try:
+                minutes_per_day = int(minutes_per_day_raw)
+            except (TypeError, ValueError):
+                return (json.dumps({"error": "minutes_per_day must be an integer"}), 400, headers)
+            if minutes_per_day <= 0:
+                return (json.dumps({"error": "minutes_per_day must be > 0"}), 400, headers)
+            if minutes_per_day > 24 * 60:
+                return (json.dumps({"error": "minutes_per_day is too high"}), 400, headers)
+
+            settings_ref.set(
                 {
-                    "ok": True,
-                    "limits": {
-                        "requests_per_minute": per_min,
-                        "requests_per_day": per_day,
-                    },
-                }
-            ),
-            200,
-            headers,
-        )
+                    "minutes_per_day": minutes_per_day,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "updated_by": decoded.get("uid"),
+                },
+                merge=True,
+            )
+            return (
+                json.dumps(
+                    {
+                        "ok": True,
+                        "limits": {
+                            "minutes_per_day": minutes_per_day,
+                        },
+                    }
+                ),
+                200,
+                headers,
+            )
+
+        if action == "grant_voice_user":
+            email = _normalize_email(str(payload.get("email") or ""))
+            if not email or "@" not in email:
+                return (json.dumps({"error": "Valid email is required"}), 400, headers)
+            note = str(payload.get("note") or "").strip()
+            user_ref = db.collection("voice_chat_users").document(f"email:{email}")
+            existing_snap = user_ref.get()
+            existing = existing_snap.to_dict() if existing_snap.exists else {}
+            user_ref.set(
+                {
+                    "active": True,
+                    "email": email,
+                    "note": note if note else existing.get("note"),
+                    "created_at": existing.get("created_at", firestore.SERVER_TIMESTAMP),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "updated_by": decoded.get("uid"),
+                },
+                merge=True,
+            )
+            return (json.dumps({"ok": True, "message": f"Granted voice access: {email}"}), 200, headers)
+
+        if action == "revoke_voice_user":
+            email = _normalize_email(str(payload.get("email") or ""))
+            if not email or "@" not in email:
+                return (json.dumps({"error": "Valid email is required"}), 400, headers)
+            user_ref = db.collection("voice_chat_users").document(f"email:{email}")
+            existing_snap = user_ref.get()
+            if not existing_snap.exists:
+                return (json.dumps({"error": "Voice user not found"}), 404, headers)
+            user_ref.set(
+                {
+                    "active": False,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "updated_by": decoded.get("uid"),
+                },
+                merge=True,
+            )
+            return (json.dumps({"ok": True, "message": f"Revoked voice access: {email}"}), 200, headers)
+
+        return (json.dumps({"error": f"Unsupported action: {action}"}), 400, headers)
 
     settings_snap = settings_ref.get()
     if settings_snap.exists:
@@ -155,40 +275,39 @@ def voice_chat_admin(request: Request):
     else:
         limits = _default_limits()
 
-    usage_docs = db.collection("voice_chat_usage").order_by(
-        "day_count", direction=firestore.Query.DESCENDING
-    ).limit(50).stream()
-
     usage = []
-    total_today = 0
+    total_today_seconds = 0
     today_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+    usage_docs = db.collection("voice_live_usage_daily").where("day_key", "==", today_key).stream()
     for doc in usage_docs:
         data = doc.to_dict() or {}
-        day_count = int(data.get("day_count", 0))
-        if data.get("day_key") == today_key:
-            total_today += day_count
+        used_seconds = int(data.get("used_seconds", 0))
+        total_today_seconds += used_seconds
         usage.append(
             {
-                "uid": doc.id,
+                "uid": data.get("uid") or (doc.id.split(":")[0] if ":" in doc.id else doc.id),
+                "email": data.get("email"),
                 "day_key": data.get("day_key"),
-                "day_count": day_count,
-                "minute_key": data.get("minute_key"),
-                "minute_count": int(data.get("minute_count", 0)),
+                "used_seconds": used_seconds,
+                "used_minutes": round(used_seconds / 60, 2),
             }
         )
+    usage.sort(key=lambda row: row.get("used_seconds", 0), reverse=True)
+    usage = usage[:50]
 
     return (
         json.dumps(
             {
                 "limits": {
-                    "requests_per_minute": int(limits.get("requests_per_minute", _default_limits()["requests_per_minute"])),
-                    "requests_per_day": int(limits.get("requests_per_day", _default_limits()["requests_per_day"])),
+                    "minutes_per_day": int(limits.get("minutes_per_day", _default_limits()["minutes_per_day"])),
                 },
                 "summary": {
                     "tracked_users": len(usage),
-                    "total_today_requests": total_today,
+                    "total_today_minutes": round(total_today_seconds / 60, 2),
                 },
                 "top_usage": usage,
+                "voice_users": _list_voice_users(db),
+                "usage_logs": _list_usage_logs(db),
             },
             ensure_ascii=False,
         ),

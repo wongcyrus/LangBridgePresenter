@@ -125,7 +125,7 @@ sequenceDiagram
 ### 8. Voice Admin (`voice-chat-admin`)
 - **Path**: `/api/voice-chat-admin`
 - **Method**: GET/POST
-- **Purpose**: Voice usage dashboard and limit controls.
+- **Purpose**: Voice usage dashboard, limit controls, and voice-user grant/revoke management.
 
 ### 9. Voice Live Session Lease (`voice-live-session`)
 - **Path**: `/api/voice-live-session`
