@@ -72,17 +72,40 @@ Then complete:
 - `POST /api/config` - Update Firestore config and live presentation broadcast
 - `POST /api/voice-chat` - Backend voice assistant request (speech transcript -> answer/audio + commands)
 - `GET /api/voice-chat-access` - Check if signed-in user is granted voice chat access
-- `GET/POST /api/voice-chat-admin` - Admin usage, limits, and voice-user grant/revoke management
+- `GET/POST /api/voice-chat-admin` - Admin access and limit management
+- `GET/POST /api/admin-teachers` - Admin teacher-role grant/revoke and teacher listing
+- `GET/POST /api/teacher-courses` - Teacher course management + class cloning/student status
+- `GET/POST /api/student-courses` - Student class selection/enrollment/current view
+- `GET /api/teacher-student-records` - Teacher-facing student study records + latest user settings
 - `POST /api/voice-live-session` - Open/heartbeat/close short-lived voice live session lease
 
 `talk-stream`, `welcome`, `goodbye`, `recquestions`, and `speech` use header-based request signature validation. `/api/config` is exposed through API Gateway key protection and updates Firestore-backed runtime state.
 
 `/api/voice-chat-access` requires Firebase ID token authentication and returns whether the user is active in `voice_chat_users`.
 `/api/voice-chat-admin` requires Firebase ID token authentication (`Authorization: Bearer <idToken>`) and admin access (custom claim, allowlist, or `admin_users` records). It supports:
-- `GET`: dashboard summary + usage + voice user list
+- `GET`: dashboard summary + access user list
 - `POST action=update_limits`: update per-minute/per-day limits
 - `POST action=grant_voice_user`: grant voice access by email
 - `POST action=revoke_voice_user`: revoke voice access by email
+`/api/admin-teachers` requires Firebase ID token authentication + admin access and supports:
+- `GET`: teacher list
+- `POST action=grant_teacher`: grant teacher role by email (works before first login; resolves UID later when available)
+- `POST action=revoke_teacher`: revoke teacher role by email
+`/api/teacher-courses` requires teacher/admin access and supports:
+- `GET`: list owned courses and classes
+- `POST action=create_course`: create a teacher-owned course
+- `POST action=update_course`: update course metadata
+- `POST action=clone_class`: clone a course into an independent class instance
+- `POST action=set_student_status`: update student status in class roster/enrollments by UID or email (email-only pending assignment supported before first login)
+`/api/student-courses` requires Firebase ID token authentication and supports:
+- `GET`: list selectable classes + enrollment state
+- `POST action=enroll`: enroll/select a class
+- `POST action=access_check`: verify class access (`enrolled student` / `class teacher` / `admin`)
+- `POST action=current_view`: fetch class current presentation pointer (requires class access)
+`/api/teacher-student-records` requires Firebase ID token authentication + admin access and returns:
+- daily usage summary and top usage
+- recent session logs
+- latest per-user settings snapshot (display/audio language + autoplay + context)
 `/api/voice-live-session` requires Firebase ID token authentication and active `voice_chat_users` access for every `open`, `heartbeat`, and `close` operation.
 `/api/voice-chat` requires Firebase ID token authentication, active `voice_chat_users` access, and a valid lease session id issued by `/api/voice-live-session`.
 `voice-live-proxy` (Cloud Run WebSocket service) bridges browser requests to Gemini Live after verifying Firebase ID token + live lease (`voice_live_sessions`).

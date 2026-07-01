@@ -331,6 +331,70 @@ class LangBridgeApiStack extends TerraformStack {
       },
       additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
     });
+    const adminTeachersFunction = await CloudFunctionConstruct.create(this, "adminTeachersFunction", {
+      functionName: "admin-teachers",
+      runtime: "python311",
+      entryPoint: "admin_teachers",
+      timeout: 60,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_CHAT_ADMIN_EMAILS": process.env.VOICE_CHAT_ADMIN_EMAILS || "",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
+    const teacherCoursesFunction = await CloudFunctionConstruct.create(this, "teacherCoursesFunction", {
+      functionName: "teacher-courses",
+      runtime: "python311",
+      entryPoint: "teacher_courses",
+      timeout: 120,
+      availableMemory: "512Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_CHAT_ADMIN_EMAILS": process.env.VOICE_CHAT_ADMIN_EMAILS || "",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
+    const studentCoursesFunction = await CloudFunctionConstruct.create(this, "studentCoursesFunction", {
+      functionName: "student-courses",
+      runtime: "python311",
+      entryPoint: "student_courses",
+      timeout: 60,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_CHAT_ADMIN_EMAILS": process.env.VOICE_CHAT_ADMIN_EMAILS || "",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
+    const teacherStudentRecordsFunction = await CloudFunctionConstruct.create(this, "teacherStudentRecordsFunction", {
+      functionName: "teacher-student-records",
+      runtime: "python311",
+      entryPoint: "teacher_student_records",
+      timeout: 60,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "VOICE_CHAT_ADMIN_EMAILS": process.env.VOICE_CHAT_ADMIN_EMAILS || "",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
     const voiceChatAccessFunction = await CloudFunctionConstruct.create(this, "voiceChatAccessFunction", {
       functionName: "voice-chat-access",
       runtime: "python311",
@@ -377,6 +441,10 @@ class LangBridgeApiStack extends TerraformStack {
         "CONFIG": configFunction.cloudFunction.url,
         "VOICE_CHAT": voiceChatFunction.cloudFunction.url,
         "VOICE_CHAT_ADMIN": voiceChatAdminFunction.cloudFunction.url,
+        "ADMIN_TEACHERS": adminTeachersFunction.cloudFunction.url,
+        "TEACHER_COURSES": teacherCoursesFunction.cloudFunction.url,
+        "STUDENT_COURSES": studentCoursesFunction.cloudFunction.url,
+        "TEACHER_STUDENT_RECORDS": teacherStudentRecordsFunction.cloudFunction.url,
         "VOICE_CHAT_ACCESS": voiceChatAccessFunction.cloudFunction.url,
         "VOICE_LIVE_SESSION": voiceLiveSessionFunction.cloudFunction.url
       },

@@ -8,7 +8,7 @@ set -e
 # (via CDK Terrain / CDKTN) and the frontend web client (to Firebase Hosting).
 #
 # Prerequisites:
-# 1. Ensure your env file (default: `backend/cdktf/.env`) is configured with project IDs and keys.
+# 1. Ensure your env file (default: `backend/cdktf/.env.dev`) is configured with project IDs and keys.
 # 2. Authenticate to gcloud and firebase CLI.
 #
 # Usage:
@@ -16,7 +16,7 @@ set -e
 #   ./deploy.sh --env-file backend/cdktf/.env.dev
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-ENV_FILE="$SCRIPT_DIR/backend/cdktf/.env"
+ENV_FILE="$SCRIPT_DIR/backend/cdktf/.env.dev"
 
 if [ "${1:-}" = "--env-file" ]; then
     if [ -z "${2:-}" ]; then
@@ -43,13 +43,19 @@ set -a
 . "$CDKTN_ENV_PATH"
 set +a
 
+if [ -z "${PROJECTID:-}" ]; then
+    echo "Error: PROJECTID is not set in $CDKTN_ENV_PATH"
+    exit 1
+fi
+
 echo "🚀 Starting full deployment..."
 
 # Deploy Backend Infrastructure via CDK Terrain / CDKTN and sync config files
 echo "
 --- Deploying Backend Infrastructure ---"
 # Capture absolute path for use after cd change
-OUTPUT_FILE="$SCRIPT_DIR/backend/cdktf_outputs.json"
+OUTPUT_FILE="$SCRIPT_DIR/backend/cdktf_outputs.${PROJECTID}.json"
+LEGACY_OUTPUT_FILE="$SCRIPT_DIR/backend/cdktf_outputs.json"
 
 # 1. Run Deployment
 bash "$SCRIPT_DIR/backend/deploy.sh" "$CDKTN_ENV_PATH"
@@ -59,6 +65,8 @@ echo "Exporting CDK Terrain outputs to $OUTPUT_FILE..."
 cd "$SCRIPT_DIR/backend/cdktf"
 # Use npx to run cdktn output and save to JSON
 npx cdktn output --outputs-file-include-sensitive-outputs --outputs-file "$OUTPUT_FILE" --json
+cp "$OUTPUT_FILE" "$LEGACY_OUTPUT_FILE"
+export CDKTF_OUTPUT_FILE="$OUTPUT_FILE"
 
 # 3. Run Sync Config (now uses the file if available)
 echo "Running final configuration sync..."
@@ -102,9 +110,16 @@ fi
 
 echo "
 --- Deploying Web Client Hosting ---"
-CLIENT_PROJECT_ID=$(jq -r '.cdktf["client-project-id"] // .cdktf["cdktf-langbridge-presenter-d2"]["client-project-id"] // .cdktf["cdktf-langbridge-presenter-dev"]["client-project-id"] // empty' "$OUTPUT_FILE")
+STACK_KEY="cdktf-$PROJECTID"
+CLIENT_PROJECT_ID=$(jq -r '
+  .[$stack]["client-project-id"] //
+  .cdktf[$stack]["client-project-id"] //
+  (.[]? | select(."project-id" == $project) | ."client-project-id") //
+  (.cdktf[]? | select(."project-id" == $project) | ."client-project-id") //
+  empty
+' --arg stack "$STACK_KEY" --arg project "$PROJECTID" "$OUTPUT_FILE")
 if [ -z "$CLIENT_PROJECT_ID" ]; then
-    echo "Error: client-project-id not found in $OUTPUT_FILE"
+    echo "Error: client-project-id not found for PROJECTID=$PROJECTID (stack=$STACK_KEY) in $OUTPUT_FILE"
     exit 1
 fi
 

@@ -13,7 +13,21 @@ TESTS_ENV = os.path.join(BACKEND_DIR, "tests", ".env.test")
 CDKTF_ENV = os.environ.get("CDKTF_ENV_PATH", os.path.join(CDKTF_DIR, ".env"))
 
 def get_cdktf_outputs():
-    # 1. Check for static output file in backend dir (passed from deploy machine)
+    # 1. Check for explicit output file path from deploy script
+    explicit_output_file = os.environ.get("CDKTF_OUTPUT_FILE", "").strip()
+    if explicit_output_file:
+        print(f"Loading configuration from {explicit_output_file}...")
+        try:
+            with open(explicit_output_file, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Error: explicit output file not found at {explicit_output_file}")
+            return None
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from {explicit_output_file}: {e}")
+            return None
+
+    # 2. Check for static output file in backend dir (passed from deploy machine)
     static_output_file = os.path.join(BACKEND_DIR, "cdktf_outputs.json")
     if os.path.exists(static_output_file):
         print(f"Loading configuration from {static_output_file}...")
@@ -25,7 +39,7 @@ def get_cdktf_outputs():
             # Fallback to dynamic fetch if file is corrupt? No, explicit file should be trusted.
             return None
 
-    # 2. Fallback: Fetch dynamically from CDKTF
+    # 3. Fallback: Fetch dynamically from CDKTF
     print(f"Fetching CDKTF outputs from {CDKTF_DIR}...")
     temp_output_file = os.path.join(CDKTF_DIR, "cdktf_outputs.json")
     try:

@@ -142,27 +142,6 @@ def _list_voice_users(db: firestore.Client):
     return users[:200]
 
 
-def _list_usage_logs(db: firestore.Client):
-    logs = []
-    docs = db.collection("voice_live_usage_logs").order_by("ended_at", direction=firestore.Query.DESCENDING).limit(50).stream()
-    for doc in docs:
-        data = doc.to_dict() or {}
-        logs.append(
-            {
-                "id": doc.id,
-                "uid": data.get("uid"),
-                "email": data.get("email"),
-                "session_id": data.get("session_id"),
-                "day_key": data.get("day_key"),
-                "duration_seconds": int(data.get("duration_seconds", 0)),
-                "ended_reason": data.get("ended_reason"),
-                "started_at": data.get("started_at"),
-                "ended_at": data.get("ended_at"),
-            }
-        )
-    return logs
-
-
 @functions_framework.http
 def voice_chat_admin(request: Request):
     headers = _cors_headers()
@@ -275,25 +254,7 @@ def voice_chat_admin(request: Request):
     else:
         limits = _default_limits()
 
-    usage = []
-    total_today_seconds = 0
-    today_key = datetime.now(timezone.utc).strftime("%Y%m%d")
-    usage_docs = db.collection("voice_live_usage_daily").where("day_key", "==", today_key).stream()
-    for doc in usage_docs:
-        data = doc.to_dict() or {}
-        used_seconds = int(data.get("used_seconds", 0))
-        total_today_seconds += used_seconds
-        usage.append(
-            {
-                "uid": data.get("uid") or (doc.id.split(":")[0] if ":" in doc.id else doc.id),
-                "email": data.get("email"),
-                "day_key": data.get("day_key"),
-                "used_seconds": used_seconds,
-                "used_minutes": round(used_seconds / 60, 2),
-            }
-        )
-    usage.sort(key=lambda row: row.get("used_seconds", 0), reverse=True)
-    usage = usage[:50]
+    voice_users = _list_voice_users(db)
 
     return (
         json.dumps(
@@ -302,12 +263,9 @@ def voice_chat_admin(request: Request):
                     "minutes_per_day": int(limits.get("minutes_per_day", _default_limits()["minutes_per_day"])),
                 },
                 "summary": {
-                    "tracked_users": len(usage),
-                    "total_today_minutes": round(total_today_seconds / 60, 2),
+                    "granted_users": len([u for u in voice_users if u.get("active") is True]),
                 },
-                "top_usage": usage,
-                "voice_users": _list_voice_users(db),
-                "usage_logs": _list_usage_logs(db),
+                "voice_users": voice_users,
             },
             ensure_ascii=False,
         ),

@@ -214,6 +214,98 @@ paths:
       responses:
         200:
           description: Successful response
+  /api/admin-teachers:
+    options:
+      summary: Admin teachers preflight
+      operationId: adminTeachersOptions
+      x-google-backend:
+        address: ${ADMIN_TEACHERS}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: List teacher accounts
+      operationId: adminTeachersGet
+      x-google-backend:
+        address: ${ADMIN_TEACHERS}
+      responses:
+        200:
+          description: Successful response
+    post:
+      summary: Grant or revoke teacher role
+      operationId: adminTeachersPost
+      x-google-backend:
+        address: ${ADMIN_TEACHERS}
+      responses:
+        200:
+          description: Successful response
+  /api/teacher-courses:
+    options:
+      summary: Teacher courses preflight
+      operationId: teacherCoursesOptions
+      x-google-backend:
+        address: ${TEACHER_COURSES}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: List teacher-owned courses and classes
+      operationId: teacherCoursesGet
+      x-google-backend:
+        address: ${TEACHER_COURSES}
+      responses:
+        200:
+          description: Successful response
+    post:
+      summary: Create/update courses, clone classes, manage class students
+      operationId: teacherCoursesPost
+      x-google-backend:
+        address: ${TEACHER_COURSES}
+      responses:
+        200:
+          description: Successful response
+  /api/student-courses:
+    options:
+      summary: Student courses preflight
+      operationId: studentCoursesOptions
+      x-google-backend:
+        address: ${STUDENT_COURSES}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: List selectable student classes and role flags
+      operationId: studentCoursesGet
+      x-google-backend:
+        address: ${STUDENT_COURSES}
+      responses:
+        200:
+          description: Successful response
+    post:
+      summary: Enroll/select class or fetch current view pointer
+      operationId: studentCoursesPost
+      x-google-backend:
+        address: ${STUDENT_COURSES}
+      responses:
+        200:
+          description: Successful response
+  /api/teacher-student-records:
+    options:
+      summary: Voice teacher records preflight
+      operationId: voiceTeacherRecordsOptions
+      x-google-backend:
+        address: ${TEACHER_STUDENT_RECORDS}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: Teacher-facing voice usage records and user settings
+      operationId: voiceTeacherRecordsGet
+      x-google-backend:
+        address: ${TEACHER_STUDENT_RECORDS}
+      responses:
+        200:
+          description: Successful response
   /api/voice-chat-access:
     options:
       summary: Voice chat access preflight

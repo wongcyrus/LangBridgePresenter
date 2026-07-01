@@ -16,13 +16,19 @@ It connects to the LangBridge backend via Firebase Firestore to receive live upd
     *   Japanese (`ja-JP`)
     *   Korean (`ko-KR`)
 
+### 🧭 Course/Class Selection + Teacher Workspace
+*   **Student class selection**: Signed-in students land on a class-selection page (`/`) and can enroll/open classes before entering slide view.
+*   **Class access control**: Class content reads are restricted to enrolled students, the class teacher, or admins.
+*   **Teacher workspace**: Teacher users can open `/teacher-courses` to create courses, update course titles, and clone independent classes from courses.
+*   **Admin teacher grant**: Admin users can grant/revoke teacher role on `/voice-admin`, then teachers manage their own course/class scope.
+
 ### 🔊 Smart Audio Player (Text-to-Speech)
 *   **Auto-Play**: Automatically plays the audio narration for new slides as they arrive (can be toggled off).
 *   **Intelligent Queuing**: Prevents audio overlap by queuing messages to play sequentially.
 *   **Interactive Controls**: Play or pause specific messages at any time.
 
 ### 🎤 Voice Chat (Login Required)
-*   **Optional Sign-In**: The web app still works without login for normal slide viewing.
+*   **Sign-In Required for Class View**: Opening `/?class=...` requires sign-in and class access.
 *   **Access Control**: Signed-in users must be explicitly granted in `voice_chat_users`.
 *   **Gemini Live Proxy Policy**: Direct browser calls to Gemini Live are disabled. Voice chat must use a backend proxy path.
 *   **Current Status**: Voice Start uses a Cloud Run WebSocket proxy to Gemini Live. Browser speech recognition sends text turns through the proxy, Gemini audio replies stream back, and tool-calling commands are executed in the web client.
@@ -86,6 +92,10 @@ python manage_voice_chat_users.py --project-id <backend-project-id> --database l
 python manage_voice_chat_users.py --project-id <backend-project-id> --database langbridge list --active-only
 ```
 
+The `/voice-admin` dashboard now includes teacher-facing visibility for:
+- per-user access settings (audio language, display language, autoplay, latest presentation)
+- study records from voice sessions (top daily usage and recent session logs)
+
 ### ♿ Accessibility & UI
 *   **Adjustable Font Size**: Easy-to-use `A+` / `A-` controls to adjust text size for better readability.
 *   **Mobile-First Design**: Fully responsive layout that works perfectly on smartphones, tablets, and laptops.
@@ -147,7 +157,7 @@ Access the app at `http://localhost:5173`.
 To join a specific class/course, append the `class` parameter:
 `http://localhost:5173/?class=demo`
 
-(Defaults to `current` if not specified).
+Direct class URLs require sign-in plus class access (enrolled student / class teacher / admin).
 
 ### 4. Build & Deploy (Handled by Root Deployment)
 

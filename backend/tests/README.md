@@ -101,9 +101,29 @@ Tests authentication and authorization:
 ### Voice Chat Admin Tests (`test_voice_chat_admin_function.py`)
 Unit tests for the voice-chat admin Cloud Function:
 - unauthenticated request rejection
-- usage dashboard response formatting
+- access dashboard response formatting
 - limit update request handling
 - Firestore-backed admin access check
+
+### Teacher Student Records Tests (`test_teacher_student_records_function.py`)
+Unit tests for the teacher-student records Cloud Function:
+- unauthenticated request rejection
+- usage and settings response formatting
+
+### Admin Teachers Tests (`test_admin_teachers_function.py`)
+Unit tests for admin teacher-role grant/revoke:
+- unauthenticated request rejection
+- teacher grant handling
+
+### Teacher Courses Tests (`test_teacher_courses_function.py`)
+Unit tests for teacher course management:
+- role guard (teacher/admin required)
+- course creation flow
+
+### Student Courses Tests (`test_student_courses_function.py`)
+Unit tests for student class selection:
+- class listing response
+- enrollment action handling
 
 ### Admin User Script Tests (`test_manage_admin_users.py`)
 Unit tests for `manage_admin_users.py`:

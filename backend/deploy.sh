@@ -1,5 +1,5 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-ENV_FILE="${1:-$SCRIPT_DIR/cdktf/.env}"
+ENV_FILE="${1:-$SCRIPT_DIR/cdktf/.env.dev}"
 ENV_FILE="$(realpath "$ENV_FILE")"
 
 if [ ! -f "$ENV_FILE" ]; then

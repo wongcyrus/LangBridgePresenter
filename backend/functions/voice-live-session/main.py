@@ -159,12 +159,68 @@ def _append_usage_log(db: firestore.Client, *, uid: str, email: str, lease: dict
             "course_id": lease.get("course_id"),
             "presentation_id": lease.get("presentation_id"),
             "slide_id": str(lease.get("slide_id") or ""),
+            "display_language": lease.get("display_language"),
+            "audio_language": lease.get("audio_language"),
+            "autoplay": lease.get("autoplay"),
             "started_at": _iso8601_z(started_at),
             "ended_at": _iso8601_z(ended_at),
             "duration_seconds": int(lease.get("accumulated_seconds") or 0),
             "day_key": _day_key(ended_at),
             "ended_reason": ended_reason,
             "updated_at": _iso8601_z(ended_at),
+        },
+        merge=True,
+    )
+
+
+def _normalize_optional_text(value):
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _normalize_optional_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
+def _resolve_setting(payload: dict, snake_key: str, camel_key: str, existing=None):
+    raw_value = payload.get(snake_key)
+    if raw_value is None and camel_key:
+        raw_value = payload.get(camel_key)
+
+    if snake_key == "autoplay":
+        normalized = _normalize_optional_bool(raw_value)
+    else:
+        normalized = _normalize_optional_text(raw_value)
+
+    if normalized is None:
+        return existing
+    return normalized
+
+
+def _upsert_user_settings(db: firestore.Client, *, uid: str, email: str, lease: dict, now: datetime):
+    settings_ref = db.collection("voice_user_settings").document(uid)
+    settings_ref.set(
+        {
+            "uid": uid,
+            "email": (email or "").strip().lower(),
+            "display_language": lease.get("display_language"),
+            "audio_language": lease.get("audio_language"),
+            "autoplay": lease.get("autoplay"),
+            "course_id": lease.get("course_id"),
+            "presentation_id": lease.get("presentation_id"),
+            "slide_id": str(lease.get("slide_id") or ""),
+            "last_session_id": lease.get("session_id"),
+            "updated_at": _iso8601_z(now),
         },
         merge=True,
     )
@@ -229,6 +285,9 @@ def voice_live_session(request: Request):
             )
         session_id = secrets.token_urlsafe(18)
         expires_at = now + timedelta(seconds=max_session_seconds)
+        display_language = _resolve_setting(payload, "display_language", "displayLanguage")
+        audio_language = _resolve_setting(payload, "audio_language", "audioLanguage")
+        autoplay = _resolve_setting(payload, "autoplay", "autoplay")
         lease_ref.set(
             {
                 "uid": uid,
@@ -245,8 +304,26 @@ def voice_live_session(request: Request):
                 "course_id": payload.get("course_id") or payload.get("courseId"),
                 "presentation_id": payload.get("presentation_id") or payload.get("presentationId"),
                 "slide_id": str(payload.get("slide_id") or payload.get("slideId") or ""),
+                "display_language": display_language,
+                "audio_language": audio_language,
+                "autoplay": autoplay,
             },
             merge=True,
+        )
+        _upsert_user_settings(
+            db,
+            uid=uid,
+            email=(decoded.get("email") or ""),
+            lease={
+                "session_id": session_id,
+                "course_id": payload.get("course_id") or payload.get("courseId"),
+                "presentation_id": payload.get("presentation_id") or payload.get("presentationId"),
+                "slide_id": str(payload.get("slide_id") or payload.get("slideId") or ""),
+                "display_language": display_language,
+                "audio_language": audio_language,
+                "autoplay": autoplay,
+            },
+            now=now,
         )
         return (
             json.dumps(
@@ -319,6 +396,12 @@ def voice_live_session(request: Request):
 
     used_seconds_today = _current_used_seconds(db, uid, today_key)
     next_accumulated_seconds = int(lease.get("accumulated_seconds") or 0) + max(0, elapsed_total)
+    next_display_language = _resolve_setting(payload, "display_language", "displayLanguage", lease.get("display_language"))
+    next_audio_language = _resolve_setting(payload, "audio_language", "audioLanguage", lease.get("audio_language"))
+    next_autoplay = _resolve_setting(payload, "autoplay", "autoplay", lease.get("autoplay"))
+    next_course_id = payload.get("course_id") or payload.get("courseId") or lease.get("course_id")
+    next_presentation_id = payload.get("presentation_id") or payload.get("presentationId") or lease.get("presentation_id")
+    next_slide_id = str(payload.get("slide_id") or payload.get("slideId") or lease.get("slide_id") or "")
     if used_seconds_today >= limit_seconds:
         ended_reason = "quota_exceeded"
         lease_ref.set(
@@ -328,6 +411,12 @@ def voice_live_session(request: Request):
                 "ended_at": _iso8601_z(now),
                 "ended_reason": ended_reason,
                 "accumulated_seconds": next_accumulated_seconds,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
             },
             merge=True,
         )
@@ -335,9 +424,33 @@ def voice_live_session(request: Request):
             db,
             uid=uid,
             email=(decoded.get("email") or ""),
-            lease={**lease, "accumulated_seconds": next_accumulated_seconds},
+            lease={
+                **lease,
+                "accumulated_seconds": next_accumulated_seconds,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
+            },
             ended_at=now,
             ended_reason=ended_reason,
+        )
+        _upsert_user_settings(
+            db,
+            uid=uid,
+            email=(decoded.get("email") or ""),
+            lease={
+                "session_id": session_id,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+            },
+            now=now,
         )
         return _deny_with_payload(
             {
@@ -358,6 +471,12 @@ def voice_live_session(request: Request):
                 "ended_at": _iso8601_z(now),
                 "ended_reason": str(payload.get("reason") or "client_close"),
                 "accumulated_seconds": next_accumulated_seconds,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
             },
             merge=True,
         )
@@ -365,9 +484,33 @@ def voice_live_session(request: Request):
             db,
             uid=uid,
             email=(decoded.get("email") or ""),
-            lease={**lease, "accumulated_seconds": next_accumulated_seconds},
+            lease={
+                **lease,
+                "accumulated_seconds": next_accumulated_seconds,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
+            },
             ended_at=now,
             ended_reason=str(payload.get("reason") or "client_close"),
+        )
+        _upsert_user_settings(
+            db,
+            uid=uid,
+            email=(decoded.get("email") or ""),
+            lease={
+                "session_id": session_id,
+                "course_id": next_course_id,
+                "presentation_id": next_presentation_id,
+                "slide_id": next_slide_id,
+                "display_language": next_display_language,
+                "audio_language": next_audio_language,
+                "autoplay": next_autoplay,
+            },
+            now=now,
         )
         return (json.dumps({"ok": True, "closed": True}, ensure_ascii=False), 200, headers)
 
@@ -376,11 +519,29 @@ def voice_live_session(request: Request):
             "updated_at": _iso8601_z(now),
             "last_heartbeat_at": _iso8601_z(now),
             "accumulated_seconds": next_accumulated_seconds,
-            "course_id": payload.get("course_id") or payload.get("courseId") or lease.get("course_id"),
-            "presentation_id": payload.get("presentation_id") or payload.get("presentationId") or lease.get("presentation_id"),
-            "slide_id": str(payload.get("slide_id") or payload.get("slideId") or lease.get("slide_id") or ""),
+            "course_id": next_course_id,
+            "presentation_id": next_presentation_id,
+            "slide_id": next_slide_id,
+            "display_language": next_display_language,
+            "audio_language": next_audio_language,
+            "autoplay": next_autoplay,
         },
         merge=True,
+    )
+    _upsert_user_settings(
+        db,
+        uid=uid,
+        email=(decoded.get("email") or ""),
+        lease={
+            "session_id": session_id,
+            "course_id": next_course_id,
+            "presentation_id": next_presentation_id,
+            "slide_id": next_slide_id,
+            "display_language": next_display_language,
+            "audio_language": next_audio_language,
+            "autoplay": next_autoplay,
+        },
+        now=now,
     )
     return (
         json.dumps(

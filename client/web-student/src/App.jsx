@@ -8,6 +8,11 @@ import {
 } from "firebase/auth";
 import { auth, db, googleAuthProvider } from "./firebase";
 import {
+  AdminIndexPage,
+  ClassSelectionPage,
+  TeacherWorkspacePage,
+} from "./components/AppPages";
+import {
   formatBroadcastStatusLabel,
   normalizeBroadcastStatus,
   normalizeLanguageSelection,
@@ -138,7 +143,9 @@ function App() {
   const [searchParams] = useSearchParams();
   const hasClassParam = searchParams.has('class') || searchParams.has('courseId');
   const courseId = searchParams.get('class') || searchParams.get('courseId') || 'current';
+  const isAdminIndexPage = location.pathname === "/admin";
   const isAdminPage = location.pathname === "/voice-admin";
+  const isTeacherPage = location.pathname === "/teacher-courses";
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
   const [viewLang, setViewLang] = useState('en');
@@ -186,8 +193,32 @@ function App() {
   const [adminTopUsage, setAdminTopUsage] = useState([]);
   const [adminUsageLogs, setAdminUsageLogs] = useState([]);
   const [adminVoiceUsers, setAdminVoiceUsers] = useState([]);
+  const [adminTeachers, setAdminTeachers] = useState([]);
+  const [adminUserSettings, setAdminUserSettings] = useState([]);
   const [adminGrantEmail, setAdminGrantEmail] = useState("");
+  const [adminTeacherEmail, setAdminTeacherEmail] = useState("");
   const [limitMinutesPerDay, setLimitMinutesPerDay] = useState(120);
+  const [adminUserQuery, setAdminUserQuery] = useState("");
+  const [adminSettingsQuery, setAdminSettingsQuery] = useState("");
+  const [adminLogQuery, setAdminLogQuery] = useState("");
+  const [adminUsersPage, setAdminUsersPage] = useState(1);
+  const [adminSettingsPage, setAdminSettingsPage] = useState(1);
+  const [adminUsagePage, setAdminUsagePage] = useState(1);
+  const [adminLogsPage, setAdminLogsPage] = useState(1);
+  const [teacherEnabled, setTeacherEnabled] = useState(false);
+  const [teacherStatus, setTeacherStatus] = useState("");
+  const [teacherLoading, setTeacherLoading] = useState(false);
+  const [teacherCourses, setTeacherCourses] = useState([]);
+  const [teacherClasses, setTeacherClasses] = useState([]);
+  const [teacherCourseTitle, setTeacherCourseTitle] = useState("");
+  const [teacherCourseLanguages, setTeacherCourseLanguages] = useState("en-US,zh-CN,yue-HK");
+  const [teacherCloneCourseId, setTeacherCloneCourseId] = useState("");
+  const [teacherCloneClassTitle, setTeacherCloneClassTitle] = useState("");
+  const [studentClasses, setStudentClasses] = useState([]);
+  const [studentLoading, setStudentLoading] = useState(false);
+  const [studentStatus, setStudentStatus] = useState("");
+  const [classAccessLoading, setClassAccessLoading] = useState(false);
+  const [classAccessDeniedMessage, setClassAccessDeniedMessage] = useState("");
 
   // Refs
   const audioRef = useRef(new Audio());
@@ -222,6 +253,10 @@ function App() {
   });
 
   const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+  const ADMIN_TEACHERS_ENDPOINT = `${API_BASE_URL}/api/admin-teachers`;
+  const TEACHER_COURSES_ENDPOINT = `${API_BASE_URL}/api/teacher-courses`;
+  const STUDENT_COURSES_ENDPOINT = `${API_BASE_URL}/api/student-courses`;
+  const TEACHER_RECORDS_ENDPOINT = `${API_BASE_URL}/api/teacher-student-records`;
   const VOICE_LEASE_ENDPOINT = `${API_BASE_URL}/api/voice-live-session`;
   const VOICE_PROXY_WS_URL = (import.meta.env.VITE_VOICE_LIVE_PROXY_WS_URL || "").trim();
   const GCP_PROJECT_ID = (import.meta.env.VITE_GCP_PROJECT_ID || "").trim();
@@ -337,6 +372,10 @@ function App() {
   useEffect(() => {
     if (currentUser) {
       loadAdminDashboard(currentUser);
+      loadAdminTeachers(currentUser);
+      loadTeacherRecords(currentUser);
+      loadTeacherWorkspace(currentUser);
+      loadStudentClasses(currentUser);
       loadVoiceAccess(currentUser);
     }
   }, [currentUser]);
@@ -367,6 +406,18 @@ function App() {
       setAdminStatus("");
       setAdminSummary(null);
       setAdminTopUsage([]);
+      setAdminUsageLogs([]);
+      setAdminVoiceUsers([]);
+      setAdminTeachers([]);
+      setAdminUserSettings([]);
+      setTeacherEnabled(false);
+      setTeacherStatus("");
+      setTeacherCourses([]);
+      setTeacherClasses([]);
+      setStudentClasses([]);
+      setStudentStatus("");
+      setClassAccessDeniedMessage("");
+      setIsReady(false);
     } catch (error) {
       console.error("Sign-out failed:", error);
     }
@@ -398,9 +449,8 @@ function App() {
       setAdminEnabled(true);
       setAdminStatus("");
       setAdminSummary(data.summary || null);
-      setAdminTopUsage(Array.isArray(data.top_usage) ? data.top_usage : []);
-      setAdminUsageLogs(Array.isArray(data.usage_logs) ? data.usage_logs : []);
       setAdminVoiceUsers(Array.isArray(data.voice_users) ? data.voice_users : []);
+      setAdminUsersPage(1);
       if (data.limits) {
         setLimitMinutesPerDay(data.limits.minutes_per_day ?? data.limits.requests_per_day ?? 120);
       }
@@ -409,6 +459,302 @@ function App() {
       setAdminStatus("");
     } finally {
       setAdminLoading(false);
+    }
+  };
+
+  const loadAdminTeachers = async (user = currentUser) => {
+    if (!user || !API_BASE_URL) return;
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(ADMIN_TEACHERS_ENDPOINT, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+      if (response.status === 401 || response.status === 403) {
+        setAdminTeachers([]);
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load teachers");
+      }
+      const data = await response.json();
+      setAdminTeachers(Array.isArray(data.teachers) ? data.teachers : []);
+    } catch (_error) {
+      setAdminTeachers([]);
+    }
+  };
+
+  const loadTeacherRecords = async (user = currentUser) => {
+    if (!user || !API_BASE_URL) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(TEACHER_RECORDS_ENDPOINT, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        setAdminTopUsage([]);
+        setAdminUsageLogs([]);
+        setAdminUserSettings([]);
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load teacher records");
+      }
+
+      const data = await response.json();
+      setAdminTopUsage(Array.isArray(data.top_usage) ? data.top_usage : []);
+      setAdminUsageLogs(Array.isArray(data.usage_logs) ? data.usage_logs : []);
+      setAdminUserSettings(Array.isArray(data.user_settings) ? data.user_settings : []);
+      setAdminUsagePage(1);
+      setAdminSettingsPage(1);
+      setAdminLogsPage(1);
+    } catch (_error) {
+      setAdminTopUsage([]);
+      setAdminUsageLogs([]);
+      setAdminUserSettings([]);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const loadTeacherWorkspace = async (user = currentUser) => {
+    if (!user || !API_BASE_URL) return;
+    setTeacherLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+      if (response.status === 401 || response.status === 403) {
+        setTeacherEnabled(false);
+        setTeacherCourses([]);
+        setTeacherClasses([]);
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load teacher workspace");
+      }
+      const data = await response.json();
+      setTeacherEnabled(Boolean(data.is_teacher || data.is_admin));
+      setTeacherCourses(Array.isArray(data.courses) ? data.courses : []);
+      setTeacherClasses(Array.isArray(data.classes) ? data.classes : []);
+    } catch (_error) {
+      setTeacherEnabled(false);
+      setTeacherCourses([]);
+      setTeacherClasses([]);
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const loadStudentClasses = async (user = currentUser) => {
+    if (!user || !API_BASE_URL) {
+      setStudentClasses([]);
+      return;
+    }
+    setStudentLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(STUDENT_COURSES_ENDPOINT, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+      if (response.status === 401 || response.status === 403) {
+        setStudentClasses([]);
+        setTeacherEnabled(false);
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load classes");
+      }
+      const data = await response.json();
+      setStudentClasses(Array.isArray(data.classes) ? data.classes : []);
+      if (data?.user && (data.user.is_teacher || data.user.is_admin)) {
+        setTeacherEnabled(true);
+      }
+    } catch (error) {
+      setStudentClasses([]);
+      setStudentStatus(error?.message || "Failed to load classes");
+    } finally {
+      setStudentLoading(false);
+    }
+  };
+
+  const verifyClassAccess = async (user = currentUser, classIdValue = courseId) => {
+    if (!user || !API_BASE_URL || !classIdValue) return false;
+    setClassAccessLoading(true);
+    setClassAccessDeniedMessage("");
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(STUDENT_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "access_check",
+          class_id: classIdValue,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Class access denied");
+      }
+      return true;
+    } catch (error) {
+      setClassAccessDeniedMessage(error?.message || "Class access denied");
+      return false;
+    } finally {
+      setClassAccessLoading(false);
+    }
+  };
+
+  const createTeacherCourse = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const title = String(teacherCourseTitle || "").trim();
+    if (!title) {
+      setTeacherStatus("Course title is required");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "create_course",
+          title,
+          languages: teacherCourseLanguages,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to create course");
+      setTeacherStatus(`Created course: ${data.course_id}`);
+      setTeacherCourseTitle("");
+      await loadTeacherWorkspace(currentUser);
+    } catch (error) {
+      setTeacherStatus(error?.message || "Failed to create course");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const updateTeacherCourseTitle = async (course) => {
+    if (!currentUser || !API_BASE_URL || !course?.course_id) return;
+    const nextTitle = window.prompt("New course title", course.title || "");
+    if (nextTitle === null) return;
+    const title = String(nextTitle || "").trim();
+    if (!title) {
+      setTeacherStatus("Course title cannot be empty");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "update_course",
+          course_id: course.course_id,
+          title,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to update course");
+      setTeacherStatus(`Updated course: ${course.course_id}`);
+      await loadTeacherWorkspace(currentUser);
+    } catch (error) {
+      setTeacherStatus(error?.message || "Failed to update course");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const cloneTeacherClass = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const courseIdValue = String(teacherCloneCourseId || "").trim();
+    const classTitleValue = String(teacherCloneClassTitle || "").trim();
+    if (!courseIdValue) {
+      setTeacherStatus("Select a course to clone");
+      return;
+    }
+    setTeacherLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TEACHER_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "clone_class",
+          course_id: courseIdValue,
+          class_title: classTitleValue || undefined,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to clone class");
+      setTeacherStatus(`Created class: ${data.class_id}`);
+      setTeacherCloneClassTitle("");
+      await loadTeacherWorkspace(currentUser);
+      await loadStudentClasses(currentUser);
+    } catch (error) {
+      setTeacherStatus(error?.message || "Failed to clone class");
+    } finally {
+      setTeacherLoading(false);
+    }
+  };
+
+  const enrollAndOpenClass = async (classIdValue) => {
+    if (!currentUser || !API_BASE_URL || !classIdValue) return;
+    setStudentLoading(true);
+    setStudentStatus("");
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(STUDENT_COURSES_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "enroll",
+          class_id: classIdValue,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to enroll class");
+      window.location.href = `/?class=${encodeURIComponent(classIdValue)}`;
+    } catch (error) {
+      setStudentStatus(error?.message || "Failed to open class");
+    } finally {
+      setStudentLoading(false);
     }
   };
 
@@ -486,33 +832,53 @@ function App() {
     }
   };
 
+  const parseGrantEmails = (rawText) => {
+    const values = String(rawText || "")
+      .split(/[\n,;]+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+    const deduped = Array.from(new Set(values));
+    const valid = deduped.filter((email) => email.includes("@"));
+    const invalid = deduped.filter((email) => !email.includes("@"));
+    return { valid, invalid };
+  };
+
   const grantVoiceUser = async () => {
     if (!currentUser || !API_BASE_URL) return;
-    const email = String(adminGrantEmail || "").trim().toLowerCase();
-    if (!email) {
-      setAdminStatus("Email is required");
+    const { valid: emails, invalid } = parseGrantEmails(adminGrantEmail);
+    if (emails.length === 0) {
+      setAdminStatus("At least one valid email is required");
       return;
     }
     setAdminLoading(true);
     try {
       const idToken = await currentUser.getIdToken();
-      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          action: "grant_voice_user",
-          email,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to grant voice user");
+      const failed = [];
+      for (const email of emails) {
+        const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            action: "grant_voice_user",
+            email,
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          failed.push(`${email} (${data.error || "request failed"})`);
+        }
       }
-      setAdminGrantEmail("");
-      setAdminStatus(data.message || "Voice user granted");
+      if (failed.length > 0 || invalid.length > 0) {
+        const failedText = [...failed, ...invalid.map((email) => `${email} (invalid email)`)];
+        setAdminGrantEmail(failed.map((item) => item.split(" (")[0]).join("\n"));
+        setAdminStatus(`Granted ${emails.length - failed.length}/${emails.length}. Failed: ${failedText.join(", ")}`);
+      } else {
+        setAdminGrantEmail("");
+        setAdminStatus(`Granted ${emails.length} student access user(s)`);
+      }
       await loadAdminDashboard(currentUser);
     } catch (error) {
       console.error("Grant voice user failed:", error);
@@ -549,6 +915,81 @@ function App() {
     } catch (error) {
       console.error("Revoke voice user failed:", error);
       setAdminStatus(error?.message || "Failed to revoke voice user");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const grantTeacherUser = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const { valid: emails, invalid } = parseGrantEmails(adminTeacherEmail);
+    if (emails.length === 0) {
+      setAdminStatus("At least one valid teacher email is required");
+      return;
+    }
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const failed = [];
+      for (const email of emails) {
+        const response = await fetch(ADMIN_TEACHERS_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            action: "grant_teacher",
+            email,
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          failed.push(`${email} (${data.error || "request failed"})`);
+        }
+      }
+      if (failed.length > 0 || invalid.length > 0) {
+        const failedText = [...failed, ...invalid.map((email) => `${email} (invalid email)`)];
+        setAdminTeacherEmail(failed.map((item) => item.split(" (")[0]).join("\n"));
+        setAdminStatus(`Granted ${emails.length - failed.length}/${emails.length} teacher(s). Failed: ${failedText.join(", ")}`);
+      } else {
+        setAdminTeacherEmail("");
+        setAdminStatus(`Granted ${emails.length} teacher(s)`);
+      }
+      await loadAdminTeachers(currentUser);
+    } catch (error) {
+      setAdminStatus(error?.message || "Failed to grant teacher");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const revokeTeacherUser = async (email) => {
+    if (!currentUser || !API_BASE_URL) return;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(ADMIN_TEACHERS_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "revoke_teacher",
+          email: normalizedEmail,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to revoke teacher");
+      }
+      setAdminStatus(data.message || "Teacher revoked");
+      await loadAdminTeachers(currentUser);
+    } catch (error) {
+      setAdminStatus(error?.message || "Failed to revoke teacher");
     } finally {
       setAdminLoading(false);
     }
@@ -706,6 +1147,9 @@ function App() {
       course_id: courseIdValue,
       presentation_id: presentationIdValue,
       slide_id: String(slideIdValue),
+      display_language: viewLang,
+      audio_language: listenLang,
+      autoplay,
     });
     voiceLeaseRef.current = lease;
     clearVoiceLeaseTimers();
@@ -721,6 +1165,9 @@ function App() {
           course_id: courseId,
           presentation_id: viewingPptId || livePptId,
           slide_id: String(viewingSlideId || liveSlideId || ""),
+          display_language: viewLang,
+          audio_language: listenLang,
+          autoplay,
         });
         voiceLeaseRef.current = { ...voiceLeaseRef.current, ...heartbeat };
         if (heartbeat.expires_at) {
@@ -1289,10 +1736,21 @@ Keep replies short and explicit about the action completed.`,
   };
 
   useEffect(() => {
-    if (hasClassParam) {
-      setIsReady(true);
+    if (isAdminIndexPage || isAdminPage || isTeacherPage) return;
+    if (!hasClassParam) {
+      setClassAccessDeniedMessage("");
+      setIsReady(false);
+      return;
     }
-  }, [hasClassParam]);
+    if (!currentUser) {
+      setClassAccessDeniedMessage("Sign in required to open this class");
+      setIsReady(false);
+      return;
+    }
+    verifyClassAccess(currentUser, courseId).then((allowed) => {
+      setIsReady(allowed);
+    });
+  }, [hasClassParam, currentUser, courseId, isAdminIndexPage, isAdminPage, isTeacherPage]);
 
   // Helper to extract data for specific language
   const getLangContent = (languagesMap, langCode) => {
@@ -1479,33 +1937,41 @@ Keep replies short and explicit about the action completed.`,
   useEffect(() => {
     if (!isReady) return;
 
-    const unsubscribe = onSnapshot(doc(db, "presentation_broadcast", courseId), (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        setStatus({ text: "🟢 Live", color: "green" });
-        const data = docSnapshot.data();
+    const unsubscribe = onSnapshot(
+      doc(db, "presentation_broadcast", courseId),
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          setStatus({ text: "🟢 Live", color: "green" });
+          const data = docSnapshot.data();
 
-        // Update Live Pointers
-        if (data.current_presentation_id) setLivePptId(data.current_presentation_id);
-        if (data.current_slide_id) setLiveSlideId(data.current_slide_id);
-        setBroadcastStatus(normalizeBroadcastStatus(data.broadcast_status));
-        
-        // Update Live Content (Audio/Text)
-        if (data.latest_languages) {
-            setLiveData(data.latest_languages);
-            
-            // Update supported languages list and sync selection
-            const langs = Object.keys(data.latest_languages);
-            if (langs.length > 0) {
-                setSupportedLangs(langs);
-                
-                setViewLang(prev => normalizeLanguageSelection(prev, langs));
-                setListenLang(prev => normalizeLanguageSelection(prev, langs));
-            }
+          // Update Live Pointers
+          if (data.current_presentation_id) setLivePptId(data.current_presentation_id);
+          if (data.current_slide_id) setLiveSlideId(data.current_slide_id);
+          setBroadcastStatus(normalizeBroadcastStatus(data.broadcast_status));
+          
+          // Update Live Content (Audio/Text)
+          if (data.latest_languages) {
+              setLiveData(data.latest_languages);
+              
+              // Update supported languages list and sync selection
+              const langs = Object.keys(data.latest_languages);
+              if (langs.length > 0) {
+                  setSupportedLangs(langs);
+                  
+                  setViewLang(prev => normalizeLanguageSelection(prev, langs));
+                  setListenLang(prev => normalizeLanguageSelection(prev, langs));
+              }
+          }
+        } else {
+            setStatus({ text: "🟡 Waiting for Class...", color: "orange" });
         }
-      } else {
-          setStatus({ text: "🟡 Waiting for Class...", color: "orange" });
-      }
-    });
+      },
+      (error) => {
+        console.error("Error reading class broadcast:", error);
+        setStatus({ text: "🔴 Class access denied", color: "red" });
+        setClassAccessDeniedMessage("Class access denied");
+      },
+    );
     return () => unsubscribe();
   }, [courseId, isReady]);
 
@@ -1599,36 +2065,43 @@ Keep replies short and explicit about the action completed.`,
       const basePath = `presentation_broadcast/${courseId}/presentations`;
 
       const slideRef = doc(db, basePath, viewingPptId, "slides", String(viewingSlideId));
-      const unsubscribe = onSnapshot(slideRef, (docSnapshot) => {
-          console.log(`[DEBUG] Single slide snapshot for #${viewingSlideId}: exists=${docSnapshot.exists()}`);
-          if (docSnapshot.exists()) {
-              const data = docSnapshot.data();
-              setSlideData(data);
+      const unsubscribe = onSnapshot(
+        slideRef,
+        (docSnapshot) => {
+            console.log(`[DEBUG] Single slide snapshot for #${viewingSlideId}: exists=${docSnapshot.exists()}`);
+            if (docSnapshot.exists()) {
+                const data = docSnapshot.data();
+                setSlideData(data);
 
-              // Update supported languages from the slide data if available
-              if (data.languages) {
-                  const langs = Object.keys(data.languages);
-                  if (langs.length > 0) {
-                      // Only update if significantly different to avoid loops, or just set it
-                      // Ideally, we merge or prioritize. For now, if we are viewing this slide, 
-                      // these are the langs we can see.
-                      setSupportedLangs(langs);
-                      
-                      // Ensure current selection is valid
-                      if (!langs.includes(viewLang)) setViewLang(langs[0]);
-                      if (!langs.includes(listenLang)) setListenLang(langs[0]);
-                  }
-              }
+                // Update supported languages from the slide data if available
+                if (data.languages) {
+                    const langs = Object.keys(data.languages);
+                    if (langs.length > 0) {
+                        // Only update if significantly different to avoid loops, or just set it
+                        // Ideally, we merge or prioritize. For now, if we are viewing this slide, 
+                        // these are the langs we can see.
+                        setSupportedLangs(langs);
+                        
+                        // Ensure current selection is valid
+                        if (!langs.includes(viewLang)) setViewLang(langs[0]);
+                        if (!langs.includes(listenLang)) setListenLang(langs[0]);
+                    }
+                }
 
-          } else {
-              // If doc missing (maybe audio only update?), try to fallback to liveData if we are live
-              if (isLiveMode && String(viewingSlideId) === String(liveSlideId)) {
-                  setSlideData({ languages: liveData }); 
-              } else {
-                  setSlideData(null);
-              }
-          }
-      });
+            } else {
+                // If doc missing (maybe audio only update?), try to fallback to liveData if we are live
+                if (isLiveMode && String(viewingSlideId) === String(liveSlideId)) {
+                    setSlideData({ languages: liveData }); 
+                } else {
+                    setSlideData(null);
+                }
+            }
+        },
+        (error) => {
+          console.error("Error reading slide data:", error);
+          setClassAccessDeniedMessage("Class access denied");
+        },
+      );
       return () => unsubscribe();
   }, [courseId, isReady, viewingPptId, viewingSlideId, liveSlideId, liveData, isLiveMode]);
 
@@ -2185,14 +2658,75 @@ Keep replies short and explicit about the action completed.`,
       return () => window.removeEventListener("keydown", onKeyDown);
   }, [isFullScreen, livePptId, liveSlideId, viewLang, listenLang, isLiveMode, viewingSlideId, viewingPptId, slideData, liveData, slideList, togglePlay, narrateCurrentSlide, stopNarration, seekAudio, jumpToAudioStart, handlePrev, handleNext, toggleLiveMode, activeAudioUrl, isPlaying, isListening, voiceBusy]);
 
-  if (!isReady && !isAdminPage) {
-      return (
-          <div className="splash-screen">
-              <h1>LangBridge</h1>
-              <button onClick={() => setIsReady(true)}>Join Class</button>
-              <p className="attribution">Developed by Higher Diploma in Cloud and Data Centre Administration at HKIIT</p>
-          </div>
-      );
+  if (!hasClassParam && !isAdminIndexPage && !isAdminPage && !isTeacherPage) {
+    return (
+      <ClassSelectionPage
+        currentUser={currentUser}
+        teacherEnabled={teacherEnabled}
+        adminEnabled={adminEnabled}
+        handleSignOut={handleSignOut}
+        handleSignIn={handleSignIn}
+        UserIcon={UserIcon}
+        authStatus={authStatus}
+        studentStatus={studentStatus}
+        studentLoading={studentLoading}
+        studentClasses={studentClasses}
+        loadStudentClasses={loadStudentClasses}
+        enrollAndOpenClass={enrollAndOpenClass}
+      />
+    );
+  }
+
+  if (hasClassParam && !isAdminIndexPage && !isAdminPage && !isTeacherPage && !currentUser) {
+    return (
+      <div className="container" style={{ padding: "24px" }}>
+        <h2 style={{ marginBottom: "10px" }}>Sign in required</h2>
+        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only enrolled students, class teacher, and admins can open this class.</p>
+        <div className="controls">
+          <button type="button" className="account-action-btn" onClick={handleSignIn}>
+            <UserIcon />
+            <span>Sign in</span>
+          </button>
+          <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
+            Back to classes
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasClassParam && !isAdminIndexPage && !isAdminPage && !isTeacherPage && classAccessLoading) {
+    return (
+      <div className="splash-screen">
+        <h1>LangBridge</h1>
+        <p>Checking class access...</p>
+      </div>
+    );
+  }
+
+  if (hasClassParam && !isAdminIndexPage && !isAdminPage && !isTeacherPage && classAccessDeniedMessage) {
+    return (
+      <div className="container" style={{ padding: "24px" }}>
+        <h2 style={{ marginBottom: "10px" }}>Class access denied</h2>
+        <p style={{ color: "#b91c1c", marginBottom: "12px" }}>{classAccessDeniedMessage}</p>
+        <p style={{ color: "#4b5563", marginBottom: "12px" }}>Only enrolled students, class teacher, and admins can open this class.</p>
+        <div className="controls">
+          <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
+            Back to classes
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isReady && !isAdminIndexPage && !isAdminPage && !isTeacherPage) {
+    return (
+      <div className="splash-screen">
+        <h1>LangBridge</h1>
+        <button onClick={() => setIsReady(true)}>Join Class</button>
+        <p className="attribution">Developed by Higher Diploma in Cloud and Data Centre Administration at HKIIT</p>
+      </div>
+    );
   }
 
   // Priority: Viewing Slide Registry > Live Data (fallback if visual matches)
@@ -2208,12 +2742,86 @@ Keep replies short and explicit about the action completed.`,
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
   const canUseVoiceChat = Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason);
   const backToSlidesHref = searchParams.toString() ? `/?${searchParams.toString()}` : "/";
+  const ADMIN_PAGE_SIZE = 20;
+  const userQuery = adminUserQuery.trim().toLowerCase();
+  const settingsQuery = adminSettingsQuery.trim().toLowerCase();
+  const logQuery = adminLogQuery.trim().toLowerCase();
+  const filteredVoiceUsers = adminVoiceUsers.filter((user) => {
+    const haystack = `${user.value || ""} ${user.type || ""} ${user.note || ""}`.toLowerCase();
+    return !userQuery || haystack.includes(userQuery);
+  });
+  const filteredTopUsage = adminTopUsage.filter((row) => {
+    const haystack = `${row.email || ""} ${row.uid || ""}`.toLowerCase();
+    return !userQuery || haystack.includes(userQuery);
+  });
+  const filteredUserSettings = adminUserSettings.filter((row) => {
+    const haystack = `${row.email || ""} ${row.uid || ""} ${row.display_language || ""} ${row.audio_language || ""} ${row.course_id || ""} ${row.presentation_id || ""}`.toLowerCase();
+    return !settingsQuery || haystack.includes(settingsQuery);
+  });
+  const filteredUsageLogs = adminUsageLogs.filter((log) => {
+    const haystack = `${log.email || ""} ${log.uid || ""} ${log.session_id || ""} ${log.ended_reason || ""}`.toLowerCase();
+    return !logQuery || haystack.includes(logQuery);
+  });
+  const userPageCount = Math.max(1, Math.ceil(filteredVoiceUsers.length / ADMIN_PAGE_SIZE));
+  const settingsPageCount = Math.max(1, Math.ceil(filteredUserSettings.length / ADMIN_PAGE_SIZE));
+  const usagePageCount = Math.max(1, Math.ceil(filteredTopUsage.length / ADMIN_PAGE_SIZE));
+  const logsPageCount = Math.max(1, Math.ceil(filteredUsageLogs.length / ADMIN_PAGE_SIZE));
+  const userStart = (Math.min(adminUsersPage, userPageCount) - 1) * ADMIN_PAGE_SIZE;
+  const settingsStart = (Math.min(adminSettingsPage, settingsPageCount) - 1) * ADMIN_PAGE_SIZE;
+  const usageStart = (Math.min(adminUsagePage, usagePageCount) - 1) * ADMIN_PAGE_SIZE;
+  const logsStart = (Math.min(adminLogsPage, logsPageCount) - 1) * ADMIN_PAGE_SIZE;
+  const pagedVoiceUsers = filteredVoiceUsers.slice(userStart, userStart + ADMIN_PAGE_SIZE);
+  const pagedUserSettings = filteredUserSettings.slice(settingsStart, settingsStart + ADMIN_PAGE_SIZE);
+  const pagedTopUsage = filteredTopUsage.slice(usageStart, usageStart + ADMIN_PAGE_SIZE);
+  const pagedUsageLogs = filteredUsageLogs.slice(logsStart, logsStart + ADMIN_PAGE_SIZE);
+
+  if (isTeacherPage) {
+    return (
+      <TeacherWorkspacePage
+        currentUser={currentUser}
+        teacherEnabled={teacherEnabled}
+        teacherLoading={teacherLoading}
+        teacherStatus={teacherStatus}
+        teacherCourses={teacherCourses}
+        teacherClasses={teacherClasses}
+        teacherCourseTitle={teacherCourseTitle}
+        setTeacherCourseTitle={setTeacherCourseTitle}
+        teacherCourseLanguages={teacherCourseLanguages}
+        setTeacherCourseLanguages={setTeacherCourseLanguages}
+        teacherCloneCourseId={teacherCloneCourseId}
+        setTeacherCloneCourseId={setTeacherCloneCourseId}
+        teacherCloneClassTitle={teacherCloneClassTitle}
+        setTeacherCloneClassTitle={setTeacherCloneClassTitle}
+        createTeacherCourse={createTeacherCourse}
+        cloneTeacherClass={cloneTeacherClass}
+        updateTeacherCourseTitle={updateTeacherCourseTitle}
+        loadTeacherWorkspace={loadTeacherWorkspace}
+        handleSignOut={handleSignOut}
+        handleSignIn={handleSignIn}
+        UserIcon={UserIcon}
+        authStatus={authStatus}
+      />
+    );
+  }
+
+  if (isAdminIndexPage) {
+    return (
+      <AdminIndexPage
+        currentUser={currentUser}
+        adminEnabled={adminEnabled}
+        handleSignOut={handleSignOut}
+        handleSignIn={handleSignIn}
+        UserIcon={UserIcon}
+        authStatus={authStatus}
+      />
+    );
+  }
 
   if (isAdminPage) {
     return (
       <div className="container" style={{ padding: "18px", overflow: "auto" }}>
         <header style={{ padding: 0, borderBottom: "none", marginBottom: "12px" }}>
-          <h1>🎛️ Voice Chat Admin</h1>
+          <h1>🎛️ Teacher Student Records</h1>
           <div className="controls">
             <button
               type="button"
@@ -2234,27 +2842,27 @@ Keep replies short and explicit about the action completed.`,
               <button
                 type="button"
                 className="account-action-btn"
-                onClick={() => { window.location.href = "/voice-admin"; }}
+                onClick={() => { window.location.href = "/admin"; }}
               >
-                Voice Admin
+                Admin Index
               </button>
             )}
           </div>
         </header>      
         <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
         {!currentUser && (
-          <div style={{ color: "#4b5563" }}>Sign in with an admin account to manage voice-chat users and limits.</div>
+          <div style={{ color: "#4b5563" }}>Sign in with an admin account to manage student access and limits.</div>
         )}
         {currentUser && !adminEnabled && (
-          <div style={{ color: "#b91c1c" }}>This account does not have voice admin access.</div>
+          <div style={{ color: "#b91c1c" }}>This account does not have admin access.</div>
         )}
         {currentUser && adminEnabled && (
           <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <strong>Voice Chat Controls</strong>
+              <strong>Admin Controls</strong>
               <button
                 type="button"
-                onClick={() => loadAdminDashboard()}
+                onClick={() => { loadAdminDashboard(); loadAdminTeachers(); loadTeacherRecords(); }}
                 disabled={adminLoading}
                 style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
               >
@@ -2263,38 +2871,81 @@ Keep replies short and explicit about the action completed.`,
             </div>
             {adminSummary && (
               <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
-                Tracked users: {adminSummary.tracked_users} · Today used: {adminSummary.total_today_minutes} minutes
+                Granted student access users: {adminSummary.granted_users ?? 0}
               </div>
             )}
+            <div style={{ marginBottom: "6px" }}>
+              <div style={{ fontWeight: 600 }}>Teacher role management</div>
+              <div style={{ fontSize: "0.85rem", color: "#6b7280" }}>Independent from voice minutes limits.</div>
+            </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
               <label style={{ fontSize: "0.9rem" }}>
-                Minutes per day
-                <input
-                  type="number"
-                  min="1"
-                  value={limitMinutesPerDay}
-                  onChange={(e) => setLimitMinutesPerDay(e.target.value)}
-                  style={{ marginLeft: "6px", width: "110px" }}
+                Grant teacher emails (one per line)
+                <textarea
+                  value={adminTeacherEmail}
+                  onChange={(e) => setAdminTeacherEmail(e.target.value)}
+                  placeholder={"teacher1@example.com\nteacher2@example.com"}
+                  rows={4}
+                  style={{ marginLeft: "6px", width: "260px", resize: "vertical" }}
                 />
               </label>
               <button
                 type="button"
-                onClick={saveAdminLimits}
+                onClick={grantTeacherUser}
                 disabled={adminLoading}
                 style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
               >
-                Save limits
+                Grant teachers
               </button>
+            </div>
+            <div style={{ maxHeight: "140px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px", marginBottom: "10px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "#fafafa" }}>
+                    <th style={{ textAlign: "left", padding: "6px" }}>Teacher</th>
+                    <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
+                    <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminTeachers.map((teacher) => (
+                    <tr key={teacher.uid || teacher.email}>
+                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{teacher.email || teacher.uid}</td>
+                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{teacher.active ? "active" : "inactive"}</td>
+                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
+                        {teacher.active && (
+                          <button
+                            type="button"
+                            onClick={() => revokeTeacherUser(teacher.email)}
+                            disabled={adminLoading}
+                            style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {adminTeachers.length === 0 && (
+                    <tr>
+                      <td colSpan={3} style={{ padding: "8px", color: "#6b7280" }}>No teachers configured</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "6px" }}>
+              <div style={{ fontWeight: 600 }}>Student access management</div>
             </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
               <label style={{ fontSize: "0.9rem" }}>
-                Grant voice access (email)
-                <input
-                  type="email"
+                Grant student access emails (one per line)
+                <textarea
                   value={adminGrantEmail}
                   onChange={(e) => setAdminGrantEmail(e.target.value)}
-                  placeholder="student@example.com"
-                  style={{ marginLeft: "6px", width: "240px" }}
+                  placeholder={"student1@example.com\nstudent2@example.com"}
+                  rows={4}
+                  style={{ marginLeft: "6px", width: "280px", resize: "vertical" }}
                 />
               </label>
               <button
@@ -2303,51 +2954,186 @@ Keep replies short and explicit about the action completed.`,
                 disabled={adminLoading}
                 style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
               >
-                Grant user
+                Grant users
               </button>
             </div>
             {adminStatus && <div style={{ fontSize: "0.9rem", color: "#4b5563", marginBottom: "8px" }}>{adminStatus}</div>}
-            <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
-              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Voice chat users</div>
-              {adminVoiceUsers.length === 0 && (
-                <div style={{ color: "#6b7280" }}>No voice users configured</div>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                <div style={{ fontWeight: 600 }}>Student access users</div>
+                <input
+                  type="text"
+                  value={adminUserQuery}
+                  onChange={(e) => { setAdminUserQuery(e.target.value); setAdminUsersPage(1); setAdminUsagePage(1); }}
+                  placeholder="Filter users..."
+                  style={{ width: "180px" }}
+                />
+              </div>
+              {filteredVoiceUsers.length === 0 ? (
+                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching users</div>
+              ) : (
+                <div style={{ maxHeight: "280px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#fafafa" }}>
+                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Type</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
+                        <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedVoiceUsers.map((user) => (
+                        <tr key={user.key}>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.value}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.type}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.active ? "active" : "inactive"}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {user.type === "email" && user.active && (
+                              <button
+                                type="button"
+                                onClick={() => revokeVoiceUser(user.value)}
+                                disabled={adminLoading}
+                                style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
-              {adminVoiceUsers.map((user) => (
-                <div key={user.key} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "3px 0", alignItems: "center" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {user.value} {user.active ? "" : "(inactive)"}
-                  </span>
-                  {user.type === "email" && user.active && (
-                    <button
-                      type="button"
-                      onClick={() => revokeVoiceUser(user.value)}
-                      disabled={adminLoading}
-                      style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
-                    >
-                      Revoke
-                    </button>
-                  )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
+                <span>{filteredVoiceUsers.length} users</span>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <button type="button" disabled={adminUsersPage <= 1} onClick={() => setAdminUsersPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span>{Math.min(adminUsersPage, userPageCount)} / {userPageCount}</span>
+                  <button type="button" disabled={adminUsersPage >= userPageCount} onClick={() => setAdminUsersPage((p) => Math.min(userPageCount, p + 1))}>Next</button>
                 </div>
-              ))}
+              </div>
             </div>
-            <div style={{ maxHeight: "170px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px" }}>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px" }}>
               <div style={{ fontWeight: 600, marginBottom: "4px" }}>Top usage today</div>
-              {adminTopUsage.slice(0, 20).map((row) => (
-                <div key={row.uid} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{row.email || row.uid}</span>
-                  <span>{row.used_minutes} min</span>
-                </div>
-              ))}
+              <div style={{ maxHeight: "170px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#fafafa" }}>
+                      <th style={{ textAlign: "left", padding: "6px" }}>User</th>
+                      <th style={{ textAlign: "right", padding: "6px" }}>Minutes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedTopUsage.map((row) => (
+                      <tr key={`${row.uid}:${row.day_key}`}>
+                        <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.email || row.uid}</td>
+                        <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>{row.used_minutes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "0.8rem" }}>
+                <button type="button" disabled={adminUsagePage <= 1} onClick={() => setAdminUsagePage((p) => Math.max(1, p - 1))}>Prev</button>
+                <span>{Math.min(adminUsagePage, usagePageCount)} / {usagePageCount}</span>
+                <button type="button" disabled={adminUsagePage >= usagePageCount} onClick={() => setAdminUsagePage((p) => Math.min(usagePageCount, p + 1))}>Next</button>
+              </div>
             </div>
-            <div style={{ maxHeight: "190px", overflow: "auto", fontSize: "0.85rem", borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
-              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Recent session logs</div>
-              {adminUsageLogs.length === 0 && <div style={{ color: "#6b7280" }}>No usage logs yet</div>}
-              {adminUsageLogs.slice(0, 30).map((log) => (
-                <div key={log.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "2px 0" }}>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{log.email || log.uid}</span>
-                  <span>{Math.round((log.duration_seconds || 0) / 60)} min · {log.ended_reason || "ended"}</span>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                <div style={{ fontWeight: 600 }}>User settings (latest)</div>
+                <input
+                  type="text"
+                  value={adminSettingsQuery}
+                  onChange={(e) => { setAdminSettingsQuery(e.target.value); setAdminSettingsPage(1); }}
+                  placeholder="Filter settings..."
+                  style={{ width: "180px" }}
+                />
+              </div>
+              {filteredUserSettings.length === 0 ? (
+                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching settings</div>
+              ) : (
+                <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#fafafa" }}>
+                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Display</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Audio</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Autoplay</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Presentation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedUserSettings.map((row) => (
+                        <tr key={`${row.uid || "unknown"}:${row.updated_at || ""}`}>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.email || row.uid}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.display_language || "-"}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.audio_language || "-"}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{typeof row.autoplay === "boolean" ? (row.autoplay ? "on" : "off") : "-"}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.presentation_id || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
+                <span>{filteredUserSettings.length} settings</span>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <button type="button" disabled={adminSettingsPage <= 1} onClick={() => setAdminSettingsPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span>{Math.min(adminSettingsPage, settingsPageCount)} / {settingsPageCount}</span>
+                  <button type="button" disabled={adminSettingsPage >= settingsPageCount} onClick={() => setAdminSettingsPage((p) => Math.min(settingsPageCount, p + 1))}>Next</button>
+                </div>
+              </div>
+            </div>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                <div style={{ fontWeight: 600 }}>Recent session logs</div>
+                <input
+                  type="text"
+                  value={adminLogQuery}
+                  onChange={(e) => { setAdminLogQuery(e.target.value); setAdminLogsPage(1); }}
+                  placeholder="Filter logs..."
+                  style={{ width: "180px" }}
+                />
+              </div>
+              {filteredUsageLogs.length === 0 ? (
+                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching logs</div>
+              ) : (
+                <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#fafafa" }}>
+                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
+                        <th style={{ textAlign: "left", padding: "6px" }}>Reason</th>
+                        <th style={{ textAlign: "right", padding: "6px" }}>Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedUsageLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{log.email || log.uid}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{log.ended_reason || "ended"}</td>
+                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
+                            {Math.round((log.duration_seconds || 0) / 60)} min
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
+                <span>{filteredUsageLogs.length} logs</span>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <button type="button" disabled={adminLogsPage <= 1} onClick={() => setAdminLogsPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  <span>{Math.min(adminLogsPage, logsPageCount)} / {logsPageCount}</span>
+                  <button type="button" disabled={adminLogsPage >= logsPageCount} onClick={() => setAdminLogsPage((p) => Math.min(logsPageCount, p + 1))}>Next</button>
+                </div>
+              </div>
             </div>
           </div>
         )}

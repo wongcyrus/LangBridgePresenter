@@ -78,6 +78,8 @@ def test_voice_live_session_open_returns_lease(voice_live_session_module, mock_r
     )
     monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
     monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
+    monkeypatch.setattr(voice_live_session_module, "_current_used_seconds", lambda _db, _uid, _day_key: 0)
+    monkeypatch.setattr(voice_live_session_module, "_current_used_seconds", lambda _db, _uid, _day_key: 0)
 
     db = MagicMock()
     lease_ref = MagicMock()
@@ -104,6 +106,7 @@ def test_voice_live_session_heartbeat_rejects_invalid_session(voice_live_session
     )
     monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
     monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
+    monkeypatch.setattr(voice_live_session_module, "_current_used_seconds", lambda _db, _uid, _day_key: 0)
 
     db = MagicMock()
     lease_ref = MagicMock()
@@ -176,3 +179,60 @@ def test_voice_live_session_open_rejects_quota_exceeded(voice_live_session_modul
     payload = json.loads(body)
     assert status == 403
     assert payload["code"] == "quota_exceeded"
+
+
+def test_voice_live_session_open_persists_user_settings(voice_live_session_module, mock_request, monkeypatch):
+    mock_request.get_json.return_value = {
+        "action": "open",
+        "course_id": "course-1",
+        "presentation_id": "deck-1",
+        "slide_id": "3",
+        "display_language": "zh-CN",
+        "audio_language": "yue-HK",
+        "autoplay": False,
+    }
+    monkeypatch.setattr(
+        voice_live_session_module,
+        "_verify_user",
+        lambda _request: {"uid": "u-5", "email": "u5@example.com"},
+    )
+    monkeypatch.setattr(voice_live_session_module, "_has_voice_access", lambda _decoded, _db: True)
+    monkeypatch.setattr(voice_live_session_module, "_minutes_limit", lambda _db: 120)
+
+    db = MagicMock()
+    lease_ref = MagicMock()
+    lease_snap = MagicMock()
+    lease_snap.exists = False
+    lease_ref.get.return_value = lease_snap
+    user_settings_ref = MagicMock()
+    usage_daily_ref = MagicMock()
+    usage_daily_snap = MagicMock()
+    usage_daily_snap.exists = False
+    usage_daily_ref.get.return_value = usage_daily_snap
+
+    def _collection(name):
+        collection = MagicMock()
+        if name == "voice_live_sessions":
+            collection.document.return_value = lease_ref
+            return collection
+        if name == "voice_user_settings":
+            collection.document.return_value = user_settings_ref
+            return collection
+        if name == "voice_live_usage_daily":
+            collection.document.return_value = usage_daily_ref
+            return collection
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    db.collection.side_effect = _collection
+    voice_live_session_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_live_session_module.voice_live_session(mock_request)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["ok"] is True
+    assert lease_ref.set.called
+    assert user_settings_ref.set.called
+    user_settings_payload = user_settings_ref.set.call_args[0][0]
+    assert user_settings_payload["display_language"] == "zh-CN"
+    assert user_settings_payload["audio_language"] == "yue-HK"
+    assert user_settings_payload["autoplay"] is False

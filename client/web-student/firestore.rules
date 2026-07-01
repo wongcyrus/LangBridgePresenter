@@ -1,18 +1,55 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow students to read the broadcast data
-    match /presentation_broadcast/{courseId} {
-      allow read: if true;
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasAdminClaim() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function isAdmin() {
+      return hasAdminClaim();
+    }
+
+    function classDoc(classId) {
+      return get(/databases/$(database)/documents/classes/$(classId));
+    }
+
+    function classExists(classId) {
+      return exists(/databases/$(database)/documents/classes/$(classId));
+    }
+
+    function isClassTeacher(classId) {
+      return isSignedIn()
+        && classExists(classId)
+        && classDoc(classId).data.active == true
+        && classDoc(classId).data.teacher_uid == request.auth.uid;
+    }
+
+    function isClassStudent(classId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/classes/$(classId)/students/$(request.auth.uid))
+        && get(/databases/$(database)/documents/classes/$(classId)/students/$(request.auth.uid)).data.active == true;
+    }
+
+    function canReadClass(classId) {
+      return isAdmin() || isClassTeacher(classId) || isClassStudent(classId);
+    }
+
+    // Restrict class broadcast reads to enrolled students, class teacher, or admins
+    match /presentation_broadcast/{classId} {
+      allow read: if canReadClass(classId);
       allow write: if false;
       
       // Allow reading the presentation list
       match /presentations/{pptId} {
-        allow read: if true;
+        allow read: if canReadClass(classId);
         
         // Explicitly allow reading from the new slide registry structure
         match /slides/{slideId} {
-           allow read: if true;
+           allow read: if canReadClass(classId);
            allow write: if false;
         }
       }
