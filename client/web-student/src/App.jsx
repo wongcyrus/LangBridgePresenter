@@ -98,19 +98,18 @@ const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, has
                 <CloseIcon />
             </button>
             
-            {hasPrev && (
-                <button className="nav-btn left" onClick={(e) => { e.stopPropagation(); onPrev(); }}>
-                    <ChevronLeftIcon />
-                </button>
-            )}
-            {hasNext && (
-                <button className="nav-btn right" onClick={(e) => { e.stopPropagation(); onNext(); }}>
-                    <ChevronRightIcon />
-                </button>
-            )}
-
-            <div className="fullscreen-content">
+            <div className={`fullscreen-content ${!isSubtitleVisible ? "subtitle-hidden" : ""}`.trim()}>
                 <div className="fullscreen-media" onClick={(e) => { e.stopPropagation(); onTogglePlay(); }}>
+                    {hasPrev && (
+                        <button className="nav-btn left" onClick={(e) => { e.stopPropagation(); onPrev(); }}>
+                            <ChevronLeftIcon />
+                        </button>
+                    )}
+                    {hasNext && (
+                        <button className="nav-btn right" onClick={(e) => { e.stopPropagation(); onNext(); }}>
+                            <ChevronRightIcon />
+                        </button>
+                    )}
                     {slideUrl ? (
                         <img
                             src={slideUrl}
@@ -153,6 +152,29 @@ const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, has
 
 // --- Main App Component ---
 function App() {
+  const DISPLAY_LANG_STORAGE_KEY = "student.displayLanguage";
+  const SPEAK_LANG_STORAGE_KEY = "student.speakLanguage";
+  const AUTOPLAY_STORAGE_KEY = "student.autoplay";
+  const SLIDE_STATE_STORAGE_KEY = "student.slideState";
+  const readLocalStorage = (key) => {
+    if (typeof window === "undefined") return null;
+    try {
+      return window.localStorage.getItem(key);
+    } catch (_error) {
+      return null;
+    }
+  };
+  const loadStoredSlideState = () => {
+    const raw = readLocalStorage(SLIDE_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      return parsed;
+    } catch (_error) {
+      return null;
+    }
+  };
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const hasClassParam = searchParams.has('class') || searchParams.has('courseId');
@@ -162,8 +184,8 @@ function App() {
   const isTeacherPage = location.pathname === "/teacher-courses";
   
   const [status, setStatus] = useState({ text: "🟡 Connecting...", color: "orange" });
-  const [viewLang, setViewLang] = useState('en');
-  const [listenLang, setListenLang] = useState('en-US');
+  const [viewLang, setViewLang] = useState(() => readLocalStorage(DISPLAY_LANG_STORAGE_KEY) || "en");
+  const [listenLang, setListenLang] = useState(() => readLocalStorage(SPEAK_LANG_STORAGE_KEY) || "en-US");
   const [supportedLangs, setSupportedLangs] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [authStatus, setAuthStatus] = useState("Guest");
@@ -173,9 +195,22 @@ function App() {
   const [liveSlideId, setLiveSlideId] = useState(null);
   const [broadcastStatus, setBroadcastStatus] = useState(null);
   
-  const [viewingPptId, setViewingPptId] = useState(null);
-  const [viewingSlideId, setViewingSlideId] = useState(null);
-  const [isLiveMode, setIsLiveMode] = useState(true); // Start in sync
+  const [viewingPptId, setViewingPptId] = useState(() => {
+    const stored = loadStoredSlideState();
+    if (!stored || stored.isLiveMode !== false) return null;
+    const pptId = String(stored.pptId || "").trim();
+    return pptId || null;
+  });
+  const [viewingSlideId, setViewingSlideId] = useState(() => {
+    const stored = loadStoredSlideState();
+    if (!stored || stored.isLiveMode !== false) return null;
+    const slideId = String(stored.slideId || "").trim();
+    return slideId || null;
+  });
+  const [isLiveMode, setIsLiveMode] = useState(() => {
+    const stored = loadStoredSlideState();
+    return typeof stored?.isLiveMode === "boolean" ? stored.isLiveMode : true;
+  }); // Start in sync
   
   const [presentationList, setPresentationList] = useState([]); // List of presentation IDs
   const [slideList, setSlideList] = useState([]); // List of integers
@@ -185,7 +220,12 @@ function App() {
 
   // Audio State
   const [isPlaying, setIsPlaying] = useState(false);
-  const [autoplay, setAutoplay] = useState(true);
+  const [autoplay, setAutoplay] = useState(() => {
+    const raw = readLocalStorage(AUTOPLAY_STORAGE_KEY);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return true;
+  });
   const [isReady, setIsReady] = useState(false); 
   const [narrationStatus, setNarrationStatus] = useState("Idle");
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
@@ -272,6 +312,8 @@ function App() {
   const audioUnlockedRef = useRef(false);
   const pendingNarrationRetryRef = useRef(false);
   const userPausedNarrationRef = useRef(false);
+  const slideSwipeRef = useRef({ tracking: false, startX: 0, startY: 0 });
+  const suppressSlideClickRef = useRef(false);
   const activeVoiceModeRef = useRef("disabled");
   const recentVoiceTranscriptRef = useRef({ text: "", time: 0 });
   const recentVoiceToolCallRef = useRef({ signature: "", time: 0, result: null });
@@ -487,6 +529,31 @@ function App() {
     }
     return nextUrl;
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(DISPLAY_LANG_STORAGE_KEY, String(viewLang || "en"));
+  }, [viewLang]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SPEAK_LANG_STORAGE_KEY, String(listenLang || "en-US"));
+  }, [listenLang]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(AUTOPLAY_STORAGE_KEY, String(Boolean(autoplay)));
+  }, [autoplay]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const payload = {
+      isLiveMode: Boolean(isLiveMode),
+      pptId: viewingPptId ? String(viewingPptId) : null,
+      slideId: viewingSlideId ? String(viewingSlideId) : null,
+    };
+    window.localStorage.setItem(SLIDE_STATE_STORAGE_KEY, JSON.stringify(payload));
+  }, [isLiveMode, viewingPptId, viewingSlideId]);
 
   const getStudentVoiceMode = () => {
     if (isAdminIndexPage || isAdminPage || isTeacherPage) return "disabled";
@@ -2843,14 +2910,13 @@ Keep replies short and explicit about the action completed.`,
   // --- 5. Audio Player Logic ---
   useEffect(() => {
       const narrationBlockedByVoice = isNarrationBlockedByVoice();
-      const shouldFollowSlideAudio = Boolean(audioRef.current.src) || isPlaying || autoplay;
-      if (!activeAudioUrl || !shouldFollowSlideAudio || narrationBlockedByVoice || userPausedNarrationRef.current) return;
+      if (!activeAudioUrl || !autoplay || narrationBlockedByVoice || userPausedNarrationRef.current) return;
 
       if (lastPlayedHash.current !== activeAudioUrl) {
           lastPlayedHash.current = activeAudioUrl;
           startAudioPlayback(activeAudioUrl, { restart: false });
       }
-  }, [activeAudioUrl, autoplay, isListening, voiceBusy, isPlaying]);
+  }, [activeAudioUrl, autoplay, isListening, voiceBusy]);
 
   // Audio Events
   useEffect(() => {
@@ -2953,6 +3019,45 @@ Keep replies short and explicit about the action completed.`,
           setViewingSlideId(liveSlideId);
           setIsLiveMode(true);
       }
+  };
+
+  const handleSlidePointerDown = (event) => {
+    if ((window.innerWidth || 0) > 900) return;
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    slideSwipeRef.current = {
+      tracking: true,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+  };
+
+  const handleSlidePointerUp = (event) => {
+    const state = slideSwipeRef.current;
+    if (!state.tracking) return;
+    slideSwipeRef.current.tracking = false;
+    const deltaX = event.clientX - state.startX;
+    const deltaY = event.clientY - state.startY;
+    const horizontalThreshold = 56;
+    const verticalTolerance = 72;
+    if (Math.abs(deltaX) < horizontalThreshold || Math.abs(deltaY) > verticalTolerance) return;
+    suppressSlideClickRef.current = true;
+    if (deltaX < 0) {
+      handleNext();
+    } else {
+      handlePrev();
+    }
+  };
+
+  const handleSlidePointerCancel = () => {
+    slideSwipeRef.current.tracking = false;
+  };
+
+  const handleSlideOpenFullScreen = () => {
+    if (suppressSlideClickRef.current) {
+      suppressSlideClickRef.current = false;
+      return;
+    }
+    setIsFullScreen(true);
   };
 
   const executeVoiceCommand = async (functionCall) => {
@@ -3652,7 +3757,7 @@ Keep replies short and explicit about the action completed.`,
           </button>
           <button
             type="button"
-            className="account-action-btn"
+            className="account-action-btn header-home-btn"
             onClick={() => { window.location.href = "/"; }}
             aria-label="Go to home page"
           >
@@ -4158,8 +4263,8 @@ Keep replies short and explicit about the action completed.`,
       <header>
         <h1>🎓 LangBridge</h1>
         <div className="controls">
-            <div className="status" style={{ color: status.color }}>{status.text}</div>
-            <div className="lang-select" title="Display Language">
+            <div className="status header-live-status" style={{ color: status.color }}>{status.text}</div>
+            <div className="lang-select header-display-lang" title="Display Language">
                 <span className="lang-select-icon">🌐</span>
                 <select 
                     value={viewLang} 
@@ -4168,7 +4273,7 @@ Keep replies short and explicit about the action completed.`,
                     {supportedLangs.map(lang => <option key={lang} value={lang}>{getTextLangName(lang)}</option>)}
                 </select>
             </div>
-            <div className="lang-select" title="Narration Language">
+            <div className="lang-select header-audio-lang" title="Narration Language">
                 <span className="lang-select-icon">🔊</span>
                 <select
                     value={normalizeVoiceLanguageCode(listenLang) || "en-US"}
@@ -4179,7 +4284,7 @@ Keep replies short and explicit about the action completed.`,
             </div>
             <button
               type="button"
-              className="account-action-btn"
+              className="account-action-btn header-home-btn"
               onClick={() => { window.location.href = "/"; }}
               aria-label="Go to home page"
             >
@@ -4187,7 +4292,7 @@ Keep replies short and explicit about the action completed.`,
             </button>
             <button
               type="button"
-              className={`account-action-btn ${currentUser ? "account-action-icon-btn" : ""}`.trim()}
+              className={`account-action-btn header-auth-btn ${currentUser ? "account-action-icon-btn" : ""}`.trim()}
               onClick={currentUser ? handleSignOut : handleSignIn}
               aria-label={currentUser ? "Sign out" : "Sign in"}
               title={currentUser ? "Sign out" : "Sign in"}
@@ -4198,7 +4303,13 @@ Keep replies short and explicit about the action completed.`,
                             </div>
                         </header>      
       <div className="main-stage">
-          <div className="slide-container" onClick={() => setIsFullScreen(true)}>
+          <div
+            className="slide-container"
+            onClick={handleSlideOpenFullScreen}
+            onPointerDown={handleSlidePointerDown}
+            onPointerUp={handleSlidePointerUp}
+            onPointerCancel={handleSlidePointerCancel}
+          >
             {visualUrl ? (
                 <img src={visualUrl} alt="Current Slide" className="main-slide-image" />
             ) : (

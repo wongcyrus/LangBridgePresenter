@@ -479,6 +479,7 @@ select {
     cursor: zoom-in;
     overflow: hidden;
     min-height: 0; /* Critical for flex child */
+    touch-action: pan-y;
 }
 
 .main-slide-image {
@@ -619,6 +620,7 @@ select {
     align-items: stretch;
     justify-content: flex-start;
     min-height: 0;
+    position: relative;
 }
 
 .fullscreen-media {
@@ -628,6 +630,7 @@ select {
     justify-content: center;
     align-items: center;
     padding: 14px 24px 10px;
+    position: relative;
 }
 
 .fullscreen-image {
@@ -789,21 +792,58 @@ select {
     }
     header {
         padding: 10px 12px;
-        flex-wrap: wrap;
-        align-items: flex-start;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-areas:
+            "logo live home auth"
+            "lang1 lang1 lang2 lang2";
+        align-items: center;
         gap: 8px;
     }
     h1 {
+        grid-area: logo;
         font-size: 1.1rem;
+        line-height: 1;
+        margin: 0;
+        white-space: nowrap;
     }
     .controls {
-        width: 100%;
-        flex-wrap: wrap;
-        gap: 8px;
+        display: contents;
     }
-    .status {
+    .controls .header-live-status {
+        grid-area: live;
+        min-width: 0;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        justify-self: start;
+    }
+    .controls .header-home-btn {
+        grid-area: home;
+        white-space: nowrap;
+        justify-self: center;
+    }
+    .controls .header-auth-btn {
+        grid-area: auth;
+        justify-self: end;
+    }
+    .controls .header-display-lang {
+        grid-area: lang1;
+        min-width: 0;
+    }
+    .controls .header-audio-lang {
+        grid-area: lang2;
+        min-width: 0;
+    }
+    .controls .lang-select select {
         width: 100%;
-        margin-right: 0;
+        min-height: 36px;
+    }
+    .controls .account-action-btn {
+        min-height: 34px;
+        padding: 6px 10px;
+        width: auto;
     }
     .account-action-btn {
         min-height: 36px;
@@ -816,8 +856,44 @@ select {
         margin-left: 12px;
         margin-right: 12px;
     }
+    .identity-course-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
     .identity-course-main {
-        width: 100%;
+        width: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: nowrap;
+        flex: 0 0 auto;
+    }
+    .identity-course-main > span {
+        white-space: nowrap;
+        flex: 0 0 auto;
+    }
+    .identity-course-main .narration-controls {
+        width: auto;
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+    }
+    .identity-course-main .narration-btn {
+        white-space: nowrap;
+    }
+    .identity-quick-actions {
+        margin-left: auto;
+        width: auto;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: nowrap;
+        flex: 0 0 auto;
     }
     .identity-shortcuts {
         margin-left: 0;
@@ -839,6 +915,32 @@ select {
     }
     .sub-header .nav-controls {
         width: 100%;
+    }
+    .fullscreen-content.subtitle-hidden .fullscreen-media {
+        padding-bottom: 8px;
+    }
+    .fullscreen-content.subtitle-hidden .fullscreen-subtitle {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: auto;
+        border-top: none;
+        background: transparent;
+        padding: 0;
+    }
+    .fullscreen-content.subtitle-hidden .fullscreen-subtitle-toolbar {
+        background: transparent;
+        border: none;
+        border-radius: 999px;
+        padding: 6px 8px;
+    }
+    .fullscreen-content.subtitle-hidden .fs-play-btn,
+    .fullscreen-content.subtitle-hidden .toggle-subtitle-btn {
+        background: transparent;
+    }
+    .fullscreen-content.subtitle-hidden .fullscreen-subtitle-text {
+        display: none;
     }
     .main-stage {
         display: flex;
@@ -898,17 +1000,8 @@ select {
     h1 {
         font-size: 1rem;
     }
-    .controls {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        align-items: stretch;
-    }
-    .controls .status {
-        grid-column: 1 / -1;
-    }
-    .controls .lang-select select,
-    .controls .account-action-btn {
-        width: 100%;
+    .controls .header-live-status {
+        font-size: 0.78rem;
     }
     .identity-course-row,
     .voice-assistant-panel,
