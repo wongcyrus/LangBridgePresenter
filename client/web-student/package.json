@@ -9,6 +9,8 @@
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.3",
     "firebase": "^12.15.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.0"

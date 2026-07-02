@@ -95,6 +95,17 @@ h1 {
     flex: 0 0 auto;
 }
 
+.identity-tutor-toggle {
+    border: 1px solid #dadce0;
+    border-radius: 14px;
+    background: #fff;
+    color: #374151;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+
 .identity-shortcuts summary {
     cursor: pointer;
     user-select: none;
@@ -385,6 +396,63 @@ select {
     overflow: hidden; /* Prevent double scrollbars */
     position: relative;
     background-color: #f8f9fa;
+}
+
+.live2d-tutor {
+    position: fixed;
+    left: 10px;
+    top: 10px;
+    z-index: 1200;
+    pointer-events: auto;
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.75), rgba(255,255,255,0.45));
+    border: 1px solid rgba(209, 213, 219, 0.9);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+}
+
+.live2d-tutor.ready {
+    opacity: 1;
+}
+
+.live2d-tutor.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.live2d-tutor-handle {
+    height: 24px;
+    border: none;
+    border-bottom: 1px solid rgba(209, 213, 219, 0.95);
+    background: rgba(249, 250, 251, 0.95);
+    color: #4b5563;
+    cursor: move;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.live2d-tutor-canvas {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+}
+
+.live2d-tutor-resizer {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    border: none;
+    border-top-left-radius: 6px;
+    background: rgba(107, 114, 128, 0.6);
+    cursor: nwse-resize;
 }
 
 .slide-container {

@@ -13,6 +13,7 @@ import {
   TeacherWorkspacePage,
   VoiceAssistantCard,
 } from "./components/AppPages";
+import Live2DTutor from "./components/Live2DTutor";
 import {
   formatBroadcastStatusLabel,
   normalizeBroadcastStatus,
@@ -183,6 +184,7 @@ function App() {
   const [narrationStatus, setNarrationStatus] = useState("Idle");
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+  const [isTutorVisible, setIsTutorVisible] = useState(true);
   
   // Full Screen State
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -395,6 +397,42 @@ function App() {
     const email = (user.email || "").trim();
     if (email.includes("@")) return email.split("@")[0];
     return user.uid || "User";
+  };
+  const canRenderVoiceAssistant = (user, granted, blockReason, statusText) => Boolean(
+    user
+    && granted
+    && !blockReason
+    && !String(statusText || "").toLowerCase().includes("requires admin grant")
+  );
+  const convertToCorsAudioUrl = (inputUrl) => {
+    const raw = String(inputUrl || "").trim();
+    if (!raw) return "";
+    try {
+      const parsed = new URL(raw, window.location.href);
+      if (parsed.hostname !== "storage.googleapis.com") return parsed.toString();
+      if (parsed.pathname.startsWith("/download/storage/v1/b/")) {
+        parsed.searchParams.set("alt", "media");
+        return parsed.toString();
+      }
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      if (segments.length < 2) return parsed.toString();
+      const bucket = segments.shift();
+      const objectPath = segments.join("/");
+      return `https://storage.googleapis.com/download/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`;
+    } catch (_error) {
+      return raw;
+    }
+  };
+  const prepareAudioSource = (inputUrl) => {
+    const nextUrl = convertToCorsAudioUrl(inputUrl);
+    const audio = audioRef.current;
+    if (nextUrl.includes("/download/storage/v1/b/")) {
+      audio.crossOrigin = "anonymous";
+    } else {
+      audio.removeAttribute("crossorigin");
+      audio.crossOrigin = null;
+    }
+    return nextUrl;
   };
 
   const getStudentVoiceMode = () => {
@@ -1345,7 +1383,8 @@ function App() {
     const liveAudio = pickLang(state.liveData, state.listenLang);
     const viewingAudio = pickLang(state.slideData?.languages, state.listenLang);
     const activeContent = state.isLiveMode ? liveAudio : viewingAudio;
-    return activeContent?.audio_url || null;
+    const rawAudioUrl = activeContent?.audio_url || null;
+    return rawAudioUrl ? convertToCorsAudioUrl(rawAudioUrl) : null;
   };
 
   const snapshotNarrationForVoice = () => {
@@ -2318,8 +2357,9 @@ Keep replies short and explicit about the action completed.`,
       return;
     }
 
-    if (audioRef.current.src !== audioUrl) {
-      audioRef.current.src = audioUrl;
+    const playbackUrl = prepareAudioSource(audioUrl);
+    if (audioRef.current.src !== playbackUrl) {
+      audioRef.current.src = playbackUrl;
     }
 
     if (restart) {
@@ -2327,7 +2367,7 @@ Keep replies short and explicit about the action completed.`,
       setAudioCurrentTime(0);
     }
 
-    lastNarratedAudioUrl.current = audioUrl;
+    lastNarratedAudioUrl.current = playbackUrl;
     setNarrationStatus("Playing narration");
     audioRef.current.play()
       .then(() => {
@@ -2348,8 +2388,9 @@ Keep replies short and explicit about the action completed.`,
       setNarrationStatus("Narration audio unavailable");
       return { ok: false, message: "Narration audio unavailable." };
     }
-    if (audioRef.current.src !== audioUrl) {
-      audioRef.current.src = audioUrl;
+    const playbackUrl = prepareAudioSource(audioUrl);
+    if (audioRef.current.src !== playbackUrl) {
+      audioRef.current.src = playbackUrl;
     }
     if (restart) {
       audioRef.current.currentTime = 0;
@@ -2401,9 +2442,10 @@ Keep replies short and explicit about the action completed.`,
       setNarrationStatus("Narration audio unavailable");
       return;
     }
+    const playbackUrl = prepareAudioSource(targetUrl);
 
-    if (audioRef.current.src !== targetUrl) {
-      audioRef.current.src = targetUrl;
+    if (audioRef.current.src !== playbackUrl) {
+      audioRef.current.src = playbackUrl;
     }
 
     if (pending.mode === "restart") {
@@ -2411,7 +2453,7 @@ Keep replies short and explicit about the action completed.`,
       setAudioCurrentTime(0);
     } else {
       const resumeTime = Number.isFinite(checkpoint.time) ? Math.max(0, checkpoint.time) : 0;
-      audioRef.current.currentTime = (checkpoint.url && checkpoint.url === targetUrl) ? resumeTime : 0;
+      audioRef.current.currentTime = (checkpoint.url && checkpoint.url === playbackUrl) ? resumeTime : 0;
       setAudioCurrentTime(audioRef.current.currentTime);
     }
 
@@ -2497,10 +2539,11 @@ Keep replies short and explicit about the action completed.`,
       return;
     }
     const currentSrc = String(audioRef.current.src || "");
-    const sameSource = currentSrc === audioUrl || currentSrc.endsWith(audioUrl);
+    const playbackUrl = prepareAudioSource(audioUrl);
+    const sameSource = currentSrc === playbackUrl || currentSrc.endsWith(playbackUrl);
     userPausedNarrationRef.current = false;
     if (restart || !audioRef.current.src || !sameSource) {
-      startAudioPlayback(audioUrl, { restart });
+      startAudioPlayback(playbackUrl, { restart });
       return;
     }
     if (audioRef.current.ended) {
@@ -2704,7 +2747,8 @@ Keep replies short and explicit about the action completed.`,
     // Strictly use audio-language content path only.
     // No fallback to display-language content.
     const audioContent = isLiveMode ? liveContentAudio : viewingContentAudio;
-    return audioContent?.audio_url || null;
+    const rawAudioUrl = audioContent?.audio_url || null;
+    return rawAudioUrl ? convertToCorsAudioUrl(rawAudioUrl) : null;
   };
 
   // Audio Source Decision
@@ -3508,12 +3552,7 @@ Keep replies short and explicit about the action completed.`,
         studentClasses={studentClasses}
         loadStudentClasses={loadStudentClasses}
         enrollAndOpenClass={enrollAndOpenClass}
-        canUseVoiceChat={Boolean(
-          currentUser
-          && voiceAccessGranted
-          && !voicePlatformBlockReason
-          && !String(voiceStatus || "").toLowerCase().includes("requires admin grant")
-        )}
+        canUseVoiceChat={canRenderVoiceAssistant(currentUser, voiceAccessGranted, voicePlatformBlockReason, voiceStatus)}
         voiceStatus={voiceStatus}
         voiceAccessLoading={voiceAccessLoading}
         isListening={isListening}
@@ -3600,12 +3639,7 @@ Keep replies short and explicit about the action completed.`,
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
-  const canUseVoiceChat = Boolean(
-    currentUser
-    && voiceAccessGranted
-    && !voicePlatformBlockReason
-    && !String(voiceStatus || "").toLowerCase().includes("requires admin grant")
-  );
+  const canUseVoiceChat = canRenderVoiceAssistant(currentUser, voiceAccessGranted, voicePlatformBlockReason, voiceStatus);
   const activeClass = studentClasses.find((row) => String(row.class_id || "") === String(courseId)) || null;
   const activeCourseLabel = activeClass?.course_title || activeClass?.course_id || "-";
   const backToSlidesHref = searchParams.toString() ? `/?${searchParams.toString()}` : "/";
@@ -4091,6 +4125,14 @@ Keep replies short and explicit about the action completed.`,
         <div className="identity-course-main">
           <span><strong>Course:</strong> {activeCourseLabel}</span>
         </div>
+        <button
+          type="button"
+          className="identity-tutor-toggle"
+          onClick={() => setIsTutorVisible((prev) => !prev)}
+          aria-label={isTutorVisible ? "Hide tutor panel" : "Show tutor panel"}
+        >
+          {isTutorVisible ? "Hide Tutor" : "Show Tutor"}
+        </button>
         <details className="identity-shortcuts">
           <summary>Shortcuts</summary>
           <div className="identity-shortcuts-body">
@@ -4263,6 +4305,10 @@ Keep replies short and explicit about the action completed.`,
                  {displayText}
              </div>
           </div>
+          <Live2DTutor
+            audioElement={audioRef.current}
+            isVisible={isTutorVisible}
+          />
       </div>
     </div>
   );
