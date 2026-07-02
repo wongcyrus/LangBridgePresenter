@@ -239,6 +239,12 @@ function App() {
   const [voiceAnswer, setVoiceAnswer] = useState("");
   const [voiceAccessGranted, setVoiceAccessGranted] = useState(false);
   const [voiceAccessLoading, setVoiceAccessLoading] = useState(false);
+  const [textChatAccessGranted, setTextChatAccessGranted] = useState(false);
+  const [textChatAccessLoading, setTextChatAccessLoading] = useState(false);
+  const [tutorStatus, setTutorStatus] = useState("");
+  const [tutorBusy, setTutorBusy] = useState(false);
+  const [tutorAnswerText, setTutorAnswerText] = useState("");
+  const [tutorAudioUrl, setTutorAudioUrl] = useState("");
   const [voicePlatformBlockReason, setVoicePlatformBlockReason] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -250,11 +256,14 @@ function App() {
   const [adminTopUsage, setAdminTopUsage] = useState([]);
   const [adminUsageLogs, setAdminUsageLogs] = useState([]);
   const [adminVoiceUsers, setAdminVoiceUsers] = useState([]);
+  const [adminTextUsers, setAdminTextUsers] = useState([]);
   const [adminTeachers, setAdminTeachers] = useState([]);
   const [adminUserSettings, setAdminUserSettings] = useState([]);
   const [adminGrantEmail, setAdminGrantEmail] = useState("");
+  const [adminTextGrantEmail, setAdminTextGrantEmail] = useState("");
   const [adminTeacherEmail, setAdminTeacherEmail] = useState("");
   const [limitMinutesPerDay, setLimitMinutesPerDay] = useState(120);
+  const [textWeeklyBudgetUsd, setTextWeeklyBudgetUsd] = useState(5);
   const [adminUserQuery, setAdminUserQuery] = useState("");
   const [adminSettingsQuery, setAdminSettingsQuery] = useState("");
   const [adminLogQuery, setAdminLogQuery] = useState("");
@@ -317,6 +326,7 @@ function App() {
   const activeVoiceModeRef = useRef("disabled");
   const recentVoiceTranscriptRef = useRef({ text: "", time: 0 });
   const recentVoiceToolCallRef = useRef({ signature: "", time: 0, result: null });
+  const tutorAskStateRef = useRef({ inFlight: false, lastQuestion: "", lastAt: 0 });
   const voiceStateRef = useRef({
     slideList: [],
     viewingSlideId: null,
@@ -338,6 +348,8 @@ function App() {
   const STUDENT_COURSES_ENDPOINT = `${API_BASE_URL}/api/student-courses`;
   const TEACHER_RECORDS_ENDPOINT = `${API_BASE_URL}/api/teacher-student-records`;
   const VOICE_LEASE_ENDPOINT = `${API_BASE_URL}/api/voice-live-session`;
+  const TEXT_CHAT_ACCESS_ENDPOINT = `${API_BASE_URL}/api/text-chat-access`;
+  const TUTOR_ASK_ENDPOINT = `${API_BASE_URL}/api/tutor-ask`;
   const VOICE_PROXY_WS_URL = (import.meta.env.VITE_VOICE_LIVE_PROXY_WS_URL || "").trim();
   const GCP_PROJECT_ID = (import.meta.env.VITE_GCP_PROJECT_ID || "").trim();
   const LIVE_MODEL = "gemini-live-2.5-flash-native-audio";
@@ -624,18 +636,23 @@ function App() {
       if (!user) {
         setVoiceStatus("Sign in to use voice chat");
         setVoiceAccessLoading(false);
+        setTextChatAccessLoading(false);
+        setTutorStatus("");
       } else if (voicePlatformBlockReason) {
         setVoiceStatus(voicePlatformBlockReason);
         setVoiceAccessLoading(false);
       } else if (!API_BASE_URL) {
         setVoiceStatus("Voice chat unavailable: API base URL not configured");
         setVoiceAccessLoading(false);
+        setTextChatAccessLoading(false);
       } else {
         setVoiceStatus("Checking voice access...");
         setVoiceAccessLoading(true);
+        setTextChatAccessLoading(true);
       }
       if (!user) {
         setVoiceAccessGranted(false);
+        setTextChatAccessGranted(false);
       }
     });
     return () => unsubscribe();
@@ -649,6 +666,7 @@ function App() {
       loadTeacherWorkspace(currentUser);
       loadStudentClasses(currentUser);
       loadVoiceAccess(currentUser);
+      loadTextChatAccess(currentUser);
     }
   }, [currentUser]);
 
@@ -673,6 +691,10 @@ function App() {
       setVoiceTranscript("");
       setVoiceAnswer("");
       setVoiceAccessGranted(false);
+      setTextChatAccessGranted(false);
+      setTutorStatus("");
+      setTutorAnswerText("");
+      setTutorAudioUrl("");
       pendingNarrationAfterVoiceRef.current = null;
       setAdminEnabled(false);
       setAdminStatus("");
@@ -680,8 +702,11 @@ function App() {
       setAdminTopUsage([]);
       setAdminUsageLogs([]);
       setAdminVoiceUsers([]);
+      setAdminTextUsers([]);
       setAdminTeachers([]);
       setAdminUserSettings([]);
+      setAdminGrantEmail("");
+      setAdminTextGrantEmail("");
       setTeacherEnabled(false);
       setTeacherStatus("");
       setTeacherCourses([]);
@@ -713,7 +738,13 @@ function App() {
         return;
       }
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
+        const rawBody = await response.text();
+        let data = {};
+        try {
+          data = rawBody ? JSON.parse(rawBody) : {};
+        } catch (_error) {
+          data = {};
+        }
         throw new Error(data.error || "Failed to load admin dashboard");
       }
 
@@ -722,13 +753,18 @@ function App() {
       setAdminStatus("");
       setAdminSummary(data.summary || null);
       setAdminVoiceUsers(Array.isArray(data.voice_users) ? data.voice_users : []);
+      setAdminTextUsers(Array.isArray(data.text_users) ? data.text_users : []);
       setAdminUsersPage(1);
       if (data.limits) {
         setLimitMinutesPerDay(data.limits.minutes_per_day ?? data.limits.requests_per_day ?? 120);
       }
+      if (data.text_chat) {
+        setTextWeeklyBudgetUsd(Number(data.text_chat.weekly_budget_usd ?? 5));
+      }
     } catch (error) {
       setAdminEnabled(false);
       setAdminStatus("");
+      setAdminTextUsers([]);
     } finally {
       setAdminLoading(false);
     }
@@ -1230,6 +1266,48 @@ function App() {
     }
   };
 
+  const loadTextChatAccess = async (user = currentUser) => {
+    if (!user) return;
+    setTextChatAccessLoading(true);
+    if (!API_BASE_URL) {
+      setTextChatAccessGranted(false);
+      setTutorStatus("Text chat unavailable: API base URL not configured");
+      setTextChatAccessLoading(false);
+      return;
+    }
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch(TEXT_CHAT_ACCESS_ENDPOINT, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${idToken}`,
+        },
+      });
+      if (response.status === 401) {
+        setTextChatAccessGranted(false);
+        setTutorStatus("Session expired. Please sign in again");
+        return;
+      }
+      if (response.status === 403) {
+        setTextChatAccessGranted(false);
+        setTutorStatus("Text chat access requires admin grant");
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to check text chat access");
+      }
+      const granted = data.granted === true;
+      setTextChatAccessGranted(granted);
+      setTutorStatus(granted ? "Text tutor ready" : "Text chat access requires admin grant");
+    } catch (error) {
+      setTextChatAccessGranted(false);
+      setTutorStatus(error?.message || "Text chat access check failed");
+    } finally {
+      setTextChatAccessLoading(false);
+    }
+  };
+
   const saveAdminLimits = async () => {
     if (!currentUser || !API_BASE_URL) return;
     setAdminLoading(true);
@@ -1255,6 +1333,35 @@ function App() {
     } catch (error) {
       console.error("Admin limits update failed:", error);
       setAdminStatus(error.message || "Failed to update limits");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const saveTextBudget = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "update_text_budget",
+          weekly_budget_usd: Number(textWeeklyBudgetUsd),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update text budget");
+      }
+      setAdminStatus("Text chat budget updated");
+      await loadAdminDashboard();
+    } catch (error) {
+      setAdminStatus(error.message || "Failed to update text budget");
     } finally {
       setAdminLoading(false);
     }
@@ -1305,12 +1412,57 @@ function App() {
         setAdminStatus(`Granted ${emails.length - failed.length}/${emails.length}. Failed: ${failedText.join(", ")}`);
       } else {
         setAdminGrantEmail("");
+        setAdminTextGrantEmail("");
         setAdminStatus(`Granted ${emails.length} student access user(s)`);
       }
       await loadAdminDashboard(currentUser);
     } catch (error) {
       console.error("Grant voice user failed:", error);
       setAdminStatus(error?.message || "Failed to grant voice user");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const grantTextUser = async () => {
+    if (!currentUser || !API_BASE_URL) return;
+    const { valid: emails, invalid } = parseGrantEmails(adminTextGrantEmail);
+    if (emails.length === 0) {
+      setAdminStatus("At least one valid text-chat email is required");
+      return;
+    }
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const failed = [];
+      for (const email of emails) {
+        const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            action: "grant_text_user",
+            email,
+          }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          failed.push(`${email} (${data.error || "request failed"})`);
+        }
+      }
+      if (failed.length > 0 || invalid.length > 0) {
+        const failedText = [...failed, ...invalid.map((email) => `${email} (invalid email)`)];
+        setAdminTextGrantEmail(failed.map((item) => item.split(" (")[0]).join("\n"));
+        setAdminStatus(`Granted ${emails.length - failed.length}/${emails.length} text users. Failed: ${failedText.join(", ")}`);
+      } else {
+        setAdminTextGrantEmail("");
+        setAdminStatus(`Granted ${emails.length} text chat user(s)`);
+      }
+      await loadAdminDashboard(currentUser);
+    } catch (error) {
+      setAdminStatus(error?.message || "Failed to grant text chat user");
     } finally {
       setAdminLoading(false);
     }
@@ -1343,6 +1495,37 @@ function App() {
     } catch (error) {
       console.error("Revoke voice user failed:", error);
       setAdminStatus(error?.message || "Failed to revoke voice user");
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const revokeTextUser = async (email) => {
+    if (!currentUser || !API_BASE_URL) return;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) return;
+    setAdminLoading(true);
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(`${API_BASE_URL}/api/voice-chat-admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          action: "revoke_text_user",
+          email: normalizedEmail,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to revoke text chat user");
+      }
+      setAdminStatus(data.message || "Text chat user revoked");
+      await loadAdminDashboard(currentUser);
+    } catch (error) {
+      setAdminStatus(error?.message || "Failed to revoke text chat user");
     } finally {
       setAdminLoading(false);
     }
@@ -1486,6 +1669,114 @@ function App() {
 
     return null;
   };
+
+  const askTutorByText = async (question) => {
+    const text = String(question || "").trim();
+    if (!text) return false;
+    const now = Date.now();
+    const state = tutorAskStateRef.current;
+    if (state.inFlight) {
+      setTutorStatus("Tutor is processing your previous question...");
+      return false;
+    }
+    const normalized = text.toLowerCase();
+    if (state.lastQuestion === normalized && now - state.lastAt < 1500) {
+      setTutorStatus("Duplicate question ignored");
+      return false;
+    }
+    if (!currentUser) {
+      setTutorStatus("Sign in to ask tutor");
+      return false;
+    }
+    if (!textChatAccessGranted) {
+      setTutorStatus("Text chat access requires admin grant");
+      return false;
+    }
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    if (!presentationId || !slideId) {
+      setTutorStatus("No active slide to discuss");
+      return false;
+    }
+    tutorAskStateRef.current = { ...state, inFlight: true, lastQuestion: normalized, lastAt: now };
+    setTutorBusy(true);
+    setTutorStatus("Asking tutor...");
+    try {
+      const idToken = await currentUser.getIdToken();
+      const response = await fetch(TUTOR_ASK_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          question: text,
+          courseId,
+          presentationId: String(presentationId),
+          slideId: String(slideId),
+          languageCode: listenLang,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setTextChatAccessGranted(false);
+        setTutorStatus("Session expired. Please sign in again");
+        return false;
+      }
+      if (response.status === 403) {
+        setTextChatAccessGranted(false);
+        setTutorStatus("Text chat access requires admin grant");
+        return false;
+      }
+      if (response.status === 429) {
+        setTutorStatus(data.error || "Weekly text chat budget exceeded");
+        return false;
+      }
+      if (!response.ok) {
+        const detail = String(data.error || rawBody || "").trim();
+        throw new Error(detail ? `Tutor request failed (${response.status}): ${detail}` : `Tutor request failed (${response.status})`);
+      }
+      const answer = String(data.answer || "").trim();
+      const audioUrl = String(data.audioUrl || "").trim();
+      setTutorAnswerText(answer);
+      setTutorAudioUrl(audioUrl);
+      const remaining = Number(data?.spend?.weekly_remaining_usd);
+      if (Number.isFinite(remaining)) {
+        setTutorStatus(`Tutor replied · Weekly budget left: $${Math.max(0, remaining).toFixed(2)}`);
+      } else {
+        setTutorStatus("Tutor replied");
+      }
+      if (audioUrl) {
+        await playAudioUrlNow({ audioUrl, restart: true });
+      }
+      return true;
+    } catch (error) {
+      const message = String(error?.message || "").trim();
+      if (!message) {
+        setTutorStatus("Tutor request failed: network or gateway error");
+      } else {
+        setTutorStatus(message);
+      }
+      return false;
+    } finally {
+      tutorAskStateRef.current = { ...tutorAskStateRef.current, inFlight: false };
+      setTutorBusy(false);
+    }
+  };
+
+  const replayTutorTts = async () => {
+    const audioUrl = String(tutorAudioUrl || "").trim();
+    if (!audioUrl) {
+      setTutorStatus("No tutor speech to replay");
+      return;
+    }
+    await playAudioUrlNow({ audioUrl, restart: true });
+  };
+
+  useEffect(() => {
+    setTutorAnswerText("");
+    setTutorAudioUrl("");
+  }, [viewingPptId, viewingSlideId, isLiveMode, viewLang, listenLang]);
 
   const isNarrationBlockedByVoice = () => false;
 
@@ -3813,6 +4104,7 @@ Keep replies short and explicit about the action completed.`,
   // Text priority: Viewing Slide text (if browsing) -> Live text (if live)
   // This ensures text matches the audio language
   const displayText = (isLiveMode ? liveContentAudio?.text : viewingContentAudio?.text) || "(Translating...)";
+  const narrativeText = tutorAnswerText || displayText;
 
   const currentNum = parseInt(viewingSlideId, 10);
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
@@ -3827,6 +4119,10 @@ Keep replies short and explicit about the action completed.`,
   const settingsQuery = adminSettingsQuery.trim().toLowerCase();
   const logQuery = adminLogQuery.trim().toLowerCase();
   const filteredVoiceUsers = adminVoiceUsers.filter((user) => {
+    const haystack = `${user.value || ""} ${user.type || ""} ${user.note || ""}`.toLowerCase();
+    return !userQuery || haystack.includes(userQuery);
+  });
+  const filteredTextUsers = adminTextUsers.filter((user) => {
     const haystack = `${user.value || ""} ${user.type || ""} ${user.note || ""}`.toLowerCase();
     return !userQuery || haystack.includes(userQuery);
   });
@@ -3975,6 +4271,8 @@ Keep replies short and explicit about the action completed.`,
             {adminSummary && (
               <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
                 Granted student access users: {adminSummary.granted_users ?? 0}
+                <br />
+                Granted text chat users: {adminSummary.text_granted_users ?? 0}
               </div>
             )}
             <div style={{ marginBottom: "6px" }}>
@@ -4057,13 +4355,54 @@ Keep replies short and explicit about the action completed.`,
                 disabled={adminLoading}
                 style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
               >
-                Grant users
+                Grant voice users
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Grant text chat emails (one per line)
+                <textarea
+                  value={adminTextGrantEmail}
+                  onChange={(e) => setAdminTextGrantEmail(e.target.value)}
+                  placeholder={"student1@example.com\nstudent2@example.com"}
+                  rows={4}
+                  style={{ marginLeft: "6px", width: "280px", resize: "vertical" }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={grantTextUser}
+                disabled={adminLoading}
+                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+              >
+                Grant text users
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Text chat weekly budget (USD)
+                <input
+                  type="number"
+                  min={0.01}
+                  step={0.01}
+                  value={textWeeklyBudgetUsd}
+                  onChange={(e) => setTextWeeklyBudgetUsd(e.target.value)}
+                  style={{ marginLeft: "6px", width: "120px" }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={saveTextBudget}
+                disabled={adminLoading}
+                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
+              >
+                Save text budget
               </button>
             </div>
             {adminStatus && <div style={{ fontSize: "0.9rem", color: "#4b5563", marginBottom: "8px" }}>{adminStatus}</div>}
             <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                <div style={{ fontWeight: 600 }}>Student access users</div>
+                <div style={{ fontWeight: 600 }}>Voice access users</div>
                 <input
                   type="text"
                   value={adminUserQuery}
@@ -4116,6 +4455,46 @@ Keep replies short and explicit about the action completed.`,
                   <span>{Math.min(adminUsersPage, userPageCount)} / {userPageCount}</span>
                   <button type="button" disabled={adminUsersPage >= userPageCount} onClick={() => setAdminUsersPage((p) => Math.min(userPageCount, p + 1))}>Next</button>
                 </div>
+              </div>
+              <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
+                <div style={{ fontWeight: 600, marginBottom: "6px" }}>Text chat users</div>
+                {filteredTextUsers.length === 0 ? (
+                  <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching users</div>
+                ) : (
+                  <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ background: "#fafafa" }}>
+                          <th style={{ textAlign: "left", padding: "6px" }}>User</th>
+                          <th style={{ textAlign: "left", padding: "6px" }}>Type</th>
+                          <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
+                          <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredTextUsers.map((user) => (
+                          <tr key={user.key}>
+                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.value}</td>
+                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.type}</td>
+                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.active ? "active" : "inactive"}</td>
+                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
+                              {user.type === "email" && user.active && (
+                                <button
+                                  type="button"
+                                  onClick={() => revokeTextUser(user.value)}
+                                  disabled={adminLoading}
+                                  style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
+                                >
+                                  Revoke
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px" }}>
@@ -4249,7 +4628,7 @@ Keep replies short and explicit about the action completed.`,
       {isFullScreen && (
           <FullScreenSlide 
               slideUrl={visualUrl} 
-              text={displayText}
+              text={narrativeText}
               onClose={() => setIsFullScreen(false)}
               onNext={handleNext}
               onPrev={handlePrev}
@@ -4323,7 +4702,7 @@ Keep replies short and explicit about the action completed.`,
 
           <div className="caption-container">
              <div className="caption-text">
-                 {displayText}
+                 {narrativeText}
              </div>
           </div>
       </div>
@@ -4490,6 +4869,13 @@ Keep replies short and explicit about the action completed.`,
         isVisible={isTutorVisible}
         assistantMode={isListening}
         assistantSpeaking={assistantSpeaking}
+        questionEnabled={Boolean(textChatAccessGranted && !textChatAccessLoading)}
+        questionBusy={tutorBusy}
+        questionStatus={tutorStatus}
+        canReplayTts={Boolean(tutorAudioUrl)}
+        onReplayTts={replayTutorTts}
+        questionLanguage={listenLang}
+        onSubmitQuestion={askTutorByText}
       />
     </div>
   );

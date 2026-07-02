@@ -85,7 +85,16 @@ Tests are organized with markers for easy filtering:
 → Add `XIAOICE_CHAT_SECRET_KEY` and `XIAOICE_CHAT_ACCESS_KEY` to `.env.test`
 
 ### "API key not found" (for config tests)
-→ Run `cd ../admin_tools && python create_api_key.py`
+→ Generate and save `backend/admin_tools/api_key.json`:
+```bash
+cd ../admin_tools
+python create_api_key.py live-sync "Live Sync Tester" \
+  --project-id langbridge-presenter-d2 \
+  --api-service langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog \
+  --database langbridge
+cp "$(ls -1t api_key_*.json | head -n 1)" api_key.json
+```
+Or export `API_GATEWAY_KEY` directly when running scripts/tests that call `/api/config`.
 
 ### Tests timeout
 → Check your network connection and API availability

@@ -14,6 +14,8 @@ functions/
 ├── config/          # Config + presentation broadcast endpoint
 ├── voice-chat/      # Backend voice assistant text/audio + command fallback
 ├── voice-chat-access/# Voice chat access check for signed-in users
+├── text-chat-access/# Text tutor access check for signed-in users
+├── tutor-ask/       # Slide-scoped grounded tutor answer + TTS endpoint
 ├── voice-chat-admin/# Admin usage dashboard + limit controls API
 └── voice-live-session/# Open/heartbeat/close lease API for Live voice sessions
 
@@ -61,6 +63,16 @@ cdktf/              # Infrastructure as Code
 Then complete:
 - **Phase 2 (Auth):** initialize Authentication in Firebase console for the client project, then run `bootstrap_client_auth.py`.
 - **Phase 3 (Content):** run `backend/seeds/seed_course_content.py` to load slide text/audio/visual data.
+- **Phase 4 (Admin API key for `/api/config`):** generate an API Gateway key and save it for local tools/tests:
+  ```bash
+  cd backend/admin_tools
+  python create_api_key.py live-sync "Live Sync Tester" \
+    --project-id langbridge-presenter-d2 \
+    --api-service langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog \
+    --database langbridge
+  cp "$(ls -1t api_key_*.json | head -n 1)" api_key.json
+  ```
+  You can also use `API_GATEWAY_KEY` instead of `api_key.json`.
 
 ## API Endpoints
 
@@ -72,6 +84,8 @@ Then complete:
 - `POST /api/config` - Update Firestore config and live presentation broadcast
 - `POST /api/voice-chat` - Backend voice assistant request (speech transcript -> answer/audio + commands)
 - `GET /api/voice-chat-access` - Check if signed-in user is granted voice chat access
+- `GET /api/text-chat-access` - Check if signed-in user is granted text tutor access
+- `POST /api/tutor-ask` - Grounded Gemini text tutor answer + TTS MP3 URL, restricted to current slide scope
 - `GET/POST /api/voice-chat-admin` - Admin access and limit management
 - `GET/POST /api/admin-teachers` - Admin teacher-role grant/revoke and teacher listing
 - `GET/POST /api/teacher-courses` - Teacher course management + class cloning/student status
@@ -82,11 +96,21 @@ Then complete:
 `talk-stream`, `welcome`, `goodbye`, `recquestions`, and `speech` use header-based request signature validation. `/api/config` is exposed through API Gateway key protection and updates Firestore-backed runtime state.
 
 `/api/voice-chat-access` requires Firebase ID token authentication and returns whether the user is active in `voice_chat_users`.
+`/api/text-chat-access` requires Firebase ID token authentication and returns whether the user is active in `text_chat_users`.
+`/api/tutor-ask` requires Firebase ID token authentication + `text_chat_users` access, and enforces:
+- answer scope restricted to current slide text + speaker notes
+- out-of-scope refusal message instead of general answer
+- question length max 500 chars
+- default model `gemini-2.5-flash-lite` (`TEXT_CHAT_GEMINI_MODEL`)
+- weekly spend controls in `text_chat_budget_settings/default` with per-user ledger in `text_chat_spend/{uid}`
 `/api/voice-chat-admin` requires Firebase ID token authentication (`Authorization: Bearer <idToken>`) and admin access (custom claim, allowlist, or `admin_users` records). It supports:
 - `GET`: dashboard summary + access user list
 - `POST action=update_limits`: update per-minute/per-day limits
 - `POST action=grant_voice_user`: grant voice access by email
 - `POST action=revoke_voice_user`: revoke voice access by email
+- `POST action=grant_text_user`: grant text tutor access by email
+- `POST action=revoke_text_user`: revoke text tutor access by email
+- `POST action=update_text_budget`: update text tutor weekly budget/pricing settings
 `/api/admin-teachers` requires Firebase ID token authentication + admin access and supports:
 - `GET`: teacher list
 - `POST action=grant_teacher`: grant teacher role by email (works before first login; resolves UID later when available)
@@ -113,6 +137,28 @@ Then complete:
 `/api/voice-live-session` requires Firebase ID token authentication and active `voice_chat_users` access for every `open`, `heartbeat`, and `close` operation.
 `/api/voice-chat` requires Firebase ID token authentication, active `voice_chat_users` access, and a valid lease session id issued by `/api/voice-live-session`.
 `voice-live-proxy` (Cloud Run WebSocket service) bridges browser requests to Gemini Live after verifying Firebase ID token + live lease (`voice_live_sessions`).
+
+```mermaid
+sequenceDiagram
+    participant Student as web-student
+    participant Access as /api/text-chat-access
+    participant Tutor as /api/tutor-ask
+    participant ClientFS as Client Firestore (slides)
+    participant Gemini as Gemini 2.5 Flash-Lite
+    participant BackendFS as Backend Firestore
+    participant TTS as Cloud Text-to-Speech
+    participant GCS as Cloud Storage
+
+    Student->>Access: GET (Bearer idToken)
+    Access-->>Student: granted=true/false
+    Student->>Tutor: POST question + course/presentation/slide + language
+    Tutor->>ClientFS: load slide text + speaker notes
+    Tutor->>Gemini: grounded generation (slide-scoped prompt)
+    Tutor->>BackendFS: update token usage + weekly spend ledger
+    Tutor->>TTS: synthesize answer
+    TTS->>GCS: store mp3
+    Tutor-->>Student: answer + audioUrl + usage + spend
+```
 
 ## Course package registry + manifest contract
 

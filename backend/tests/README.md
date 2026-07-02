@@ -40,6 +40,24 @@ backend/tests/
    ./run_tests.sh
    ```
 
+### `/api/config` key setup (required for config/live-sync tests)
+
+`/api/config` is API-Gateway-key protected. The test fixtures look for
+`backend/admin_tools/api_key.json` (field `key_string`).
+
+Generate a key and save it:
+
+```bash
+cd ../admin_tools
+python create_api_key.py live-sync "Live Sync Tester" \
+  --project-id langbridge-presenter-d2 \
+  --api-service langbridgeapi-1uv4f2dvtlkj9.apigateway.langbridge-presenter-d2.cloud.goog \
+  --database langbridge
+cp "$(ls -1t api_key_*.json | head -n 1)" api_key.json
+```
+
+For `live_slide_sync_api.py`, you can also pass `--api-key` or set `API_GATEWAY_KEY`.
+
 ## Running Tests
 
 ### Run all tests

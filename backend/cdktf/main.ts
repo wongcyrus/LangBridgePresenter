@@ -410,6 +410,47 @@ class LangBridgeApiStack extends TerraformStack {
       },
       additionalDependencies: [artifactRegistryIamMember],
     });
+    const textChatAccessFunction = await CloudFunctionConstruct.create(this, "textChatAccessFunction", {
+      functionName: "text-chat-access",
+      runtime: "python311",
+      entryPoint: "text_chat_access",
+      timeout: 30,
+      availableMemory: "256Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+      },
+      additionalDependencies: [artifactRegistryIamMember],
+    });
+    const tutorAskFunction = await CloudFunctionConstruct.create(this, "tutorAskFunction", {
+      functionName: "tutor-ask",
+      runtime: "python311",
+      entryPoint: "tutor_ask",
+      timeout: 60,
+      availableMemory: "512Mi",
+      makePublic: false,
+      cloudFunctionDeploymentConstruct: cloudFunctionDeploymentConstruct,
+      serviceAccount: talkStreamFunction.serviceAccount,
+      environmentVariables: {
+        "GOOGLE_CLOUD_PROJECT": projectId,
+        "GOOGLE_CLOUD_LOCATION": "global",
+        "SPEECH_FILE_BUCKET": speechFileBucket.name,
+        "CLIENT_FIREBASE_PROJECT_ID": clientProjectId,
+        "CLIENT_FIRESTORE_PROJECT_ID": clientProjectId,
+        "CLIENT_FIRESTORE_DATABASE_ID": "(default)",
+        "TEXT_CHAT_GEMINI_MODEL": "gemini-2.5-flash-lite",
+        "TEXT_CHAT_WEEKLY_BUDGET_USD": "5",
+        "TEXT_CHAT_PRICE_INPUT_PER_MILLION": "0.25",
+        "TEXT_CHAT_PRICE_OUTPUT_PER_MILLION": "1.5",
+        "TEXT_CHAT_GROUNDING_PRICE_PER_QUERY": "0.014",
+        "TEXT_CHAT_PROJECTED_OUTPUT_TOKENS": "1200",
+        "TEXT_CHAT_PROJECTED_GROUNDING_QUERIES": "1",
+      },
+      additionalDependencies: [artifactRegistryIamMember, aiPlatformIamMember],
+    });
     const voiceLiveSessionFunction = await CloudFunctionConstruct.create(this, "voiceLiveSessionFunction", {
       functionName: "voice-live-session",
       runtime: "python311",
@@ -446,6 +487,8 @@ class LangBridgeApiStack extends TerraformStack {
         "STUDENT_COURSES": studentCoursesFunction.cloudFunction.url,
         "TEACHER_STUDENT_RECORDS": teacherStudentRecordsFunction.cloudFunction.url,
         "VOICE_CHAT_ACCESS": voiceChatAccessFunction.cloudFunction.url,
+        "TEXT_CHAT_ACCESS": textChatAccessFunction.cloudFunction.url,
+        "TUTOR_ASK": tutorAskFunction.cloudFunction.url,
         "VOICE_LIVE_SESSION": voiceLiveSessionFunction.cloudFunction.url
       },
       servicesAccount: talkStreamFunction.serviceAccount,

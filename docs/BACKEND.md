@@ -132,6 +132,22 @@ sequenceDiagram
 - **Method**: POST
 - **Purpose**: Lease lifecycle (`open`, `heartbeat`, `close`) for Gemini Live sessions.
 
+### 10. Text Tutor Access (`text-chat-access`)
+- **Path**: `/api/text-chat-access`
+- **Method**: GET
+- **Purpose**: Verifies signed-in user access for text tutor (`text_chat_users`).
+
+### 11. Slide Tutor Ask (`tutor-ask`)
+- **Path**: `/api/tutor-ask`
+- **Method**: POST
+- **Purpose**: Returns grounded tutor answer + TTS MP3 for the current slide.
+- **Current behavior**:
+    - Uses `gemini-2.5-flash-lite` by default (`TEXT_CHAT_GEMINI_MODEL`).
+    - Prompt is strictly scoped to current slide text + speaker notes.
+    - Out-of-scope questions are refused (no general off-topic answers).
+    - Rejects question payloads longer than 500 characters.
+    - Tracks per-user weekly text-chat spend via token usage.
+
 ## Request Authentication
 
 Runtime auth behavior is split between API Gateway and function-level checks:
@@ -142,12 +158,15 @@ Runtime auth behavior is split between API Gateway and function-level checks:
 - **`/api/config`**
   - Enforced by API Gateway API key (`key` query parameter in gateway spec).
   - Function itself currently validates method/body and writes config + broadcast state.
+- **`/api/voice-chat-access`, `/api/text-chat-access`, `/api/voice-chat-admin`, `/api/voice-live-session`, `/api/voice-chat`, `/api/tutor-ask`**
+  - Enforced by Firebase ID token authentication inside each function.
+  - Access grants are checked via Firestore allowlists (`voice_chat_users` / `text_chat_users`) as applicable.
 
 ```mermaid
 flowchart LR
     A[Incoming request] --> B{Endpoint is /api/config?}
     B -->|Yes| C[API Gateway API key check]
-    B -->|No| D{Voice endpoint?}
+    B -->|No| D{Voice/Text auth endpoint?}
     D -->|Yes| E[Firebase ID token + allowlist/lease checks]
     D -->|No| F[Function header signature check<br/>X-Timestamp + X-Key + X-Sign]
     C --> G[Function logic]
@@ -198,6 +217,12 @@ The backend uses two Firestore databases:
 - **Collection**: `langbridge_config`
     - Stores system configuration and messages.
     - Includes the latest `broadcast_status` summary from `/api/config`
+- **Collection**: `text_chat_users`
+    - Access allowlist for student text tutor API (`/api/text-chat-access`, `/api/tutor-ask`).
+- **Collection**: `text_chat_budget_settings`
+    - Budget/pricing config for text tutor spend controls (`default` document).
+- **Collection**: `text_chat_spend`
+    - Per-user weekly token/cost ledger keyed by UID.
 - **Collection**: `sessions` (implied)
     - Stores active conversation state.
 
@@ -218,6 +243,28 @@ The backend uses two Firestore databases:
 1. **Seeding**: Pre-generates all content and populates the registry
 2. **Live Presentation**: VBA sends slide changes → Backend fetches from registry → Updates live pointer
 3. **Web Client**: Listens to live pointer or browses registry for slide content
+
+### Text Tutor Flow
+
+```mermaid
+sequenceDiagram
+    participant Student as web-student
+    participant Access as /api/text-chat-access
+    participant Tutor as /api/tutor-ask
+    participant ClientFS as client Firestore
+    participant Gemini as Gemini 2.5 Flash-Lite
+    participant BackendFS as backend Firestore
+    participant TTS as Cloud Text-to-Speech
+
+    Student->>Access: GET (Bearer idToken)
+    Access-->>Student: granted=true/false
+    Student->>Tutor: POST question + slide identifiers
+    Tutor->>ClientFS: load slide text + source_context
+    Tutor->>Gemini: grounded answer (slide-only scope prompt)
+    Tutor->>BackendFS: update text_chat_spend/{uid} weekly counters
+    Tutor->>TTS: synthesize answer mp3
+    Tutor-->>Student: answer + audioUrl + usage + spend
+```
 
 ```mermaid
 sequenceDiagram

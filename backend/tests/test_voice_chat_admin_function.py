@@ -66,15 +66,25 @@ def mock_request():
 def _setup_admin_get_db(module):
     db = MagicMock()
     settings_collection = MagicMock()
+    text_budget_collection = MagicMock()
     users_collection = MagicMock()
+    text_users_collection = MagicMock()
     settings_ref = MagicMock()
+    text_budget_ref = MagicMock()
     settings_snap = MagicMock()
+    text_budget_snap = MagicMock()
     settings_snap.exists = True
     settings_snap.to_dict.return_value = {
         "minutes_per_day": 90,
     }
+    text_budget_snap.exists = True
+    text_budget_snap.to_dict.return_value = {
+        "weekly_budget_usd": 5.0,
+    }
     settings_ref.get.return_value = settings_snap
+    text_budget_ref.get.return_value = text_budget_snap
     settings_collection.document.return_value = settings_ref
+    text_budget_collection.document.return_value = text_budget_ref
 
     user_doc = MagicMock()
     user_doc.id = "email:student@example.com"
@@ -83,11 +93,16 @@ def _setup_admin_get_db(module):
         "updated_at": "2026-01-01T00:00:00+00:00",
     }
     users_collection.stream.return_value = [user_doc]
+    text_users_collection.stream.return_value = []
     def _collection(name):
         if name == "voice_chat_settings":
             return settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
         if name == "voice_chat_users":
             return users_collection
+        if name == "text_chat_users":
+            return text_users_collection
         raise AssertionError(f"Unexpected collection: {name}")
 
     db.collection.side_effect = _collection
@@ -116,6 +131,7 @@ def test_voice_chat_admin_get_returns_limits_and_users(voice_chat_admin_module, 
     assert status == 200
     payload = json.loads(body)
     assert payload["limits"]["minutes_per_day"] == 90
+    assert payload["text_chat"]["weekly_budget_usd"] == 5.0
     assert payload["summary"]["granted_users"] == 1
     assert payload["voice_users"][0]["key"] == "email:student@example.com"
 
@@ -130,9 +146,19 @@ def test_voice_chat_admin_post_updates_limits(voice_chat_admin_module, mock_requ
 
     db = MagicMock()
     settings_collection = MagicMock()
+    text_budget_collection = MagicMock()
     settings_ref = MagicMock()
     settings_collection.document.return_value = settings_ref
-    db.collection.return_value = settings_collection
+    text_budget_collection.document.return_value = MagicMock()
+
+    def _collection(name):
+        if name == "voice_chat_settings":
+            return settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
+        return MagicMock()
+
+    db.collection.side_effect = _collection
     voice_chat_admin_module.firestore.Client.return_value = db
 
     body, status, _headers = voice_chat_admin_module.voice_chat_admin(mock_request)
@@ -159,12 +185,16 @@ def test_voice_chat_admin_grants_voice_user(voice_chat_admin_module, mock_reques
 
     settings_collection = MagicMock()
     settings_collection.document.return_value = MagicMock()
+    text_budget_collection = MagicMock()
+    text_budget_collection.document.return_value = MagicMock()
 
     def _collection(name):
         if name == "voice_chat_users":
             return users_collection
         if name == "voice_chat_settings":
             return settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
         raise AssertionError(f"Unexpected collection: {name}")
 
     db.collection.side_effect = _collection
@@ -193,12 +223,16 @@ def test_voice_chat_admin_revokes_voice_user(voice_chat_admin_module, mock_reque
 
     settings_collection = MagicMock()
     settings_collection.document.return_value = MagicMock()
+    text_budget_collection = MagicMock()
+    text_budget_collection.document.return_value = MagicMock()
 
     def _collection(name):
         if name == "voice_chat_users":
             return users_collection
         if name == "voice_chat_settings":
             return settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
         raise AssertionError(f"Unexpected collection: {name}")
 
     db.collection.side_effect = _collection
@@ -234,3 +268,71 @@ def test_extract_bearer_token_prefers_forwarded_header(voice_chat_admin_module, 
     }
     token = voice_chat_admin_module._extract_bearer_token(mock_request)
     assert token == "user-token"
+
+
+def test_voice_chat_admin_grants_text_user(voice_chat_admin_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {"action": "grant_text_user", "email": "student@example.com"}
+    monkeypatch.setattr(voice_chat_admin_module, "_verify_user", lambda _request: {"uid": "admin-1", "admin": True})
+
+    db = MagicMock()
+    text_users_collection = MagicMock()
+    user_ref = MagicMock()
+    user_snap = MagicMock()
+    user_snap.exists = False
+    user_ref.get.return_value = user_snap
+    text_users_collection.document.return_value = user_ref
+
+    voice_settings_collection = MagicMock()
+    voice_settings_collection.document.return_value = MagicMock()
+    text_budget_collection = MagicMock()
+    text_budget_collection.document.return_value = MagicMock()
+
+    def _collection(name):
+        if name == "text_chat_users":
+            return text_users_collection
+        if name == "voice_chat_settings":
+            return voice_settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    db.collection.side_effect = _collection
+    voice_chat_admin_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_chat_admin_module.voice_chat_admin(mock_request)
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert "Granted text chat access" in payload["message"]
+    assert user_ref.set.called
+
+
+def test_voice_chat_admin_updates_text_budget(voice_chat_admin_module, mock_request, monkeypatch):
+    mock_request.method = "POST"
+    mock_request.get_json.return_value = {"action": "update_text_budget", "weekly_budget_usd": 7.5}
+    monkeypatch.setattr(voice_chat_admin_module, "_verify_user", lambda _request: {"uid": "admin-1", "admin": True})
+
+    db = MagicMock()
+    voice_settings_collection = MagicMock()
+    voice_settings_collection.document.return_value = MagicMock()
+    text_budget_collection = MagicMock()
+    text_budget_ref = MagicMock()
+    text_budget_collection.document.return_value = text_budget_ref
+
+    def _collection(name):
+        if name == "voice_chat_settings":
+            return voice_settings_collection
+        if name == "text_chat_budget_settings":
+            return text_budget_collection
+        return MagicMock()
+
+    db.collection.side_effect = _collection
+    voice_chat_admin_module.firestore.Client.return_value = db
+
+    body, status, _headers = voice_chat_admin_module.voice_chat_admin(mock_request)
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert payload["text_chat"]["weekly_budget_usd"] == 7.5
+    assert text_budget_ref.set.called

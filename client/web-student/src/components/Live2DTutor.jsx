@@ -26,16 +26,21 @@ const LOOK_Y_ANGLE_PARAMETER_IDS = ["ParamAngleY", "PARAM_ANGLE_Y"];
 const LOOK_X_EYE_PARAMETER_IDS = ["ParamEyeBallX", "PARAM_EYE_BALL_X"];
 const LOOK_Y_EYE_PARAMETER_IDS = ["ParamEyeBallY", "PARAM_EYE_BALL_Y"];
 const EDGE_GAP = 10;
-const MIN_SIZE = 140;
-const MAX_SIZE = 640;
+const MIN_WIDTH = 160;
+const MAX_WIDTH = 640;
+const MIN_HEIGHT = 180;
+const MAX_HEIGHT = 760;
 const RANDOM_MOUTH_MIN = 0.55;
 const RANDOM_MOUTH_RANGE = 0.4;
 const MOBILE_BREAKPOINT = 900;
-const getResponsiveTutorSize = () => {
-  if (typeof window === "undefined") return 220;
-  const target = window.innerWidth * 0.25;
-  const byHeight = window.innerHeight * 0.6;
-  return Math.round(Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.min(target, byHeight))));
+const getResponsiveTutorRect = () => {
+  if (typeof window === "undefined") return { width: 220, height: 320 };
+  const widthByViewport = window.innerWidth * 0.24;
+  const width = Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, widthByViewport)));
+  const heightByViewport = window.innerHeight * 0.5;
+  const heightByWidth = width * 1.35;
+  const height = Math.round(Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.min(heightByViewport, heightByWidth))));
+  return { width, height };
 };
 const isMobileViewport = () => {
   if (typeof window === "undefined") return false;
@@ -153,7 +158,19 @@ const applyLookValue = (model, lookX, lookY) => {
   }
 };
 
-const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, assistantSpeaking = false }) => {
+const Live2DTutor = ({
+  audioElement,
+  isVisible = true,
+  assistantMode = false,
+  assistantSpeaking = false,
+  questionEnabled = false,
+  questionBusy = false,
+  questionStatus = "",
+  canReplayTts = false,
+  onReplayTts,
+  questionLanguage = "en-US",
+  onSubmitQuestion,
+}) => {
   const mountRef = useRef(null);
   const panelRef = useRef(null);
   const dragStateRef = useRef(null);
@@ -174,11 +191,15 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
   });
   const [ready, setReady] = useState(false);
   const [isMobile, setIsMobile] = useState(() => isMobileViewport());
+  const [questionText, setQuestionText] = useState("");
+  const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
+  const [voiceInputStatus, setVoiceInputStatus] = useState("");
+  const speechRecognitionRef = useRef(null);
   const [panelRect, setPanelRect] = useState({
     x: EDGE_GAP,
-    y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorSize() - EDGE_GAP),
-    width: getResponsiveTutorSize(),
-    height: getResponsiveTutorSize(),
+    y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorRect().height - EDGE_GAP),
+    width: getResponsiveTutorRect().width,
+    height: getResponsiveTutorRect().height,
   });
 
   const activeAvatar = useMemo(() => {
@@ -349,14 +370,14 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
       if (isMobileViewport()) {
         return getMobileTutorRect();
       }
-      const responsiveSize = getResponsiveTutorSize();
+      const responsiveRect = getResponsiveTutorRect();
       const safeBottom = Math.max(EDGE_GAP, window.innerHeight - EDGE_GAP);
       const next = {
         ...current,
-        width: responsiveSize,
-        height: responsiveSize,
+        width: responsiveRect.width,
+        height: responsiveRect.height,
         x: EDGE_GAP,
-        y: Math.max(EDGE_GAP, safeBottom - responsiveSize),
+        y: Math.max(EDGE_GAP, safeBottom - responsiveRect.height),
       };
       return next;
     });
@@ -367,16 +388,16 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
         if (mobile) {
           return getMobileTutorRect();
         }
-        const responsiveSize = getResponsiveTutorSize();
+        const responsiveRect = getResponsiveTutorRect();
         const parentWidth = window.innerWidth || 0;
         const parentHeight = window.innerHeight || 0;
-        const maxX = Math.max(EDGE_GAP, parentWidth - responsiveSize - EDGE_GAP);
+        const maxX = Math.max(EDGE_GAP, parentWidth - responsiveRect.width - EDGE_GAP);
         const safeBottom = Math.max(EDGE_GAP, parentHeight - EDGE_GAP);
-        const maxY = Math.max(EDGE_GAP, safeBottom - responsiveSize);
+        const maxY = Math.max(EDGE_GAP, safeBottom - responsiveRect.height);
         return {
           ...current,
-          width: responsiveSize,
-          height: responsiveSize,
+          width: responsiveRect.width,
+          height: responsiveRect.height,
           x: Math.max(EDGE_GAP, Math.min(maxX, current.x)),
           y: Math.max(EDGE_GAP, Math.min(maxY, current.y)),
         };
@@ -432,21 +453,23 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
       startY: event.clientY,
       width: panelRect.width,
       height: panelRect.height,
+      originX: panelRect.x,
       originY: panelRect.y,
     };
     const onMove = (moveEvent) => {
       if (!resizeStateRef.current) return;
       const deltaX = moveEvent.clientX - resizeStateRef.current.startX;
       const deltaY = moveEvent.clientY - resizeStateRef.current.startY;
+      const parentWidth = window.innerWidth || 0;
       const parentHeight = window.innerHeight || 0;
-      const maxHeightByFooter = Math.max(MIN_SIZE, parentHeight - EDGE_GAP - resizeStateRef.current.originY);
-      const maxSquareByViewport = Math.max(MIN_SIZE, maxHeightByFooter);
-      const growth = Math.max(deltaX, deltaY);
-      const nextSize = Math.max(MIN_SIZE, Math.min(Math.min(MAX_SIZE, maxSquareByViewport), resizeStateRef.current.width + growth));
+      const maxWidthByViewport = Math.max(MIN_WIDTH, parentWidth - EDGE_GAP - resizeStateRef.current.originX);
+      const maxHeightByFooter = Math.max(MIN_HEIGHT, parentHeight - EDGE_GAP - resizeStateRef.current.originY);
+      const nextWidth = Math.max(MIN_WIDTH, Math.min(Math.min(MAX_WIDTH, maxWidthByViewport), resizeStateRef.current.width + deltaX));
+      const nextHeight = Math.max(MIN_HEIGHT, Math.min(Math.min(MAX_HEIGHT, maxHeightByFooter), resizeStateRef.current.height + deltaY));
       setPanelRect((current) => ({
         ...current,
-        width: nextSize,
-        height: nextSize,
+        width: nextWidth,
+        height: nextHeight,
       }));
     };
     const onUp = () => {
@@ -474,6 +497,88 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
     lastTapAtRef.current = now;
   };
 
+  const handleAsk = async () => {
+    const text = String(questionText || "").trim();
+    if (!text || questionBusy || !questionEnabled || typeof onSubmitQuestion !== "function") return;
+    const ok = await onSubmitQuestion(text);
+    if (ok) setQuestionText("");
+  };
+
+  const handleQuestionKeyDown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleAsk().catch(() => {});
+    }
+  };
+
+  const stopVoiceInput = () => {
+    const recognition = speechRecognitionRef.current;
+    if (!recognition) return;
+    try {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.stop();
+    } catch (_error) {
+      // no-op
+    } finally {
+      speechRecognitionRef.current = null;
+      setIsVoiceInputActive(false);
+    }
+  };
+
+  const startVoiceInput = () => {
+    if (questionBusy || !questionEnabled || typeof window === "undefined") return;
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceInputStatus("Voice input is not supported on this browser");
+      return;
+    }
+    setVoiceInputStatus("");
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = questionLanguage || "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = async (event) => {
+      const transcript = String(event?.results?.[0]?.[0]?.transcript || "").trim();
+      if (!transcript) return;
+      setQuestionText(transcript);
+      if (typeof onSubmitQuestion === "function") {
+        await onSubmitQuestion(transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      const detail = String(event?.error || "voice input failed");
+      setVoiceInputStatus(detail);
+    };
+    recognition.onend = () => {
+      speechRecognitionRef.current = null;
+      setIsVoiceInputActive(false);
+    };
+    speechRecognitionRef.current = recognition;
+    setIsVoiceInputActive(true);
+    try {
+      recognition.start();
+    } catch (_error) {
+      speechRecognitionRef.current = null;
+      setIsVoiceInputActive(false);
+      setVoiceInputStatus("Failed to start voice input");
+    }
+  };
+
+  const toggleVoiceInput = () => {
+    if (isVoiceInputActive) {
+      stopVoiceInput();
+      return;
+    }
+    startVoiceInput();
+  };
+
+  useEffect(() => () => {
+    stopVoiceInput();
+  }, []);
+
   return (
     <div
       ref={panelRef}
@@ -498,6 +603,47 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
         </button>
       )}
       <div ref={mountRef} className="live2d-tutor-canvas" />
+      <div className="live2d-tutor-chat" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="live2d-tutor-chat-row">
+          <input
+            type="text"
+            className="live2d-tutor-chat-input"
+            placeholder={questionEnabled ? "Ask tutor about this slide..." : "Text chat requires grant"}
+            value={questionText}
+            onChange={(event) => setQuestionText(event.target.value)}
+            onKeyDown={handleQuestionKeyDown}
+            disabled={!questionEnabled || questionBusy}
+          />
+          <button
+            type="button"
+            className="live2d-tutor-chat-btn"
+            onClick={() => { handleAsk().catch(() => {}); }}
+            disabled={!questionEnabled || questionBusy || !String(questionText || "").trim()}
+          >
+            {questionBusy ? "..." : "Ask"}
+          </button>
+          <button
+            type="button"
+            className={`live2d-tutor-chat-btn ${isVoiceInputActive ? "active" : ""}`.trim()}
+            onClick={toggleVoiceInput}
+            disabled={!questionEnabled || questionBusy}
+            title="Voice input for tutor"
+          >
+            🎤
+          </button>
+          <button
+            type="button"
+            className="live2d-tutor-chat-btn"
+            onClick={() => { if (typeof onReplayTts === "function") onReplayTts(); }}
+            disabled={!canReplayTts || questionBusy}
+            title="Replay tutor speech"
+          >
+            ↻
+          </button>
+        </div>
+        {questionStatus ? <div className="live2d-tutor-chat-status">{questionStatus}</div> : null}
+        {voiceInputStatus ? <div className="live2d-tutor-chat-status">{voiceInputStatus}</div> : null}
+      </div>
       {!isMobile && (
         <button type="button" className="live2d-tutor-resizer" onPointerDown={handleResizeStart} aria-label="Resize tutor" />
       )}

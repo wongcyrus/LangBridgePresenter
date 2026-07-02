@@ -323,6 +323,57 @@ paths:
       responses:
         200:
           description: Successful response
+  /api/text-chat-access:
+    options:
+      summary: Text chat access preflight
+      operationId: textChatAccessOptions
+      x-google-backend:
+        address: ${TEXT_CHAT_ACCESS}
+      responses:
+        204:
+          description: CORS preflight response
+    get:
+      summary: Text chat access check
+      operationId: textChatAccessGet
+      x-google-backend:
+        address: ${TEXT_CHAT_ACCESS}
+      responses:
+        200:
+          description: Successful response
+  /api/tutor-ask:
+    options:
+      summary: Tutor ask preflight
+      operationId: tutorAskOptions
+      x-google-backend:
+        address: ${TUTOR_ASK}
+      responses:
+        204:
+          description: CORS preflight response
+    post:
+      summary: Tutor text Q&A with grounded Gemini + TTS
+      operationId: tutorAskPost
+      x-google-backend:
+        address: ${TUTOR_ASK}
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              question:
+                type: string
+              courseId:
+                type: string
+              presentationId:
+                type: string
+              slideId:
+                type: string
+              languageCode:
+                type: string
+      responses:
+        200:
+          description: Successful response
   /api/voice-live-session:
     options:
       summary: Voice live session preflight

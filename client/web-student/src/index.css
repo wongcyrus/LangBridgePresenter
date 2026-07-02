@@ -457,6 +457,52 @@ select {
     min-height: 0;
 }
 
+.live2d-tutor-chat {
+    flex: 0 0 auto;
+    border-top: 1px solid rgba(209, 213, 219, 0.9);
+    background: rgba(255, 255, 255, 0.92);
+    padding: 6px;
+}
+
+.live2d-tutor-chat-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.live2d-tutor-chat-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 5px 8px;
+    font-size: 0.75rem;
+}
+
+.live2d-tutor-chat-btn {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.74rem;
+    line-height: 1;
+    padding: 6px 8px;
+}
+
+.live2d-tutor-chat-btn.active {
+    background: #1a73e8;
+    color: #fff;
+    border-color: #1a73e8;
+}
+
+.live2d-tutor-chat-status {
+    margin-top: 4px;
+    font-size: 0.68rem;
+    color: #4b5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .live2d-tutor-resizer {
     position: absolute;
     right: 0;
@@ -548,6 +594,16 @@ select {
     color: #202124;
     overflow-y: auto;
     max-height: 200px;
+}
+
+.tutor-inline-answer {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px dashed #d1d5db;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: #1f2937;
+    white-space: pre-wrap;
 }
 
 .play-btn {
