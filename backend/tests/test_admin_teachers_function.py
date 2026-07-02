@@ -174,3 +174,32 @@ def test_admin_teachers_revoke_teacher_works_without_existing_auth_user(admin_te
     assert status == 200
     assert payload["ok"] is True
     assert payload["active"] is False
+
+
+def test_list_teachers_deduplicates_email_and_uid_mirror(admin_teachers_module):
+    db = MagicMock()
+    teachers_collection = MagicMock()
+    db.collection.return_value = teachers_collection
+
+    email_doc = MagicMock()
+    email_doc.id = "email:teacher@example.com"
+    email_doc.to_dict.return_value = {
+        "email": "teacher@example.com",
+        "active": True,
+        "updated_at": "2026-07-01T10:00:00+00:00",
+    }
+    uid_doc = MagicMock()
+    uid_doc.id = "teacher-uid"
+    uid_doc.to_dict.return_value = {
+        "uid": "teacher-uid",
+        "email": "teacher@example.com",
+        "active": True,
+        "updated_at": "2026-07-01T10:00:00+00:00",
+    }
+
+    teachers_collection.stream.return_value = [email_doc, uid_doc]
+
+    teachers = admin_teachers_module._list_teachers(db)
+    assert len(teachers) == 1
+    assert teachers[0]["email"] == "teacher@example.com"
+    assert teachers[0]["uid"] == "teacher-uid"

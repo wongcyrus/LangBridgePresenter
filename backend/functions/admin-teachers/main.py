@@ -129,10 +129,32 @@ def _teacher_from_doc(doc):
 
 
 def _list_teachers(db: firestore.Client):
-    teachers = []
+    merged_by_principal = {}
     docs = db.collection("teacher_users").stream()
     for doc in docs:
-        teachers.append(_teacher_from_doc(doc))
+        row = _teacher_from_doc(doc)
+        dedupe_key = _normalize_email(row.get("email") or "") or (row.get("uid") or row.get("principal_value") or "")
+        if not dedupe_key:
+            continue
+        existing = merged_by_principal.get(dedupe_key)
+        if not existing:
+            merged_by_principal[dedupe_key] = row
+            continue
+
+        existing_rank = (
+            existing.get("active") is True,
+            existing.get("principal_type") == "uid",
+            existing.get("updated_at") or "",
+        )
+        next_rank = (
+            row.get("active") is True,
+            row.get("principal_type") == "uid",
+            row.get("updated_at") or "",
+        )
+        if next_rank > existing_rank:
+            merged_by_principal[dedupe_key] = row
+
+    teachers = list(merged_by_principal.values())
     teachers.sort(
         key=lambda row: (
             row.get("active") is True,

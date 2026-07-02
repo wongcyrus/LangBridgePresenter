@@ -595,7 +595,35 @@ function App() {
         throw new Error(data.error || "Failed to load teachers");
       }
       const data = await response.json();
-      setAdminTeachers(Array.isArray(data.teachers) ? data.teachers : []);
+      const rawTeachers = Array.isArray(data.teachers) ? data.teachers : [];
+      const dedupedTeachers = Array.from(
+        rawTeachers.reduce((map, teacher) => {
+          const key = String(teacher?.email || teacher?.uid || teacher?.principal_value || "").trim().toLowerCase();
+          if (!key) return map;
+          const existing = map.get(key);
+          if (!existing) {
+            map.set(key, teacher);
+            return map;
+          }
+          const existingRank = [
+            existing?.active === true ? 1 : 0,
+            existing?.principal_type === "uid" ? 1 : 0,
+            String(existing?.updated_at || ""),
+          ];
+          const nextRank = [
+            teacher?.active === true ? 1 : 0,
+            teacher?.principal_type === "uid" ? 1 : 0,
+            String(teacher?.updated_at || ""),
+          ];
+          if (nextRank[0] > existingRank[0]
+            || (nextRank[0] === existingRank[0] && nextRank[1] > existingRank[1])
+            || (nextRank[0] === existingRank[0] && nextRank[1] === existingRank[1] && nextRank[2] > existingRank[2])) {
+            map.set(key, teacher);
+          }
+          return map;
+        }, new Map())
+      );
+      setAdminTeachers(dedupedTeachers);
     } catch (_error) {
       setAdminTeachers([]);
     }
@@ -2147,6 +2175,9 @@ Keep replies short and explicit about the action completed.`,
         }
         if (voiceCaptureActiveRef.current) {
           const authorized = voiceProxyAuthorizedRef.current;
+          if (!authorized) {
+            setVoiceAccessGranted(false);
+          }
           setVoiceStatus(authorized ? "Voice proxy disconnected" : "Voice chat access requires admin grant");
           stopVoiceCapture().catch((stopError) => {
             console.error("Failed to stop voice after proxy disconnect:", stopError);
@@ -3477,7 +3508,12 @@ Keep replies short and explicit about the action completed.`,
         studentClasses={studentClasses}
         loadStudentClasses={loadStudentClasses}
         enrollAndOpenClass={enrollAndOpenClass}
-        canUseVoiceChat={Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason)}
+        canUseVoiceChat={Boolean(
+          currentUser
+          && voiceAccessGranted
+          && !voicePlatformBlockReason
+          && !String(voiceStatus || "").toLowerCase().includes("requires admin grant")
+        )}
         voiceStatus={voiceStatus}
         voiceAccessLoading={voiceAccessLoading}
         isListening={isListening}
@@ -3564,7 +3600,12 @@ Keep replies short and explicit about the action completed.`,
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
   const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
-  const canUseVoiceChat = Boolean(currentUser && voiceAccessGranted && !voicePlatformBlockReason);
+  const canUseVoiceChat = Boolean(
+    currentUser
+    && voiceAccessGranted
+    && !voicePlatformBlockReason
+    && !String(voiceStatus || "").toLowerCase().includes("requires admin grant")
+  );
   const activeClass = studentClasses.find((row) => String(row.class_id || "") === String(courseId)) || null;
   const activeCourseLabel = activeClass?.course_title || activeClass?.course_id || "-";
   const backToSlidesHref = searchParams.toString() ? `/?${searchParams.toString()}` : "/";

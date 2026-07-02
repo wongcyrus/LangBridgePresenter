@@ -1,5 +1,23 @@
 import React from "react";
 
+const getSignedInName = (authStatus = "") => {
+  const marker = "Signed in:";
+  const text = String(authStatus || "").trim();
+  if (!text.startsWith(marker)) return "";
+  return text.slice(marker.length).trim();
+};
+
+const AuthActionButton = ({ currentUser, handleSignOut, handleSignIn, UserIcon, authStatus }) => {
+  const name = getSignedInName(authStatus);
+  const label = currentUser ? `Sign out ${name}`.trim() : "Sign in";
+  return (
+    <button type="button" className="account-action-btn" onClick={currentUser ? handleSignOut : handleSignIn}>
+      <UserIcon />
+      <span>{label}</span>
+    </button>
+  );
+};
+
 export const VoiceAssistantCard = ({
   canUseVoiceChat,
   voiceStatus,
@@ -11,7 +29,9 @@ export const VoiceAssistantCard = ({
   MicIcon,
   voiceTranscript = "",
   voiceAnswer = "",
-}) => (
+}) => {
+  if (!canUseVoiceChat) return null;
+  return (
   <div className="voice-assistant-panel">
     <div className="voice-assistant-top">
       <span className="voice-assistant-label">Voice Assistant</span>
@@ -40,7 +60,8 @@ export const VoiceAssistantCard = ({
       </div>
     ) : null}
   </div>
-);
+  );
+};
 
 export const ClassSelectionPage = ({
   currentUser,
@@ -80,13 +101,15 @@ export const ClassSelectionPage = ({
             Admin
           </button>
         )}
-        <button type="button" className="account-action-btn" onClick={currentUser ? handleSignOut : handleSignIn}>
-          <UserIcon />
-          <span>{currentUser ? "Sign out" : "Sign in"}</span>
-        </button>
+        <AuthActionButton
+          currentUser={currentUser}
+          handleSignOut={handleSignOut}
+          handleSignIn={handleSignIn}
+          UserIcon={UserIcon}
+          authStatus={authStatus}
+        />
       </div>
     </header>
-    <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
     <VoiceAssistantCard
       canUseVoiceChat={canUseVoiceChat}
       voiceStatus={voiceStatus}
@@ -204,10 +227,13 @@ export const TeacherWorkspacePage = ({
         <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
           Back to Class Selection
         </button>
-        <button type="button" className="account-action-btn" onClick={currentUser ? handleSignOut : handleSignIn}>
-          <UserIcon />
-          <span>{currentUser ? "Sign out" : "Sign in"}</span>
-        </button>
+        <AuthActionButton
+          currentUser={currentUser}
+          handleSignOut={handleSignOut}
+          handleSignIn={handleSignIn}
+          UserIcon={UserIcon}
+          authStatus={authStatus}
+        />
       </div>
     </header>
     <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
@@ -215,128 +241,144 @@ export const TeacherWorkspacePage = ({
     {currentUser && !teacherEnabled && <div style={{ color: "#b91c1c" }}>This account does not have teacher access.</div>}
     {currentUser && teacherEnabled && (
       <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-          <label style={{ fontSize: "0.9rem" }}>
-            Course title
-            <input
-              type="text"
-              value={teacherCourseTitle}
-              onChange={(e) => setTeacherCourseTitle(e.target.value)}
-              placeholder="Cloud Fundamentals"
-              style={{ marginLeft: "6px", width: "220px" }}
-            />
-          </label>
-          <label style={{ fontSize: "0.9rem" }}>
-            Languages
-            <input
-              type="text"
-              value={teacherCourseLanguages}
-              onChange={(e) => setTeacherCourseLanguages(e.target.value)}
-              placeholder="en-US,zh-CN,yue-HK"
-              style={{ marginLeft: "6px", width: "200px" }}
-            />
-          </label>
-          <button type="button" onClick={createTeacherCourse} disabled={teacherLoading}>Create course</button>
+        <div style={{ marginBottom: "10px", fontSize: "0.88rem", color: "#4b5563", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "8px 10px" }}>
+          <strong>Quick start:</strong> 1) Create/select a course → 2) Enter class title and create class → 3) Use advanced package tools only if needed.
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-          <label style={{ fontSize: "0.9rem" }}>
-            Select course
-            <select
-              value={teacherCloneCourseId}
-              onChange={(e) => setTeacherCloneCourseId(e.target.value)}
-              style={{ marginLeft: "6px", width: "220px" }}
-            >
-              <option value="">Select course</option>
-              {teacherCourses.map((course) => (
-                <option key={course.course_id} value={course.course_id}>
-                  {course.title || course.course_id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ fontSize: "0.9rem" }}>
-            Class title
-            <input
-              type="text"
-              value={teacherCloneClassTitle}
-              onChange={(e) => setTeacherCloneClassTitle(e.target.value)}
-              placeholder="2026A Cohort"
-              style={{ marginLeft: "6px", width: "180px" }}
-            />
-          </label>
-          <label style={{ fontSize: "0.9rem", display: "inline-flex", alignItems: "center", gap: "6px" }}>
-            <input
-              type="checkbox"
-              checked={teacherClassIsPublic}
-              onChange={(e) => setTeacherClassIsPublic(e.target.checked)}
-            />
-            Public class
-          </label>
-          <button type="button" onClick={createClassFromPackage} disabled={teacherLoading}>Create class from package</button>
-          <button type="button" onClick={cloneTeacherClass} disabled={teacherLoading}>Legacy clone</button>
-          <button type="button" onClick={() => loadTeacherWorkspace()} disabled={teacherLoading}>Refresh</button>
-        </div>
+
         <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "10px" }}>
-          <div style={{ fontWeight: 600, marginBottom: "6px" }}>Course package</div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+          <div style={{ fontWeight: 600, marginBottom: "6px" }}>Step 1 · Course setup</div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
             <label style={{ fontSize: "0.9rem" }}>
-              Bucket
+              Course title
               <input
                 type="text"
-                value={teacherPackageBucket}
-                onChange={(e) => setTeacherPackageBucket(e.target.value)}
-                placeholder="course-package-bucket"
+                value={teacherCourseTitle}
+                onChange={(e) => setTeacherCourseTitle(e.target.value)}
+                placeholder="Cloud Fundamentals"
                 style={{ marginLeft: "6px", width: "220px" }}
               />
             </label>
             <label style={{ fontSize: "0.9rem" }}>
-              Prefix
+              Languages
               <input
                 type="text"
-                value={teacherPackagePrefix}
-                onChange={(e) => setTeacherPackagePrefix(e.target.value)}
-                placeholder="course-packages/course_id/v20260701"
-                style={{ marginLeft: "6px", width: "260px" }}
+                value={teacherCourseLanguages}
+                onChange={(e) => setTeacherCourseLanguages(e.target.value)}
+                placeholder="en-US,zh-CN,yue-HK"
+                style={{ marginLeft: "6px", width: "200px" }}
               />
             </label>
-            <label style={{ fontSize: "0.9rem" }}>
-              Manifest URL
-              <input
-                type="text"
-                value={teacherPackageManifestUrl}
-                onChange={(e) => setTeacherPackageManifestUrl(e.target.value)}
-                placeholder="https://cdn.example.com/course/manifest.json"
-                style={{ marginLeft: "6px", width: "320px" }}
-              />
-            </label>
-            <button type="button" onClick={linkTeacherCoursePackage} disabled={teacherLoading}>Link & validate package</button>
+            <button type="button" onClick={createTeacherCourse} disabled={teacherLoading}>Create course</button>
+            <button type="button" onClick={() => loadTeacherWorkspace()} disabled={teacherLoading}>Refresh list</button>
           </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>
-            <label style={{ fontSize: "0.9rem" }}>
-              Upload file paths (one per line)
-              <textarea
-                value={teacherUploadFilePaths}
-                onChange={(e) => setTeacherUploadFilePaths(e.target.value)}
-                placeholder={"manifest.json\nassets/en/slide_1.png\naudio/en/slide_1.audio"}
-                rows={4}
-                style={{ marginLeft: "6px", width: "300px", resize: "vertical" }}
-              />
-            </label>
-            <button type="button" onClick={createTeacherUploadSession} disabled={teacherLoading}>Create upload session</button>
-          </div>
-          {Array.isArray(teacherUploadUrls) && teacherUploadUrls.length > 0 && (
-            <div style={{ marginTop: "8px", maxHeight: "140px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px", padding: "6px", fontSize: "0.8rem" }}>
-              {teacherUploadUrls.map((item) => (
-                <div key={item.object_name} style={{ marginBottom: "4px" }}>
-                  <strong>{item.path}</strong>
-                  <div style={{ wordBreak: "break-all" }}>{item.upload_url}</div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
+
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "10px" }}>
+          <div style={{ fontWeight: 600, marginBottom: "6px" }}>Step 2 · Create class</div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "6px" }}>
+            <label style={{ fontSize: "0.9rem" }}>
+              Source course
+              <select
+                value={teacherCloneCourseId}
+                onChange={(e) => setTeacherCloneCourseId(e.target.value)}
+                style={{ marginLeft: "6px", width: "220px" }}
+              >
+                <option value="">Select course</option>
+                {teacherCourses.map((course) => (
+                  <option key={course.course_id} value={course.course_id}>
+                    {course.title || course.course_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ fontSize: "0.9rem" }}>
+              Class title
+              <input
+                type="text"
+                value={teacherCloneClassTitle}
+                onChange={(e) => setTeacherCloneClassTitle(e.target.value)}
+                placeholder="2026A Cohort"
+                style={{ marginLeft: "6px", width: "180px" }}
+              />
+            </label>
+            <label style={{ fontSize: "0.9rem", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+              <input
+                type="checkbox"
+                checked={teacherClassIsPublic}
+                onChange={(e) => setTeacherClassIsPublic(e.target.checked)}
+              />
+              Public class
+            </label>
+            <button type="button" onClick={createClassFromPackage} disabled={teacherLoading}>Create class</button>
+          </div>
+          <div style={{ fontSize: "0.82rem", color: "#6b7280" }}>Legacy clone is older behavior; use only for compatibility.</div>
+          <button type="button" onClick={cloneTeacherClass} disabled={teacherLoading} style={{ marginTop: "6px" }}>Legacy clone</button>
+        </div>
+
+        <details style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "10px" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Advanced · Course package tools</summary>
+          <div style={{ marginTop: "8px" }}>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Bucket
+                <input
+                  type="text"
+                  value={teacherPackageBucket}
+                  onChange={(e) => setTeacherPackageBucket(e.target.value)}
+                  placeholder="course-package-bucket"
+                  style={{ marginLeft: "6px", width: "220px" }}
+                />
+              </label>
+              <label style={{ fontSize: "0.9rem" }}>
+                Prefix
+                <input
+                  type="text"
+                  value={teacherPackagePrefix}
+                  onChange={(e) => setTeacherPackagePrefix(e.target.value)}
+                  placeholder="course-packages/course_id/v20260701"
+                  style={{ marginLeft: "6px", width: "260px" }}
+                />
+              </label>
+              <label style={{ fontSize: "0.9rem" }}>
+                Manifest URL
+                <input
+                  type="text"
+                  value={teacherPackageManifestUrl}
+                  onChange={(e) => setTeacherPackageManifestUrl(e.target.value)}
+                  placeholder="https://cdn.example.com/course/manifest.json"
+                  style={{ marginLeft: "6px", width: "320px" }}
+                />
+              </label>
+              <button type="button" onClick={linkTeacherCoursePackage} disabled={teacherLoading}>Link & validate package</button>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", flexWrap: "wrap" }}>
+              <label style={{ fontSize: "0.9rem" }}>
+                Upload file paths (one per line)
+                <textarea
+                  value={teacherUploadFilePaths}
+                  onChange={(e) => setTeacherUploadFilePaths(e.target.value)}
+                  placeholder={"manifest.json\nassets/en/slide_1.png\naudio/en/slide_1.audio"}
+                  rows={4}
+                  style={{ marginLeft: "6px", width: "300px", resize: "vertical" }}
+                />
+              </label>
+              <button type="button" onClick={createTeacherUploadSession} disabled={teacherLoading}>Create upload session</button>
+            </div>
+            {Array.isArray(teacherUploadUrls) && teacherUploadUrls.length > 0 && (
+              <div style={{ marginTop: "8px", maxHeight: "140px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px", padding: "6px", fontSize: "0.8rem" }}>
+                {teacherUploadUrls.map((item) => (
+                  <div key={item.object_name} style={{ marginBottom: "4px" }}>
+                    <strong>{item.path}</strong>
+                    <div style={{ wordBreak: "break-all" }}>{item.upload_url}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+
         {teacherStatus && <div style={{ color: "#4b5563", marginBottom: "10px" }}>{teacherStatus}</div>}
-        <div style={{ fontWeight: 600, marginBottom: "6px" }}>Courses</div>
+        <div style={{ fontWeight: 600, marginBottom: "6px" }}>Your courses</div>
         <div style={{ maxHeight: "220px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px", marginBottom: "10px" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
@@ -366,7 +408,7 @@ export const TeacherWorkspacePage = ({
             </tbody>
           </table>
         </div>
-        <div style={{ fontWeight: 600, marginBottom: "6px" }}>Classes</div>
+        <div style={{ fontWeight: 600, marginBottom: "6px" }}>Your classes</div>
         <div style={{ maxHeight: "220px", overflow: "auto", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
             <thead>
@@ -410,10 +452,13 @@ export const AdminIndexPage = ({
         <button type="button" className="account-action-btn" onClick={() => { window.location.href = "/"; }}>
           Back to Classes
         </button>
-        <button type="button" className="account-action-btn" onClick={currentUser ? handleSignOut : handleSignIn}>
-          <UserIcon />
-          <span>{currentUser ? "Sign out" : "Sign in"}</span>
-        </button>
+        <AuthActionButton
+          currentUser={currentUser}
+          handleSignOut={handleSignOut}
+          handleSignIn={handleSignIn}
+          UserIcon={UserIcon}
+          authStatus={authStatus}
+        />
       </div>
     </header>
     <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
