@@ -1,8 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 
-const MODEL_URL = "https://cdn.jsdelivr.net/npm/live2d-widget-model-shizuku@latest/assets/shizuku.model.json";
 const CUBISM2_RUNTIME_URL = "https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js";
+const AVATAR_MODELS = [
+  { name: "Shizuku", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-shizuku@latest/assets/shizuku.model.json" },
+  { name: "Hibiki", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-hibiki@latest/assets/hibiki.model.json" },
+  { name: "Izumi", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-izumi@latest/assets/izumi.model.json" },
+  { name: "Koharu", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-koharu@latest/assets/koharu.model.json" },
+  { name: "Tororo", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-tororo@latest/assets/tororo.model.json" },
+  { name: "Wanko", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-wanko@latest/assets/wanko.model.json" },
+  { name: "Z16", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-z16@latest/assets/z16.model.json" },
+  { name: "Tsumiki", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-tsumiki@latest/assets/tsumiki.model.json" },
+  { name: "Unitychan", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-unitychan@latest/assets/unitychan.model.json" },
+];
 const MOUTH_PARAMETER_IDS = [
   "ParamMouthOpenY",
   "PARAM_MOUTH_OPEN_Y",
@@ -12,11 +22,21 @@ const MOUTH_PARAMETER_IDS = [
   "PARAM_A",
   "ParamA",
 ];
+const LOOK_X_ANGLE_PARAMETER_IDS = ["ParamAngleX", "PARAM_ANGLE_X"];
+const LOOK_Y_ANGLE_PARAMETER_IDS = ["ParamAngleY", "PARAM_ANGLE_Y"];
+const LOOK_X_EYE_PARAMETER_IDS = ["ParamEyeBallX", "PARAM_EYE_BALL_X"];
+const LOOK_Y_EYE_PARAMETER_IDS = ["ParamEyeBallY", "PARAM_EYE_BALL_Y"];
 const EDGE_GAP = 10;
 const MIN_SIZE = 140;
-const MAX_SIZE = 300;
+const MAX_SIZE = 640;
 const RANDOM_MOUTH_MIN = 0.55;
 const RANDOM_MOUTH_RANGE = 0.4;
+const getResponsiveTutorSize = () => {
+  if (typeof window === "undefined") return 220;
+  const target = window.innerWidth * 0.25;
+  const byHeight = window.innerHeight * 0.6;
+  return Math.round(Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.min(target, byHeight))));
+};
 
 const ensureCubism2Runtime = async () => {
   if (window.Live2D) return;
@@ -59,20 +79,108 @@ const applyMouthValue = (model, value) => {
   }
 };
 
-const Live2DTutor = ({ audioElement, isVisible = true }) => {
+const applyLookValue = (model, lookX, lookY) => {
+  const core = model?.internalModel?.coreModel || model?.internalModel?.live2DModel;
+  if (!core) return;
+  for (const parameterId of LOOK_X_ANGLE_PARAMETER_IDS) {
+    try {
+      if (typeof core.setParameterValueById === "function") {
+        core.setParameterValueById(parameterId, lookX);
+      } else if (typeof core.setParameterValue === "function") {
+        core.setParameterValue(parameterId, lookX);
+      } else if (typeof core.setParamFloat === "function") {
+        core.setParamFloat(parameterId, lookX);
+      }
+    } catch (_error) {
+      // no-op
+    }
+  }
+  for (const parameterId of LOOK_Y_ANGLE_PARAMETER_IDS) {
+    try {
+      if (typeof core.setParameterValueById === "function") {
+        core.setParameterValueById(parameterId, lookY);
+      } else if (typeof core.setParameterValue === "function") {
+        core.setParameterValue(parameterId, lookY);
+      } else if (typeof core.setParamFloat === "function") {
+        core.setParamFloat(parameterId, lookY);
+      }
+    } catch (_error) {
+      // no-op
+    }
+  }
+  const eyeX = Math.max(-1, Math.min(1, lookX / 30));
+  const eyeY = Math.max(-1, Math.min(1, lookY / 30));
+  for (const parameterId of LOOK_X_EYE_PARAMETER_IDS) {
+    try {
+      if (typeof core.setParameterValueById === "function") {
+        core.setParameterValueById(parameterId, eyeX);
+      } else if (typeof core.setParameterValue === "function") {
+        core.setParameterValue(parameterId, eyeX);
+      } else if (typeof core.setParamFloat === "function") {
+        core.setParamFloat(parameterId, eyeX);
+      }
+    } catch (_error) {
+      // no-op
+    }
+  }
+  for (const parameterId of LOOK_Y_EYE_PARAMETER_IDS) {
+    try {
+      if (typeof core.setParameterValueById === "function") {
+        core.setParameterValueById(parameterId, eyeY);
+      } else if (typeof core.setParameterValue === "function") {
+        core.setParameterValue(parameterId, eyeY);
+      } else if (typeof core.setParamFloat === "function") {
+        core.setParamFloat(parameterId, eyeY);
+      }
+    } catch (_error) {
+      // no-op
+    }
+  }
+};
+
+const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, assistantSpeaking = false }) => {
   const mountRef = useRef(null);
   const panelRef = useRef(null);
   const dragStateRef = useRef(null);
   const resizeStateRef = useRef(null);
   const baseModelSizeRef = useRef({ width: 1, height: 1 });
   const mouthValueRef = useRef(0);
+  const lookValueRef = useRef({ x: 0, y: 0 });
+  const pointerRef = useRef({ x: 0, y: 0 });
+  const assistantModeRef = useRef(assistantMode);
+  const assistantSpeakingRef = useRef(assistantSpeaking);
+  const [avatarIndex, setAvatarIndex] = useState(() => {
+    if (typeof window === "undefined") return 0;
+    const raw = window.localStorage.getItem("live2d.avatarIndex");
+    const parsed = Number.parseInt(raw || "0", 10);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, parsed % AVATAR_MODELS.length);
+  });
   const [ready, setReady] = useState(false);
   const [panelRect, setPanelRect] = useState({
     x: EDGE_GAP,
-    y: Math.max(EDGE_GAP, window.innerHeight - 180 - EDGE_GAP),
-    width: 180,
-    height: 180,
+    y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorSize() - EDGE_GAP),
+    width: getResponsiveTutorSize(),
+    height: getResponsiveTutorSize(),
   });
+
+  const activeAvatar = useMemo(() => {
+    const idx = Math.max(0, avatarIndex % AVATAR_MODELS.length);
+    return AVATAR_MODELS[idx];
+  }, [avatarIndex]);
+
+  useEffect(() => {
+    assistantModeRef.current = assistantMode;
+  }, [assistantMode]);
+
+  useEffect(() => {
+    assistantSpeakingRef.current = assistantSpeaking;
+  }, [assistantSpeaking]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("live2d.avatarIndex", String(Math.max(0, avatarIndex % AVATAR_MODELS.length)));
+  }, [avatarIndex]);
 
   useEffect(() => {
     if (!mountRef.current) return undefined;
@@ -81,6 +189,8 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
     let model = null;
     let animationFrame = 0;
     let smoothed = 0;
+    let lookXSmooth = 0;
+    let lookYSmooth = 0;
     let cancelled = false;
     let Live2DModel = null;
     let resizeObserver = null;
@@ -97,11 +207,24 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
       model.y = app.screen.height * 0.98;
     };
 
+    const applyFrameValues = () => {
+      if (!model) return;
+      applyMouthValue(model, mouthValueRef.current);
+      applyLookValue(model, lookValueRef.current.x, lookValueRef.current.y);
+    };
+
     const updateLoop = () => {
       if (cancelled) return;
       let target = 0;
-      const isPlaying = Boolean(audioElement && !audioElement.paused && !audioElement.ended);
-      if (isPlaying) {
+      const useAssistantMode = Boolean(assistantModeRef.current);
+      const isMp3Playing = Boolean(audioElement && !audioElement.paused && !audioElement.ended);
+      if (useAssistantMode && assistantSpeakingRef.current) {
+        const t = performance.now() / 1000;
+        const waveA = (Math.sin(t * 11.7) + 1) * 0.5;
+        const waveB = (Math.sin(t * 19.1 + 0.8) + 1) * 0.5;
+        const motion = (waveA * 0.58) + (waveB * 0.42);
+        target = RANDOM_MOUTH_MIN + (motion * RANDOM_MOUTH_RANGE);
+      } else if (!useAssistantMode && isMp3Playing) {
         const t = Number.isFinite(audioElement?.currentTime) ? audioElement.currentTime : performance.now() / 1000;
         const waveA = (Math.sin(t * 10.7) + 1) * 0.5;
         const waveB = (Math.sin(t * 17.9 + 0.8) + 1) * 0.5;
@@ -111,7 +234,17 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
       }
       smoothed += (target - smoothed) * 0.75;
       mouthValueRef.current = smoothed;
-      if (model) applyMouthValue(model, smoothed);
+
+      const desiredLookX = useAssistantMode && assistantSpeakingRef.current ? pointerRef.current.x : 0;
+      const desiredLookY = useAssistantMode && assistantSpeakingRef.current ? pointerRef.current.y : 0;
+      lookXSmooth += (desiredLookX - lookXSmooth) * 0.35;
+      lookYSmooth += (desiredLookY - lookYSmooth) * 0.35;
+      lookValueRef.current = {
+        x: Math.max(-30, Math.min(30, lookXSmooth * 30)),
+        y: Math.max(-30, Math.min(30, lookYSmooth * 30)),
+      };
+
+      applyFrameValues();
       animationFrame = window.requestAnimationFrame(updateLoop);
     };
 
@@ -127,7 +260,7 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
         await ensureCubism2Runtime();
         const live2dModule = await import("pixi-live2d-display/cubism2");
         Live2DModel = live2dModule.Live2DModel;
-        model = await Live2DModel.from(MODEL_URL);
+        model = await Live2DModel.from(activeAvatar.url);
         if (cancelled) return;
         model.scale.set(1);
         const baseBounds = typeof model.getLocalBounds === "function" ? model.getLocalBounds() : null;
@@ -137,10 +270,10 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
         };
         app.stage.addChild(model);
         onAfterMotionUpdate = () => {
-          applyMouthValue(model, mouthValueRef.current);
+          applyFrameValues();
         };
         onBeforeModelUpdate = () => {
-          applyMouthValue(model, mouthValueRef.current);
+          applyFrameValues();
         };
         if (model.internalModel?.on) {
           model.internalModel.on("afterMotionUpdate", onAfterMotionUpdate);
@@ -163,6 +296,16 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
 
     init();
 
+    const onPointerMove = (event) => {
+      const x = (event.clientX / Math.max(window.innerWidth, 1)) * 2 - 1;
+      const y = (event.clientY / Math.max(window.innerHeight, 1)) * 2 - 1;
+      pointerRef.current = {
+        x: Math.max(-1, Math.min(1, x)),
+        y: Math.max(-1, Math.min(1, y)),
+      };
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+
     return () => {
       cancelled = true;
       setReady(false);
@@ -179,28 +322,35 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
       if (resizeObserver) {
         resizeObserver.disconnect();
       }
+      window.removeEventListener("pointermove", onPointerMove);
     };
-  }, [audioElement]);
+  }, [audioElement, activeAvatar.url]);
 
   useEffect(() => {
     setPanelRect((current) => {
+      const responsiveSize = getResponsiveTutorSize();
       const safeBottom = Math.max(EDGE_GAP, window.innerHeight - EDGE_GAP);
       const next = {
         ...current,
+        width: responsiveSize,
+        height: responsiveSize,
         x: EDGE_GAP,
-        y: Math.max(EDGE_GAP, safeBottom - current.height),
+        y: Math.max(EDGE_GAP, safeBottom - responsiveSize),
       };
       return next;
     });
     const onResize = () => {
       setPanelRect((current) => {
+        const responsiveSize = getResponsiveTutorSize();
         const parentWidth = window.innerWidth || 0;
         const parentHeight = window.innerHeight || 0;
-        const maxX = Math.max(EDGE_GAP, parentWidth - current.width - EDGE_GAP);
+        const maxX = Math.max(EDGE_GAP, parentWidth - responsiveSize - EDGE_GAP);
         const safeBottom = Math.max(EDGE_GAP, parentHeight - EDGE_GAP);
-        const maxY = Math.max(EDGE_GAP, safeBottom - current.height);
+        const maxY = Math.max(EDGE_GAP, safeBottom - responsiveSize);
         return {
           ...current,
+          width: responsiveSize,
+          height: responsiveSize,
           x: Math.max(EDGE_GAP, Math.min(maxX, current.x)),
           y: Math.max(EDGE_GAP, Math.min(maxY, current.y)),
         };
@@ -284,6 +434,10 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
     <div
       ref={panelRef}
       className={`live2d-tutor ${ready ? "ready" : ""} ${isVisible ? "" : "hidden"}`.trim()}
+      onDoubleClick={() => {
+        setAvatarIndex((prev) => (prev + 1) % AVATAR_MODELS.length);
+      }}
+      title={`Double click to switch avatar (${activeAvatar.name})`}
       style={{
         width: `${panelRect.width}px`,
         height: `${panelRect.height}px`,
@@ -292,7 +446,7 @@ const Live2DTutor = ({ audioElement, isVisible = true }) => {
       }}
     >
       <button type="button" className="live2d-tutor-handle" onPointerDown={handleDragStart}>
-        Tutor
+        Tutor · {activeAvatar.name}
       </button>
       <div ref={mountRef} className="live2d-tutor-canvas" />
       <button type="button" className="live2d-tutor-resizer" onPointerDown={handleResizeStart} aria-label="Resize tutor" />

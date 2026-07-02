@@ -196,6 +196,7 @@ function App() {
   const [voicePlatformBlockReason, setVoicePlatformBlockReason] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [assistantSpeaking, setAssistantSpeaking] = useState(false);
   const [adminEnabled, setAdminEnabled] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminStatus, setAdminStatus] = useState("");
@@ -251,6 +252,7 @@ function App() {
   const voiceCaptureProcessorRef = useRef(null);
   const voicePlaybackCtxRef = useRef(null);
   const voicePlaybackNextRef = useRef(0);
+  const assistantSpeechTimeoutRef = useRef(null);
   const voiceCaptureActiveRef = useRef(false);
   const voiceCommandPendingRef = useRef(false);
   const voiceLeaseRef = useRef(null);
@@ -1787,6 +1789,15 @@ function App() {
     const when = Math.max(ctx.currentTime, voicePlaybackNextRef.current || 0);
     source.start(when);
     voicePlaybackNextRef.current = when + buffer.duration;
+    const remainingMs = Math.max(180, ((voicePlaybackNextRef.current - ctx.currentTime) * 1000) + 120);
+    setAssistantSpeaking(true);
+    if (assistantSpeechTimeoutRef.current) {
+      clearTimeout(assistantSpeechTimeoutRef.current);
+    }
+    assistantSpeechTimeoutRef.current = setTimeout(() => {
+      setAssistantSpeaking(false);
+      assistantSpeechTimeoutRef.current = null;
+    }, remainingMs);
   };
 
   const unlockAudioPlayback = async () => {
@@ -2286,6 +2297,11 @@ Keep replies short and explicit about the action completed.`,
         voicePlaybackCtxRef.current = null;
         voicePlaybackNextRef.current = 0;
       }
+      if (assistantSpeechTimeoutRef.current) {
+        clearTimeout(assistantSpeechTimeoutRef.current);
+        assistantSpeechTimeoutRef.current = null;
+      }
+      setAssistantSpeaking(false);
       setIsListening(false);
       setVoiceStatus("Voice assistant stopped");
       playNarrationAfterVoiceStop();
@@ -2505,6 +2521,11 @@ Keep replies short and explicit about the action completed.`,
         voicePlaybackCtxRef.current = null;
         voicePlaybackNextRef.current = 0;
       }
+      if (assistantSpeechTimeoutRef.current) {
+        clearTimeout(assistantSpeechTimeoutRef.current);
+        assistantSpeechTimeoutRef.current = null;
+      }
+      setAssistantSpeaking(false);
       if (voiceLeaseRef.current) {
         closeVoiceLease({ reason: "component_unmount" }).catch((error) => {
           console.error("Failed to close voice lease on unmount:", error);
@@ -2515,6 +2536,15 @@ Keep replies short and explicit about the action completed.`,
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (isListening) return;
+    if (assistantSpeechTimeoutRef.current) {
+      clearTimeout(assistantSpeechTimeoutRef.current);
+      assistantSpeechTimeoutRef.current = null;
+    }
+    setAssistantSpeaking(false);
+  }, [isListening]);
 
   const narrateCurrentSlide = () => {
     const narrationBlockedByVoice = isNarrationBlockedByVoice();
@@ -4308,6 +4338,8 @@ Keep replies short and explicit about the action completed.`,
           <Live2DTutor
             audioElement={audioRef.current}
             isVisible={isTutorVisible}
+            assistantMode={isListening}
+            assistantSpeaking={assistantSpeaking}
           />
       </div>
     </div>
