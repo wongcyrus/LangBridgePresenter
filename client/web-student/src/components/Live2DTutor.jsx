@@ -8,7 +8,6 @@ const AVATAR_MODELS = [
   { name: "Izumi", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-izumi@latest/assets/izumi.model.json" },
   { name: "Koharu", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-koharu@latest/assets/koharu.model.json" },
   { name: "Tororo", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-tororo@latest/assets/tororo.model.json" },
-  { name: "Wanko", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-wanko@latest/assets/wanko.model.json" },
   { name: "Z16", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-z16@latest/assets/z16.model.json" },
   { name: "Tsumiki", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-tsumiki@latest/assets/tsumiki.model.json" },
   { name: "Unitychan", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-unitychan@latest/assets/unitychan.model.json" },
@@ -31,11 +30,27 @@ const MIN_SIZE = 140;
 const MAX_SIZE = 640;
 const RANDOM_MOUTH_MIN = 0.55;
 const RANDOM_MOUTH_RANGE = 0.4;
+const MOBILE_BREAKPOINT = 900;
 const getResponsiveTutorSize = () => {
   if (typeof window === "undefined") return 220;
   const target = window.innerWidth * 0.25;
   const byHeight = window.innerHeight * 0.6;
   return Math.round(Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.min(target, byHeight))));
+};
+const isMobileViewport = () => {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth <= MOBILE_BREAKPOINT;
+};
+const getMobileTutorRect = () => {
+  if (typeof window === "undefined") return { x: EDGE_GAP, y: EDGE_GAP, width: 320, height: 180 };
+  const width = Math.max(220, window.innerWidth - (EDGE_GAP * 2));
+  const height = Math.round(Math.max(140, Math.min(260, window.innerHeight * 0.26)));
+  return {
+    x: EDGE_GAP,
+    y: Math.max(EDGE_GAP, window.innerHeight - height - EDGE_GAP),
+    width,
+    height,
+  };
 };
 
 const ensureCubism2Runtime = async () => {
@@ -147,6 +162,7 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
   const mouthValueRef = useRef(0);
   const lookValueRef = useRef({ x: 0, y: 0 });
   const pointerRef = useRef({ x: 0, y: 0 });
+  const lastTapAtRef = useRef(0);
   const assistantModeRef = useRef(assistantMode);
   const assistantSpeakingRef = useRef(assistantSpeaking);
   const [avatarIndex, setAvatarIndex] = useState(() => {
@@ -157,6 +173,7 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
     return Math.max(0, parsed % AVATAR_MODELS.length);
   });
   const [ready, setReady] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => isMobileViewport());
   const [panelRect, setPanelRect] = useState({
     x: EDGE_GAP,
     y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorSize() - EDGE_GAP),
@@ -327,7 +344,11 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
   }, [audioElement, activeAvatar.url]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
     setPanelRect((current) => {
+      if (isMobileViewport()) {
+        return getMobileTutorRect();
+      }
       const responsiveSize = getResponsiveTutorSize();
       const safeBottom = Math.max(EDGE_GAP, window.innerHeight - EDGE_GAP);
       const next = {
@@ -340,7 +361,12 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
       return next;
     });
     const onResize = () => {
+      const mobile = isMobileViewport();
+      setIsMobile(mobile);
       setPanelRect((current) => {
+        if (mobile) {
+          return getMobileTutorRect();
+        }
         const responsiveSize = getResponsiveTutorSize();
         const parentWidth = window.innerWidth || 0;
         const parentHeight = window.innerHeight || 0;
@@ -363,6 +389,7 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
   }, []);
 
   const handleDragStart = (event) => {
+    if (isMobile) return;
     event.preventDefault();
     dragStateRef.current = {
       startX: event.clientX,
@@ -397,6 +424,7 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
   };
 
   const handleResizeStart = (event) => {
+    if (isMobile) return;
     event.preventDefault();
     event.stopPropagation();
     resizeStateRef.current = {
@@ -430,26 +458,49 @@ const Live2DTutor = ({ audioElement, isVisible = true, assistantMode = false, as
     window.addEventListener("pointerup", onUp);
   };
 
+  const cycleAvatar = () => {
+    setAvatarIndex((prev) => (prev + 1) % AVATAR_MODELS.length);
+  };
+
+  const handleMobilePointerUp = (event) => {
+    if (!isMobile) return;
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    const now = Date.now();
+    if (now - lastTapAtRef.current < 360) {
+      lastTapAtRef.current = 0;
+      cycleAvatar();
+      return;
+    }
+    lastTapAtRef.current = now;
+  };
+
   return (
     <div
       ref={panelRef}
       className={`live2d-tutor ${ready ? "ready" : ""} ${isVisible ? "" : "hidden"}`.trim()}
-      onDoubleClick={() => {
-        setAvatarIndex((prev) => (prev + 1) % AVATAR_MODELS.length);
-      }}
+      onDoubleClick={cycleAvatar}
+      onPointerUp={handleMobilePointerUp}
       title={`Double click to switch avatar (${activeAvatar.name})`}
       style={{
+        position: isMobile ? "relative" : "fixed",
         width: `${panelRect.width}px`,
         height: `${panelRect.height}px`,
-        left: `${panelRect.x}px`,
-        top: `${panelRect.y}px`,
+        left: isMobile ? "auto" : `${panelRect.x}px`,
+        top: isMobile ? "auto" : `${panelRect.y}px`,
+        bottom: "auto",
+        margin: isMobile ? `${EDGE_GAP}px` : 0,
+        alignSelf: isMobile ? "stretch" : "auto",
       }}
     >
-      <button type="button" className="live2d-tutor-handle" onPointerDown={handleDragStart}>
-        Tutor · {activeAvatar.name}
-      </button>
+      {!isMobile && (
+        <button type="button" className="live2d-tutor-handle" onPointerDown={handleDragStart}>
+          Tutor · {activeAvatar.name}
+        </button>
+      )}
       <div ref={mountRef} className="live2d-tutor-canvas" />
-      <button type="button" className="live2d-tutor-resizer" onPointerDown={handleResizeStart} aria-label="Resize tutor" />
+      {!isMobile && (
+        <button type="button" className="live2d-tutor-resizer" onPointerDown={handleResizeStart} aria-label="Resize tutor" />
+      )}
     </div>
   );
 };

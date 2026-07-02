@@ -82,6 +82,12 @@ const UserIcon = () => (
     </svg>
 );
 
+const SignOutIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M10 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4a1 1 0 1 0 0-2H6V5h4a1 1 0 1 0 0-2zm6.59 4.59L15.17 9l2.58 2.59H9a1 1 0 1 0 0 2h8.75l-2.58 2.59 1.42 1.41L21.59 12z"/>
+    </svg>
+);
+
 // --- FullScreen Slide Component ---
 const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, hasPrev, isPlaying, onTogglePlay }) => {
     const [isSubtitleVisible, setIsSubtitleVisible] = useState(true);
@@ -322,10 +328,12 @@ function App() {
     }
     return null;
   };
+  const normalizeLanguageAliasKey = (value) => String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   const normalizeVoiceLanguageCode = (value) => {
     const raw = String(value || "").trim();
     if (!raw) return null;
     const normalized = raw.toLowerCase();
+    const compactNormalized = normalizeLanguageAliasKey(raw);
     const aliases = {
       "en": "en-US",
       "en-us": "en-US",
@@ -339,8 +347,29 @@ function App() {
       "yue-hk": "yue-HK",
       "cantonese": "yue-HK",
       "traditional chinese": "yue-HK",
+      "中文": "zh-CN",
+      "简体中文": "zh-CN",
+      "簡體中文": "zh-CN",
+      "中文简体": "zh-CN",
+      "中文簡體": "zh-CN",
+      "普通话": "zh-CN",
+      "普通話": "zh-CN",
+      "国语": "zh-CN",
+      "國語": "zh-CN",
+      "繁体中文": "yue-HK",
+      "繁體中文": "yue-HK",
+      "中文繁体": "yue-HK",
+      "中文繁體": "yue-HK",
+      "粤语": "yue-HK",
+      "粵語": "yue-HK",
+      "广东话": "yue-HK",
+      "廣東話": "yue-HK",
     };
-    const candidate = aliases[normalized] || raw;
+    const compactAliases = Object.entries(aliases).reduce((acc, [key, code]) => {
+      acc[normalizeLanguageAliasKey(key)] = code;
+      return acc;
+    }, {});
+    const candidate = aliases[normalized] || compactAliases[compactNormalized] || raw;
     const available = supportedLangs.length > 0 ? supportedLangs : Object.keys(AUDIO_LANGUAGE_NAMES);
     if (available.includes(candidate)) return candidate;
     const matched = available.find((code) => code.toLowerCase() === String(candidate).toLowerCase());
@@ -361,6 +390,7 @@ function App() {
     const raw = String(value || "").trim();
     if (!raw) return null;
     const normalized = raw.toLowerCase();
+    const compactNormalized = normalizeLanguageAliasKey(raw);
     const aliases = {
       "en": "en-US",
       "en-us": "en-US",
@@ -374,8 +404,29 @@ function App() {
       "yue-hk": "yue-HK",
       "cantonese": "yue-HK",
       "traditional chinese": "yue-HK",
+      "中文": "zh-CN",
+      "简体中文": "zh-CN",
+      "簡體中文": "zh-CN",
+      "中文简体": "zh-CN",
+      "中文簡體": "zh-CN",
+      "普通话": "zh-CN",
+      "普通話": "zh-CN",
+      "国语": "zh-CN",
+      "國語": "zh-CN",
+      "繁体中文": "yue-HK",
+      "繁體中文": "yue-HK",
+      "中文繁体": "yue-HK",
+      "中文繁體": "yue-HK",
+      "粤语": "yue-HK",
+      "粵語": "yue-HK",
+      "广东话": "yue-HK",
+      "廣東話": "yue-HK",
     };
-    const candidate = aliases[normalized] || raw;
+    const compactAliases = Object.entries(aliases).reduce((acc, [key, code]) => {
+      acc[normalizeLanguageAliasKey(key)] = code;
+      return acc;
+    }, {});
+    const candidate = aliases[normalized] || compactAliases[compactNormalized] || raw;
     const available = Array.from(new Set([
       ...supportedLangs,
       ...Object.keys(liveData || {}),
@@ -1650,13 +1701,13 @@ function App() {
     },
     {
       name: "playback_control",
-      description: "Control narration playback (start, pause, play/pause toggle, restart, stop, seek, jump start).",
+      description: "Control narration playback (start, pause, play/pause toggle, restart, seek, jump start).",
       parameters: {
         type: "object",
         properties: {
           action: {
             type: "string",
-            enum: ["start", "pause", "play_pause", "restart", "stop", "seek", "seek_to", "jump_start"],
+            enum: ["start", "pause", "play_pause", "restart", "seek", "seek_to", "jump_start"],
           },
           seconds: {
             type: "number",
@@ -3347,10 +3398,6 @@ Keep replies short and explicit about the action completed.`,
           narrateCurrentSlide();
           return { ok: true, message: "Restarted narration from the current slide." };
         }
-        if (action === "stop") {
-          stopNarration();
-          return { ok: true, message: "Stopped narration." };
-        }
         if (action === "seek") {
           const seconds = Number(args.seconds);
           if (!Number.isFinite(seconds) || seconds === 0) {
@@ -3399,7 +3446,7 @@ Keep replies short and explicit about the action completed.`,
           nextValue = parsed;
         }
         setAutoplay(nextValue);
-        return { ok: true, message: `Read aloud is now ${nextValue ? "on" : "off"}.` };
+        return { ok: true, message: `Autoplay is now ${nextValue ? "on" : "off"}.` };
       }
 
       if (name === "set_fullscreen_mode") {
@@ -3464,7 +3511,7 @@ Keep replies short and explicit about the action completed.`,
           ok: true,
           message: mode === "class_selection"
             ? "Shortcut: M to start/stop voice."
-            : "Shortcuts: Left/Right slide, Space play/pause, L live/manual, R restart narration, S stop narration, A/D seek, Home jump start, Alt+V display language, Alt+A narration language, M voice start/stop, click slide to open full-screen.",
+            : "Shortcuts: Left/Right slide, Space play/pause, L live/manual, R restart narration, A/D seek, Home jump start, Alt+V display language, Alt+A narration language, M voice start/stop, click slide to open full-screen.",
         };
       }
 
@@ -3493,7 +3540,7 @@ Keep replies short and explicit about the action completed.`,
 
           const narrationBlockedByVoice = isNarrationBlockedByVoice();
           if (narrationBlockedByVoice) {
-              const blockedKeys = new Set([" ", "spacebar", "r", "s", "a", "d", "home"]);
+              const blockedKeys = new Set([" ", "spacebar", "r", "a", "d", "home"]);
               const normalized = (event.key || "").toLowerCase();
               if (blockedKeys.has(normalized) || event.code === "Space") {
                   event.preventDefault();
@@ -3537,9 +3584,6 @@ Keep replies short and explicit about the action completed.`,
           } else if (event.key.toLowerCase() === "r") {
               event.preventDefault();
               narrateCurrentSlide();
-          } else if (event.key.toLowerCase() === "s") {
-              event.preventDefault();
-              stopNarration();
           } else if (event.key.toLowerCase() === "a" && !event.altKey) {
               event.preventDefault();
               seekAudio(event.shiftKey ? -30 : -10);
@@ -3610,9 +3654,9 @@ Keep replies short and explicit about the action completed.`,
             type="button"
             className="account-action-btn"
             onClick={() => { window.location.href = "/"; }}
-            aria-label="Back to course home page"
+            aria-label="Go to home page"
           >
-            Back to course home
+            Home
           </button>
         </div>
       </div>
@@ -3639,9 +3683,9 @@ Keep replies short and explicit about the action completed.`,
             type="button"
             className="account-action-btn"
             onClick={() => { window.location.href = "/"; }}
-            aria-label="Back to course home page"
+            aria-label="Go to home page"
           >
-            Back to course home
+            Home
           </button>
         </div>
       </div>
@@ -3668,7 +3712,7 @@ Keep replies short and explicit about the action completed.`,
   const currentNum = parseInt(viewingSlideId, 10);
   const hasPrev = slideList.length > 0 && slideList.indexOf(currentNum) > 0;
   const hasNext = slideList.length > 0 && slideList.indexOf(currentNum) < slideList.length - 1;
-  const readAloudLabel = autoplay ? "Read aloud: On" : "Read aloud: Off";
+  const readAloudLabel = autoplay ? "Autoplay: On" : "Autoplay: Off";
   const canUseVoiceChat = canRenderVoiceAssistant(currentUser, voiceAccessGranted, voicePlatformBlockReason, voiceStatus);
   const activeClass = studentClasses.find((row) => String(row.class_id || "") === String(courseId)) || null;
   const activeCourseLabel = activeClass?.course_title || activeClass?.course_id || "-";
@@ -4137,186 +4181,22 @@ Keep replies short and explicit about the action completed.`,
               type="button"
               className="account-action-btn"
               onClick={() => { window.location.href = "/"; }}
-              aria-label="Back to course home page"
+              aria-label="Go to home page"
             >
-              Back to course home
+              Home
             </button>
             <button
               type="button"
-              className="account-action-btn"
+              className={`account-action-btn ${currentUser ? "account-action-icon-btn" : ""}`.trim()}
               onClick={currentUser ? handleSignOut : handleSignIn}
+              aria-label={currentUser ? "Sign out" : "Sign in"}
+              title={currentUser ? "Sign out" : "Sign in"}
             >
-              <UserIcon />
-              <span>{currentUser ? `Sign out ${getUserLabel(currentUser)}` : "Sign in"}</span>
+              {currentUser ? <SignOutIcon /> : <UserIcon />}
+              {!currentUser && <span>Sign in</span>}
             </button>
                             </div>
                         </header>      
-      <div className="identity-course-row" aria-label="Current account and course">
-        <div className="identity-course-main">
-          <span><strong>Course:</strong> {activeCourseLabel}</span>
-        </div>
-        <button
-          type="button"
-          className="identity-tutor-toggle"
-          onClick={() => setIsTutorVisible((prev) => !prev)}
-          aria-label={isTutorVisible ? "Hide tutor panel" : "Show tutor panel"}
-        >
-          {isTutorVisible ? "Hide Tutor" : "Show Tutor"}
-        </button>
-        <details className="identity-shortcuts">
-          <summary>Shortcuts</summary>
-          <div className="identity-shortcuts-body">
-            <div>Keys: Alt+V/A language · ←/→ slides · L live/manual · Space play/pause · R restart · S stop · A/D seek (Shift=30s) · Home start · Esc close</div>
-            <div>{isListening ? "Voice chat active: player shortcuts are blocked." : "Voice: M start/stop · open class · select presentation · next/previous slide."}</div>
-          </div>
-        </details>
-      </div>
-      <VoiceAssistantCard
-        canUseVoiceChat={canUseVoiceChat}
-        voiceStatus={voiceStatus}
-        voiceAccessLoading={voiceAccessLoading}
-        isListening={isListening}
-        voiceBusy={voiceBusy}
-        startVoiceCapture={startVoiceCapture}
-        stopVoiceCapture={stopVoiceCapture}
-        MicIcon={MicIcon}
-        voiceTranscript={voiceTranscript}
-        voiceAnswer={voiceAnswer}
-      />
-      <div className="sub-header">
-        <div className="nav-controls">
-            {/* Presentation Selector */}
-            <select 
-                value={viewingPptId || ''} 
-                onChange={(e) => {
-                    setViewingPptId(e.target.value);
-                    setIsLiveMode(false);
-                }}
-                style={{
-                    padding: '6px 10px',
-                    borderRadius: '20px',
-                    border: '1px solid #ddd',
-                    fontSize: '0.9rem',
-                    maxWidth: '160px',
-                    backgroundColor: '#fff'
-                }}
-            >
-                {presentationList.length === 0 && <option value="">No presentations found</option>}
-                {presentationList.map(ppt => (
-                    <option key={ppt} value={ppt}>{ppt}</option>
-                ))}
-            </select>
-
-            <button disabled={!hasPrev} onClick={handlePrev} className="nav-btn-mini">
-                <ChevronLeftIcon />
-            </button>
-            
-            <select 
-                value={viewingSlideId || ''} 
-                onChange={(e) => {
-                    const newVal = e.target.value;
-                    setViewingSlideId(newVal);
-                    // If user manually selects the LIVE slide, we could auto-sync, 
-                    // but let's keep it manual unless they click the LIVE badge.
-                    // Actually, if they pick the *current* live ID, might as well sync?
-                    // Let's stick to standard behavior: manual nav breaks sync.
-                    setIsLiveMode(false); 
-                }}
-                style={{
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid #ccc',
-                    fontSize: '0.9rem',
-                    background: 'white',
-                    maxWidth: '80px'
-                }}
-            >
-                {slideList.map(id => (
-                    <option key={id} value={id}>#{id}</option>
-                ))}
-            </select>
-
-            <button 
-                onClick={toggleLiveMode} 
-                className={`live-badge ${isLiveMode ? 'active' : 'inactive'}`}
-                style={{
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '5px',
-                    border: isLiveMode ? '1px solid #4caf50' : '1px solid #ccc',
-                    background: isLiveMode ? '#e8f5e9' : '#fff',
-                    color: isLiveMode ? '#2e7d32' : '#666',
-                    borderRadius: '20px',
-                    padding: '4px 10px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
-                }}
-            >
-                <div style={{
-                    width: '8px', 
-                    height: '8px', 
-                    borderRadius: '50%', 
-                    background: isLiveMode ? '#4caf50' : '#ccc'
-                }}></div>
-                {isLiveMode ? 'LIVE' : 'Sync'}
-            </button>
-
-            <button disabled={!hasNext} onClick={handleNext} className="nav-btn-mini">
-                <ChevronRightIcon />
-            </button>
-
-          <div className="narration-controls">
-            <button
-              className={`narration-btn ${autoplay ? 'active' : ''}`}
-              title="Automatically play new narration"
-              onClick={() => {
-                setAutoplay((prev) => !prev);
-              }}
-            >
-              {readAloudLabel}
-            </button>
-            <button className="narration-btn" title="Restart from beginning (R)" onClick={narrateCurrentSlide}>
-              Restart
-            </button>
-            <button className="narration-btn secondary" title="Stop (S)" onClick={stopNarration}>
-              Stop
-            </button>
-          </div>
-          <div className="audio-seek-row">
-            <button
-              className="audio-play-btn"
-              title={isPlaying ? "Pause (Space)" : "Play / pause from current position (Space)"}
-              aria-label={isPlaying ? "Pause" : "Play / pause from current position"}
-              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-              disabled={!activeAudioUrl}
-            >
-              {isPlaying ? <PauseIcon /> : <PlayIcon />}
-            </button>
-            <span className="audio-time">{formatTime(audioCurrentTime)}</span>
-            <input
-              className="audio-seek"
-              type="range"
-              min="0"
-              max={audioDuration || 0}
-              step="0.1"
-              value={Math.min(audioCurrentTime, audioDuration || audioCurrentTime || 0)}
-              onChange={(e) => {
-                const nextTime = Number(e.target.value);
-                audioRef.current.currentTime = nextTime;
-                setAudioCurrentTime(nextTime);
-              }}
-              aria-label="Audio progress"
-              title="Seek audio"
-              disabled={!audioDuration}
-            />
-            <span className="audio-time">{formatTime(audioDuration)}</span>
-          </div>
-          <div className="compact-meta">
-            <span className="compact-status-line">Narration: {narrationStatus}</span>
-          </div>
-        </div>
-      </div>
-
       <div className="main-stage">
           <div className="slide-container" onClick={() => setIsFullScreen(true)}>
             {visualUrl ? (
@@ -4335,13 +4215,171 @@ Keep replies short and explicit about the action completed.`,
                  {displayText}
              </div>
           </div>
-          <Live2DTutor
-            audioElement={audioRef.current}
-            isVisible={isTutorVisible}
-            assistantMode={isListening}
-            assistantSpeaking={assistantSpeaking}
-          />
       </div>
+      <div className="sub-header">
+        <div className="audio-seek-row">
+          <button
+           className="audio-play-btn"
+           title={isPlaying ? "Pause (Space)" : "Play / pause from current position (Space)"}
+           aria-label={isPlaying ? "Pause" : "Play / pause from current position"}
+           onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+           disabled={!activeAudioUrl}
+          >
+           {isPlaying ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <span className="audio-time">{formatTime(audioCurrentTime)}</span>
+          <input
+           className="audio-seek"
+           type="range"
+           min="0"
+           max={audioDuration || 0}
+           step="0.1"
+           value={Math.min(audioCurrentTime, audioDuration || audioCurrentTime || 0)}
+           onChange={(e) => {
+             const nextTime = Number(e.target.value);
+             audioRef.current.currentTime = nextTime;
+             setAudioCurrentTime(nextTime);
+           }}
+           aria-label="Audio progress"
+           title="Seek audio"
+           disabled={!audioDuration}
+          />
+          <span className="audio-time">{formatTime(audioDuration)}</span>
+        </div>
+        <div className="compact-meta">
+          <span className="compact-status-line">Narration: {narrationStatus}</span>
+        </div>
+        <div className="nav-controls">
+          <select 
+             value={viewingPptId || ''} 
+             onChange={(e) => {
+                 setViewingPptId(e.target.value);
+                 setIsLiveMode(false);
+             }}
+             style={{
+                 padding: '6px 10px',
+                 borderRadius: '20px',
+                 border: '1px solid #ddd',
+                 fontSize: '0.9rem',
+                 maxWidth: '160px',
+                 backgroundColor: '#fff'
+             }}
+          >
+             {presentationList.length === 0 && <option value="">No presentations found</option>}
+             {presentationList.map(ppt => (
+                 <option key={ppt} value={ppt}>{ppt}</option>
+             ))}
+          </select>
+
+          <button disabled={!hasPrev} onClick={handlePrev} className="nav-btn-mini">
+             <ChevronLeftIcon />
+          </button>
+          
+          <select 
+             value={viewingSlideId || ''} 
+             onChange={(e) => {
+                 const newVal = e.target.value;
+                 setViewingSlideId(newVal);
+                 setIsLiveMode(false); 
+             }}
+             style={{
+                 padding: '4px 8px',
+                 borderRadius: '4px',
+                 border: '1px solid #ccc',
+                 fontSize: '0.9rem',
+                 background: 'white',
+                 maxWidth: '80px'
+             }}
+          >
+             {slideList.map(id => (
+                 <option key={id} value={id}>#{id}</option>
+             ))}
+          </select>
+
+          <button 
+             onClick={toggleLiveMode} 
+             className={`live-badge ${isLiveMode ? 'active' : 'inactive'}`}
+             style={{
+                 display: 'flex', 
+                 alignItems: 'center', 
+                 gap: '5px',
+                 border: isLiveMode ? '1px solid #4caf50' : '1px solid #ccc',
+                 background: isLiveMode ? '#e8f5e9' : '#fff',
+                 color: isLiveMode ? '#2e7d32' : '#666',
+                 borderRadius: '20px',
+                 padding: '4px 10px',
+                 cursor: 'pointer',
+                 fontSize: '0.85rem'
+             }}
+          >
+             <div style={{
+                 width: '8px', 
+                 height: '8px', 
+                 borderRadius: '50%', 
+                 background: isLiveMode ? '#4caf50' : '#ccc'
+             }}></div>
+             {isLiveMode ? 'LIVE' : 'Sync'}
+          </button>
+
+          <button disabled={!hasNext} onClick={handleNext} className="nav-btn-mini">
+             <ChevronRightIcon />
+          </button>
+        </div>
+      </div>
+      <div className="identity-course-row" aria-label="Current account and course">
+        <div className="identity-course-main">
+          <span><strong>Course:</strong> {activeCourseLabel}</span>
+          <div className="narration-controls">
+            <button
+             className={`narration-btn ${autoplay ? 'active' : ''}`}
+             title="Automatically play new narration"
+             onClick={() => {
+               setAutoplay((prev) => !prev);
+             }}
+            >
+             {readAloudLabel}
+            </button>
+            <button className="narration-btn" title="Restart from beginning (R)" onClick={narrateCurrentSlide}>
+             Restart
+            </button>
+          </div>
+        </div>
+        <div className="identity-quick-actions">
+          <button
+           type="button"
+           className="identity-tutor-toggle"
+           onClick={() => setIsTutorVisible((prev) => !prev)}
+           aria-label={isTutorVisible ? "Hide tutor panel" : "Show tutor panel"}
+          >
+           {isTutorVisible ? "Hide Tutor" : "Show Tutor"}
+          </button>
+          <details className="identity-shortcuts">
+           <summary>Shortcuts</summary>
+           <div className="identity-shortcuts-body">
+             <div>Keys: Alt+V/A language · ←/→ slides · L live/manual · Space play/pause · R restart · A/D seek (Shift=30s) · Home start · Esc close</div>
+             <div>{isListening ? "Voice chat active: player shortcuts are blocked." : "Voice: M start/stop · open class · select presentation · next/previous slide."}</div>
+           </div>
+          </details>
+        </div>
+      </div>
+      <VoiceAssistantCard
+        canUseVoiceChat={canUseVoiceChat}
+        voiceStatus={voiceStatus}
+        voiceAccessLoading={voiceAccessLoading}
+        isListening={isListening}
+        voiceBusy={voiceBusy}
+        startVoiceCapture={startVoiceCapture}
+        stopVoiceCapture={stopVoiceCapture}
+        MicIcon={MicIcon}
+        voiceTranscript={voiceTranscript}
+        voiceAnswer={voiceAnswer}
+      />
+      <Live2DTutor
+        audioElement={audioRef.current}
+        isVisible={isTutorVisible}
+        assistantMode={isListening}
+        assistantSpeaking={assistantSpeaking}
+      />
     </div>
   );
 }

@@ -60,6 +60,20 @@ h1 {
     cursor: pointer;
 }
 
+.account-action-icon-btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    justify-content: center;
+}
+
+.identity-quick-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .identity-status {
     font-size: 0.85rem;
     color: #555;
@@ -88,7 +102,7 @@ h1 {
 }
 
 .identity-shortcuts {
-    margin-left: auto;
+    margin-left: 0;
     font-size: 0.78rem;
     color: #5f6368;
     position: relative;
@@ -753,9 +767,201 @@ select {
     right: 20px;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
+    html,
+    body {
+        height: auto;
+        min-height: 100dvh;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+    #root {
+        height: auto;
+        min-height: 100dvh;
+    }
+    .container {
+        max-width: none;
+        box-shadow: none;
+        display: flex;
+        flex-direction: column;
+        height: auto;
+        min-height: 100dvh;
+    }
+    header {
+        padding: 10px 12px;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    h1 {
+        font-size: 1.1rem;
+    }
+    .controls {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .status {
+        width: 100%;
+        margin-right: 0;
+    }
+    .account-action-btn {
+        min-height: 36px;
+        padding: 7px 10px;
+        font-size: 0.82rem;
+    }
+    .identity-course-row,
+    .voice-assistant-panel,
+    .voice-assistant-inline {
+        margin-left: 12px;
+        margin-right: 12px;
+    }
+    .identity-course-main {
+        width: 100%;
+    }
+    .identity-shortcuts {
+        margin-left: 0;
+    }
+    .identity-shortcuts-body {
+        width: min(92vw, 520px);
+        right: auto;
+        left: 0;
+    }
     .sub-header {
-        padding: 10px 14px 8px;
+        padding: 8px 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .sub-header .narration-controls {
+        width: 100%;
+    }
+    .sub-header .nav-controls {
+        width: 100%;
+    }
+    .main-stage {
+        display: flex;
+        flex-direction: column;
+        flex: 0 0 auto;
+        overflow: visible;
+    }
+    .nav-controls > select:first-of-type {
+        flex: 1 1 100%;
+        max-width: none !important;
+    }
+    .narration-controls,
+    .audio-seek-row {
+        flex: 1 1 100%;
+    }
+    .caption-container {
+        padding: 12px;
+        min-height: 112px;
+        height: auto;
+    }
+    .caption-text {
+        font-size: 1rem;
+        line-height: 1.45;
+        max-height: none;
+        overflow-y: visible;
+    }
+    .slide-container {
+        padding: 10px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex: 0 0 clamp(220px, 42vh, 420px);
+        height: clamp(220px, 42vh, 420px);
+        min-height: 220px;
+        overflow: hidden;
+    }
+    .main-slide-image {
+        width: auto;
+        height: auto;
+        max-width: 100%;
+        max-height: 100%;
+    }
+    .slide-placeholder {
+        min-height: 220px;
+    }
+    .live2d-tutor {
+        z-index: 2;
+        opacity: 1;
+        flex-shrink: 0;
+    }
+}
+
+@media (max-width: 600px) {
+    header {
+        padding: 8px 10px;
+    }
+    h1 {
+        font-size: 1rem;
+    }
+    .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        align-items: stretch;
+    }
+    .controls .status {
+        grid-column: 1 / -1;
+    }
+    .controls .lang-select select,
+    .controls .account-action-btn {
+        width: 100%;
+    }
+    .identity-course-row,
+    .voice-assistant-panel,
+    .voice-assistant-inline {
+        margin-left: 10px;
+        margin-right: 10px;
+    }
+    .identity-course-row {
+        gap: 8px;
+        padding: 8px;
+    }
+    .identity-tutor-toggle,
+    .identity-shortcuts summary {
+        height: 32px;
+    }
+    .voice-assistant-top {
+        flex-wrap: wrap;
+    }
+    .voice-assistant-status-inline {
+        white-space: normal;
+    }
+    .sub-header {
+        padding: 8px 10px;
+    }
+    .nav-controls {
+        gap: 6px;
+    }
+    .nav-controls select {
+        min-height: 36px;
+        max-width: none !important;
+    }
+    .narration-btn {
+        min-height: 36px;
+    }
+    .audio-seek-row {
+        padding: 6px 8px;
+        gap: 6px;
+    }
+    .audio-play-btn {
+        width: 36px;
+        height: 36px;
+    }
+    .audio-time {
+        min-width: 2.4rem;
+        font-size: 0.68rem;
+    }
+    .live2d-tutor-handle {
+        height: 20px;
+        font-size: 0.62rem;
+    }
+    .live2d-tutor-resizer {
+        width: 14px;
+        height: 14px;
     }
     .compact-meta {
         margin-left: 0;
@@ -764,7 +970,7 @@ select {
     .nav-btn {
         width: 40px;
         height: 40px;
-        background: rgba(0, 0, 0, 0.6); 
+        background: rgba(0, 0, 0, 0.6);
     }
     .nav-btn.left {
         left: 10px;
