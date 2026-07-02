@@ -88,6 +88,12 @@ const SignOutIcon = () => (
     </svg>
 );
 
+const HomeIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M12 3.2 2.8 10.9a1 1 0 1 0 1.3 1.5L5 11.6V20a2 2 0 0 0 2 2h3.5a1 1 0 0 0 1-1v-5h1v5a1 1 0 0 0 1 1H17a2 2 0 0 0 2-2v-8.4l.9.8a1 1 0 0 0 1.3-1.5L12 3.2z"/>
+    </svg>
+);
+
 // --- FullScreen Slide Component ---
 const FullScreenSlide = ({ slideUrl, text, onClose, onNext, onPrev, hasNext, hasPrev, isPlaying, onTogglePlay }) => {
     const [isSubtitleVisible, setIsSubtitleVisible] = useState(true);
@@ -156,6 +162,7 @@ function App() {
   const SPEAK_LANG_STORAGE_KEY = "student.speakLanguage";
   const AUTOPLAY_STORAGE_KEY = "student.autoplay";
   const SLIDE_STATE_STORAGE_KEY = "student.slideState";
+  const FONT_SIZE_STORAGE_KEY = "student.readerFontSize";
   const readLocalStorage = (key) => {
     if (typeof window === "undefined") return null;
     try {
@@ -227,6 +234,12 @@ function App() {
     return true;
   });
   const [isReady, setIsReady] = useState(false); 
+  const [readerFontSize, setReaderFontSize] = useState(() => {
+    const raw = readLocalStorage(FONT_SIZE_STORAGE_KEY);
+    const parsed = Number.parseInt(raw || "18", 10);
+    if (!Number.isFinite(parsed)) return 18;
+    return Math.max(16, Math.min(26, parsed));
+  });
   const [narrationStatus, setNarrationStatus] = useState("Idle");
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -245,6 +258,7 @@ function App() {
   const [tutorBusy, setTutorBusy] = useState(false);
   const [tutorAnswerText, setTutorAnswerText] = useState("");
   const [tutorAudioUrl, setTutorAudioUrl] = useState("");
+  const [tutorChatHistory, setTutorChatHistory] = useState([]);
   const [voicePlatformBlockReason, setVoicePlatformBlockReason] = useState("");
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -371,6 +385,9 @@ function App() {
 
   const getTextLangName = (code) => DISPLAY_LANGUAGE_NAMES[code] || code;
   const getAudioLangName = (code) => AUDIO_LANGUAGE_NAMES[code] || code;
+  const getTutorChatStorageKey = (userUid, activeCourseId, presentationId, slideId, lang) => (
+    `student.tutor.chat:${String(userUid || "guest")}:${String(activeCourseId || "current")}:${String(presentationId || "none")}:${String(slideId || "none")}:${String(lang || "en-US")}`
+  );
   const availableVoiceLanguages = supportedLangs.length > 0 ? supportedLangs : Object.keys(AUDIO_LANGUAGE_NAMES);
   const parseBooleanArg = (value) => {
     if (typeof value === "boolean") return value;
@@ -559,6 +576,11 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(readerFontSize));
+  }, [readerFontSize]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const payload = {
       isLiveMode: Boolean(isLiveMode),
       pptId: viewingPptId ? String(viewingPptId) : null,
@@ -566,6 +588,47 @@ function App() {
     };
     window.localStorage.setItem(SLIDE_STATE_STORAGE_KEY, JSON.stringify(payload));
   }, [isLiveMode, viewingPptId, viewingSlideId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    const key = getTutorChatStorageKey(currentUser?.uid, courseId, presentationId, slideId, listenLang);
+    const raw = readLocalStorage(key);
+    if (!raw) {
+      setTutorChatHistory([]);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setTutorChatHistory([]);
+        return;
+      }
+      const cleaned = parsed
+        .filter((row) => row && typeof row === "object")
+        .map((row) => ({
+          role: row.role === "assistant" ? "assistant" : "user",
+          text: String(row.text || "").trim(),
+          usage: row.usage && typeof row.usage === "object" ? row.usage : null,
+          spend: row.spend && typeof row.spend === "object" ? row.spend : null,
+          citations: Array.isArray(row.citations) ? row.citations.filter((x) => typeof x === "string") : [],
+        }))
+        .filter((row) => row.text)
+        .slice(-30);
+      setTutorChatHistory(cleaned);
+    } catch (_error) {
+      setTutorChatHistory([]);
+    }
+  }, [currentUser?.uid, courseId, viewingPptId, viewingSlideId, livePptId, liveSlideId, listenLang]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    const key = getTutorChatStorageKey(currentUser?.uid, courseId, presentationId, slideId, listenLang);
+    window.localStorage.setItem(key, JSON.stringify(tutorChatHistory.slice(-30)));
+  }, [tutorChatHistory, currentUser?.uid, courseId, viewingPptId, viewingSlideId, livePptId, liveSlideId, listenLang]);
 
   const getStudentVoiceMode = () => {
     if (isAdminIndexPage || isAdminPage || isTeacherPage) return "disabled";
@@ -695,6 +758,7 @@ function App() {
       setTutorStatus("");
       setTutorAnswerText("");
       setTutorAudioUrl("");
+      setTutorChatHistory([]);
       pendingNarrationAfterVoiceRef.current = null;
       setAdminEnabled(false);
       setAdminStatus("");
@@ -1670,9 +1734,10 @@ function App() {
     return null;
   };
 
-  const askTutorByText = async (question) => {
+  const askTutorByText = async (question, options = {}) => {
     const text = String(question || "").trim();
     if (!text) return false;
+    const forceSubmit = Boolean(options.force);
     const now = Date.now();
     const state = tutorAskStateRef.current;
     if (state.inFlight) {
@@ -1680,7 +1745,7 @@ function App() {
       return false;
     }
     const normalized = text.toLowerCase();
-    if (state.lastQuestion === normalized && now - state.lastAt < 1500) {
+    if (!forceSubmit && state.lastQuestion === normalized && now - state.lastAt < 1500) {
       setTutorStatus("Duplicate question ignored");
       return false;
     }
@@ -1699,6 +1764,11 @@ function App() {
       return false;
     }
     tutorAskStateRef.current = { ...state, inFlight: true, lastQuestion: normalized, lastAt: now };
+    const historyForRequest = tutorChatHistory.slice(-12).map((row) => ({
+      role: row.role,
+      text: String(row.text || "").trim(),
+    })).filter((row) => row.text);
+    setTutorChatHistory((prev) => [...prev, { role: "user", text }].slice(-30));
     setTutorBusy(true);
     setTutorStatus("Asking tutor...");
     try {
@@ -1715,9 +1785,16 @@ function App() {
           presentationId: String(presentationId),
           slideId: String(slideId),
           languageCode: listenLang,
+          chatHistory: historyForRequest,
         }),
       });
-      const data = await response.json().catch(() => ({}));
+      const rawBody = await response.text();
+      let data = {};
+      try {
+        data = rawBody ? JSON.parse(rawBody) : {};
+      } catch (_error) {
+        data = {};
+      }
       if (response.status === 401) {
         setTextChatAccessGranted(false);
         setTutorStatus("Session expired. Please sign in again");
@@ -1740,6 +1817,15 @@ function App() {
       const audioUrl = String(data.audioUrl || "").trim();
       setTutorAnswerText(answer);
       setTutorAudioUrl(audioUrl);
+      if (answer) {
+        setTutorChatHistory((prev) => [...prev, {
+          role: "assistant",
+          text: answer,
+          usage: data?.usage || null,
+          spend: data?.spend || null,
+          citations: Array.isArray(data?.citations) ? data.citations : [],
+        }].slice(-30));
+      }
       const remaining = Number(data?.spend?.weekly_remaining_usd);
       if (Number.isFinite(remaining)) {
         setTutorStatus(`Tutor replied · Weekly budget left: $${Math.max(0, remaining).toFixed(2)}`);
@@ -1779,6 +1865,62 @@ function App() {
   }, [viewingPptId, viewingSlideId, isLiveMode, viewLang, listenLang]);
 
   const isNarrationBlockedByVoice = () => false;
+
+  const clearTutorChatHistory = () => {
+    setTutorChatHistory([]);
+    const presentationId = viewingPptId || livePptId;
+    const slideId = viewingSlideId || liveSlideId;
+    const key = getTutorChatStorageKey(currentUser?.uid, courseId, presentationId, slideId, listenLang);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(key);
+    }
+    setTutorStatus("Tutor chat cleared");
+  };
+
+  const regenerateTutorAnswer = async () => {
+    const lastUser = [...tutorChatHistory].reverse().find((row) => row.role === "user" && String(row.text || "").trim());
+    if (!lastUser) {
+      setTutorStatus("No previous question to regenerate");
+      return;
+    }
+    await askTutorByText(lastUser.text, { force: true });
+  };
+
+  const stopTutorSpeech = () => {
+    audioRef.current.pause();
+    setIsPlaying(false);
+    setTutorStatus("Tutor speech stopped");
+  };
+
+  const exportTutorChat = async () => {
+    if (!tutorChatHistory.length) {
+      setTutorStatus("No tutor chat to export");
+      return;
+    }
+    const transcript = tutorChatHistory.map((row) => {
+      const role = row.role === "assistant" ? "Tutor" : "You";
+      return `${role}: ${String(row.text || "").trim()}`;
+    }).join("\n\n");
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(transcript);
+        setTutorStatus("Tutor chat copied to clipboard");
+        return;
+      }
+      throw new Error("clipboard unavailable");
+    } catch (_error) {
+      const blob = new Blob([transcript], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "tutor-chat.txt";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      setTutorStatus("Tutor chat exported");
+    }
+  };
 
   const resolveAudioUrlFromVoiceState = () => {
     const state = voiceStateRef.current;
@@ -4048,11 +4190,12 @@ Keep replies short and explicit about the action completed.`,
           </button>
           <button
             type="button"
-            className="account-action-btn header-home-btn"
+            className="account-action-btn account-action-icon-btn header-home-btn"
             onClick={() => { window.location.href = "/"; }}
             aria-label="Go to home page"
+            title="Home"
           >
-            Home
+            <HomeIcon />
           </button>
         </div>
       </div>
@@ -4077,11 +4220,12 @@ Keep replies short and explicit about the action completed.`,
         <div className="controls">
           <button
             type="button"
-            className="account-action-btn"
+            className="account-action-btn account-action-icon-btn"
             onClick={() => { window.location.href = "/"; }}
             aria-label="Go to home page"
+            title="Home"
           >
-            Home
+            <HomeIcon />
           </button>
         </div>
       </div>
@@ -4624,7 +4768,7 @@ Keep replies short and explicit about the action completed.`,
   }
 
   return (
-    <div className="container single-slide-view">
+    <div className="container single-slide-view" style={{ "--reader-font-size": `${readerFontSize}px` }}>
       {isFullScreen && (
           <FullScreenSlide 
               slideUrl={visualUrl} 
@@ -4663,11 +4807,30 @@ Keep replies short and explicit about the action completed.`,
             </div>
             <button
               type="button"
-              className="account-action-btn header-home-btn"
+              className="account-action-btn header-font-dec header-font-btn"
+              onClick={() => setReaderFontSize((prev) => Math.max(16, prev - 2))}
+              aria-label="Decrease text size"
+              title="Text size down"
+            >
+              A-
+            </button>
+            <button
+              type="button"
+              className="account-action-btn header-font-inc header-font-btn"
+              onClick={() => setReaderFontSize((prev) => Math.min(26, prev + 2))}
+              aria-label="Increase text size"
+              title="Text size up"
+            >
+              A+
+            </button>
+            <button
+              type="button"
+              className="account-action-btn account-action-icon-btn header-home-btn"
               onClick={() => { window.location.href = "/"; }}
               aria-label="Go to home page"
+              title="Home"
             >
-              Home
+              <HomeIcon />
             </button>
             <button
               type="button"
@@ -4872,8 +5035,13 @@ Keep replies short and explicit about the action completed.`,
         questionEnabled={Boolean(textChatAccessGranted && !textChatAccessLoading)}
         questionBusy={tutorBusy}
         questionStatus={tutorStatus}
+        chatHistory={tutorChatHistory}
         canReplayTts={Boolean(tutorAudioUrl)}
         onReplayTts={replayTutorTts}
+        onClearChat={clearTutorChatHistory}
+        onRegenerate={regenerateTutorAnswer}
+        onStopSpeech={stopTutorSpeech}
+        onExportChat={exportTutorChat}
         questionLanguage={listenLang}
         onSubmitQuestion={askTutorByText}
       />

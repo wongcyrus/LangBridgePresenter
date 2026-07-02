@@ -2,9 +2,10 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import firebase_admin
 import functions_framework
@@ -109,7 +110,31 @@ def _fetch_slide_context(client_db: firestore.Client, course_id: str, presentati
     return snap.to_dict()
 
 
-def _build_prompt(question: str, language_code: str, slide_data: dict):
+def _normalize_chat_history(raw_history: Any, *, max_turns: int = 12, max_chars: int = 300) -> List[Dict[str, str]]:
+    if not isinstance(raw_history, list):
+        return []
+    turns: List[Dict[str, str]] = []
+    for item in raw_history[-max_turns:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in ("user", "assistant"):
+            continue
+        text = str(item.get("text") or item.get("content") or "").strip()
+        if not text:
+            continue
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip()
+        turns.append({"role": role, "text": text})
+    return turns
+
+
+def _build_prompt(
+    question: str,
+    language_code: str,
+    slide_data: dict,
+    chat_history: Optional[List[Dict[str, str]]] = None,
+):
     lang = _canonical_language_code(language_code)
     languages = slide_data.get("languages", {})
     lang_data = languages.get(lang, {})
@@ -117,14 +142,23 @@ def _build_prompt(question: str, language_code: str, slide_data: dict):
     source_context = (slide_data.get("source_context") or "").strip()
     if not slide_text and not source_context:
         raise ValueError("No slide text available for the selected language.")
+    history_lines = []
+    for turn in (chat_history or []):
+        role_label = "User" if turn.get("role") == "user" else "Tutor"
+        history_lines.append(f"{role_label}: {turn.get('text', '')}")
+    history_block = "\n".join(history_lines).strip() or "(none)"
     return f"""
 You are a classroom tutor assistant.
 Answer in language: {lang}
-Your scope is strictly limited to the current slide text and speaker notes below.
-Never answer general questions unrelated to this slide, even if asked.
-If the question is outside this slide scope, reply only with:
+Default to treating the question as related to the current slide topic/content.
+Treat references like "this slide", "this topic", "related news", "search information", "latest news", "recent example", or "real-world case" as related when they refer to the slide topic.
+Only if the question is clearly unrelated to the slide topic, reply only with:
 "I can only help with this slide. Please ask a question about the current slide content."
-Do not provide extra facts, web knowledge, code, opinions, or instructions outside the slide.
+If the question is related to this slide, always use Google Search grounding before answering.
+Use grounded external facts/examples to clarify the slide context, including latest developments when relevant.
+Do not answer related questions using slide text alone; include grounded context in every related answer.
+Keep grounded additions tightly tied to the slide topic, and do not switch to unrelated topics.
+Use recent conversation history for follow-up context.
 Give concise answer suitable for students.
 Do not repeat points, examples, or sentences.
 Maximum 6 sentences total.
@@ -134,6 +168,9 @@ Slide text ({lang}):
 
 Speaker notes:
 {source_context or "(none)"}
+
+Recent conversation (oldest to newest):
+{history_block}
 
 Question:
 {question}
@@ -187,13 +224,23 @@ def _load_budget_settings(db: firestore.Client) -> Dict[str, Any]:
     if not snap.exists:
         return defaults
     raw = snap.to_dict() or {}
+    def _num_float(key: str) -> float:
+        try:
+            return float(raw.get(key, defaults[key]))
+        except (TypeError, ValueError):
+            return float(defaults[key])
+    def _num_int(key: str) -> int:
+        try:
+            return int(raw.get(key, defaults[key]))
+        except (TypeError, ValueError):
+            return int(defaults[key])
     return {
-        "weekly_budget_usd": float(raw.get("weekly_budget_usd", defaults["weekly_budget_usd"])),
-        "price_input_per_million": float(raw.get("price_input_per_million", defaults["price_input_per_million"])),
-        "price_output_per_million": float(raw.get("price_output_per_million", defaults["price_output_per_million"])),
-        "grounding_price_per_query": float(raw.get("grounding_price_per_query", defaults["grounding_price_per_query"])),
-        "projected_output_tokens": int(raw.get("projected_output_tokens", defaults["projected_output_tokens"])),
-        "projected_grounding_queries": int(raw.get("projected_grounding_queries", defaults["projected_grounding_queries"])),
+        "weekly_budget_usd": _num_float("weekly_budget_usd"),
+        "price_input_per_million": _num_float("price_input_per_million"),
+        "price_output_per_million": _num_float("price_output_per_million"),
+        "grounding_price_per_query": _num_float("grounding_price_per_query"),
+        "projected_output_tokens": _num_int("projected_output_tokens"),
+        "projected_grounding_queries": _num_int("projected_grounding_queries"),
     }
 
 
@@ -308,13 +355,27 @@ def _count_prompt_tokens(client: genai.Client, model: str, prompt: str) -> int:
     return int(count)
 
 
+def _estimate_prompt_tokens(prompt: str) -> int:
+    text = str(prompt or "")
+    if not text:
+        return 1
+    # Fast server-side estimate to avoid an extra upstream API call before each tutor request.
+    return max(1, min(32768, len(text) // 4))
+
+
 def _check_budget_before_call(db: firestore.Client, uid: str, settings: Dict[str, Any], projected_input_tokens: int):
     now = datetime.now(timezone.utc)
     week_key = _weekly_key(now)
     spend_ref = db.collection("text_chat_spend").document(uid)
     spend_snap = spend_ref.get()
     current = spend_snap.to_dict() if spend_snap.exists else {}
-    current_week_spent = float(current.get("spent_usd", 0)) if current.get("week_key") == week_key else 0.0
+    if current.get("week_key") == week_key:
+        try:
+            current_week_spent = float(current.get("spent_usd", 0))
+        except (TypeError, ValueError):
+            current_week_spent = 0.0
+    else:
+        current_week_spent = 0.0
 
     projected_cost = _cost_usd(
         input_tokens=projected_input_tokens,
@@ -364,13 +425,34 @@ def _commit_spend_after_call(
             grounding_queries = 0
             request_count = 0
         else:
-            current_spent = float(current.get("spent_usd", 0))
-            input_tokens = int(current.get("input_tokens", 0))
-            output_tokens = int(current.get("output_tokens", 0))
-            tool_use_tokens = int(current.get("tool_use_tokens", 0))
-            total_tokens = int(current.get("total_tokens", 0))
-            grounding_queries = int(current.get("grounding_queries", 0))
-            request_count = int(current.get("request_count", 0))
+            try:
+                current_spent = float(current.get("spent_usd", 0))
+            except (TypeError, ValueError):
+                current_spent = 0.0
+            try:
+                input_tokens = int(current.get("input_tokens", 0))
+            except (TypeError, ValueError):
+                input_tokens = 0
+            try:
+                output_tokens = int(current.get("output_tokens", 0))
+            except (TypeError, ValueError):
+                output_tokens = 0
+            try:
+                tool_use_tokens = int(current.get("tool_use_tokens", 0))
+            except (TypeError, ValueError):
+                tool_use_tokens = 0
+            try:
+                total_tokens = int(current.get("total_tokens", 0))
+            except (TypeError, ValueError):
+                total_tokens = 0
+            try:
+                grounding_queries = int(current.get("grounding_queries", 0))
+            except (TypeError, ValueError):
+                grounding_queries = 0
+            try:
+                request_count = int(current.get("request_count", 0))
+            except (TypeError, ValueError):
+                request_count = 0
 
         next_spent = current_spent + call_cost
         payload = {
@@ -447,6 +529,46 @@ def _generate_answer(client: genai.Client, model: str, prompt: str):
     return response, answer
 
 
+def _extract_citations(response: Any, *, max_items: int = 6) -> List[str]:
+    try:
+        data = response.to_dict()
+    except Exception:
+        data = {}
+    urls: List[str] = []
+    seen = set()
+
+    def _add_url(value: Any):
+        if not isinstance(value, str):
+            return
+        raw = value.strip()
+        if not raw:
+            return
+        if not raw.startswith(("http://", "https://")):
+            return
+        if raw in seen:
+            return
+        seen.add(raw)
+        urls.append(raw)
+
+    def _walk(node: Any):
+        if len(urls) >= max_items:
+            return
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("url", "uri", "source_uri", "retrieved_uri", "link"):
+                    _add_url(value)
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+        elif isinstance(node, str):
+            for match in re.findall(r"https?://[^\s\]\)\"'<>]+", node):
+                _add_url(match)
+
+    _walk(data)
+    return urls[:max_items]
+
+
 @functions_framework.http
 def tutor_ask(request: Request):
     headers = _cors_headers()
@@ -477,6 +599,7 @@ def tutor_ask(request: Request):
     language_code = str(payload.get("languageCode") or "en-US").strip()
     if not course_id or not presentation_id or not slide_id:
         return (json.dumps({"error": "courseId, presentationId, and slideId are required"}), 400, headers)
+    chat_history = _normalize_chat_history(payload.get("chatHistory"))
 
     db = firestore.Client(database="langbridge")
     if not _has_text_chat_access(decoded, db):
@@ -498,14 +621,15 @@ def tutor_ask(request: Request):
             database=os.environ.get("CLIENT_FIRESTORE_DATABASE_ID", "(default)"),
         )
         slide_data = _fetch_slide_context(client_db, course_id, presentation_id, slide_id)
-        prompt = _build_prompt(question, language_code, slide_data)
+        prompt = _build_prompt(question, language_code, slide_data, chat_history)
 
-        projected_input_tokens = _count_prompt_tokens(client, model, prompt)
+        projected_input_tokens = _estimate_prompt_tokens(prompt)
         projected = _check_budget_before_call(db, uid, settings, projected_input_tokens)
 
         response, answer = _generate_answer(client, model, prompt)
         answer = _dedupe_answer_text(answer)
         usage = _extract_usage(response, int(settings["projected_grounding_queries"]))
+        citations = _extract_citations(response)
         spend = _commit_spend_after_call(db, uid, settings, usage)
 
         if spend["weekly_remaining_usd"] < 0:
@@ -536,6 +660,7 @@ def tutor_ask(request: Request):
         "presentationId": presentation_id,
         "slideId": slide_id,
         "languageCode": _canonical_language_code(language_code),
+        "citations": citations,
         "usage": usage,
         "spend": spend,
         "projected": projected,

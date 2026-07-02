@@ -67,6 +67,13 @@ h1 {
     justify-content: center;
 }
 
+.header-font-btn {
+    min-width: 38px;
+    justify-content: center;
+    padding: 6px 8px;
+    font-weight: 700;
+}
+
 .identity-quick-actions {
     margin-left: auto;
     display: inline-flex;
@@ -451,6 +458,46 @@ select {
     letter-spacing: 0.03em;
 }
 
+.live2d-tutor-expand {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 2;
+    height: 20px;
+    min-width: 20px;
+    border: 1px solid rgba(209, 213, 219, 0.95);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #374151;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0 4px;
+}
+
+.live2d-tutor.expanded {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    margin: 0 !important;
+    border-radius: 0;
+    z-index: 9999;
+}
+
+.live2d-tutor.expanded .live2d-tutor-expand {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    background: rgba(17, 24, 39, 0.88);
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 700;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
 .live2d-tutor-canvas {
     flex: 1 1 auto;
     width: 100%;
@@ -462,6 +509,63 @@ select {
     border-top: 1px solid rgba(209, 213, 219, 0.9);
     background: rgba(255, 255, 255, 0.92);
     padding: 6px;
+    max-height: 46%;
+    overflow: hidden;
+}
+
+.live2d-tutor-chat-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    font-size: 0.7rem;
+    color: #374151;
+    font-weight: 600;
+}
+
+.live2d-tutor-chat-tools {
+    display: flex;
+    gap: 4px;
+}
+
+.live2d-tutor-chat-log {
+    max-height: 112px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid rgba(209, 213, 219, 0.85);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 6px;
+    margin-bottom: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.live2d-tutor-chat-meta {
+    margin-top: 2px;
+    font-size: 0.62rem;
+    color: #6b7280;
+}
+
+.live2d-tutor-chat-msg {
+    font-size: var(--reader-font-size, 16px);
+    line-height: 1.3;
+    color: #111827;
+    word-break: break-word;
+}
+
+.live2d-tutor-chat-msg.user {
+    color: #1d4ed8;
+}
+
+.live2d-tutor-chat-msg.assistant {
+    color: #065f46;
+}
+
+.live2d-tutor-chat-empty {
+    font-size: var(--reader-font-size, 16px);
+    color: #6b7280;
 }
 
 .live2d-tutor-chat-row {
@@ -589,7 +693,7 @@ select {
 
 .caption-text {
     flex-grow: 1;
-    font-size: 1.2rem;
+    font-size: var(--reader-font-size, 16px);
     line-height: 1.6;
     color: #202124;
     overflow-y: auto;
@@ -849,12 +953,12 @@ select {
     header {
         padding: 10px 12px;
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(8, minmax(0, 1fr));
         grid-template-areas:
-            "logo live home auth"
-            "lang1 lang1 lang2 lang2";
+            "logo logo logo live dec inc home auth"
+            "lang1 lang1 lang1 lang1 lang2 lang2 lang2 lang2";
         align-items: center;
-        gap: 8px;
+        gap: 10px;
     }
     h1 {
         grid-area: logo;
@@ -862,6 +966,9 @@ select {
         line-height: 1;
         margin: 0;
         white-space: nowrap;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .controls {
         display: contents;
@@ -873,17 +980,25 @@ select {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        justify-self: start;
+        justify-self: end;
+        text-align: right;
     }
     .controls .header-home-btn {
         grid-area: home;
         white-space: nowrap;
-        justify-self: center;
+        justify-self: stretch;
+        width: 100%;
     }
     .controls .header-auth-btn {
         grid-area: auth;
-        justify-self: end;
+        justify-self: stretch;
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        justify-content: center;
+        min-height: 34px;
     }
+    .controls .header-auth-btn span { display: none; }
     .controls .header-display-lang {
         grid-area: lang1;
         min-width: 0;
@@ -892,6 +1007,8 @@ select {
         grid-area: lang2;
         min-width: 0;
     }
+    .controls .header-font-dec { grid-area: dec; justify-self: stretch; width: 100%; min-width: 0; }
+    .controls .header-font-inc { grid-area: inc; justify-self: stretch; width: 100%; min-width: 0; }
     .controls .lang-select select {
         width: 100%;
         min-height: 36px;
@@ -1018,7 +1135,7 @@ select {
         height: auto;
     }
     .caption-text {
-        font-size: 1rem;
+        font-size: var(--reader-font-size, 16px);
         line-height: 1.45;
         max-height: none;
         overflow-y: visible;
@@ -1052,12 +1169,21 @@ select {
 @media (max-width: 600px) {
     header {
         padding: 8px 10px;
+        gap: 8px;
     }
     h1 {
         font-size: 1rem;
     }
     .controls .header-live-status {
-        font-size: 0.78rem;
+        font-size: 0.76rem;
+        line-height: 1.2;
+        max-width: 46vw;
+    }
+    .header-font-btn {
+        min-width: 32px;
+        min-height: 32px;
+        padding: 4px 6px;
+        font-size: 0.82rem;
     }
     .identity-course-row,
     .voice-assistant-panel,
@@ -1107,6 +1233,19 @@ select {
     .live2d-tutor-handle {
         height: 20px;
         font-size: 0.62rem;
+    }
+    .live2d-tutor-expand {
+        top: 6px;
+        right: 6px;
+        height: 28px;
+        min-width: 28px;
+        font-size: 0.9rem;
+    }
+    .live2d-tutor-chat {
+        max-height: 52%;
+    }
+    .live2d-tutor-chat-log {
+        max-height: 128px;
     }
     .live2d-tutor-resizer {
         width: 14px;
