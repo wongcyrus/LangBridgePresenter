@@ -3,6 +3,12 @@ import * as PIXI from "pixi.js";
 
 const CUBISM2_RUNTIME_URL = "https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js";
 const AVATAR_MODELS = [
+  { name: "Ni-j", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-ni-j@latest/assets/ni-j.model.json" },
+  { name: "Wild", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-wild@latest/assets/wild.model.json" },
+  { name: "Epsilon2.1", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-epsilon2_1@latest/assets/Epsilon2.1.model.json" },
+  { name: "Haru01", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-haru@latest/01/assets/haru01.model.json" },
+  { name: "Haru02", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-haru@latest/02/assets/haru02.model.json" },
+  { name: "Chitose", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-chitose@latest/assets/chitose.model.json" },
   { name: "Shizuku", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-shizuku@latest/assets/shizuku.model.json" },
   { name: "Hibiki", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-hibiki@latest/assets/hibiki.model.json" },
   { name: "Izumi", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-izumi@latest/assets/izumi.model.json" },
@@ -12,6 +18,36 @@ const AVATAR_MODELS = [
   { name: "Tsumiki", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-tsumiki@latest/assets/tsumiki.model.json" },
   { name: "Unitychan", url: "https://cdn.jsdelivr.net/npm/live2d-widget-model-unitychan@latest/assets/unitychan.model.json" },
 ];
+const DEFAULT_AVATAR_LAYOUT = {
+  fitWidthRatio: 0.82,
+  fitHeightRatio: 0.95,
+  scaleMultiplier: 1,
+  xRatio: 0.5,
+  yRatio: 0.98,
+  drawableTopPaddingRatio: null,
+};
+const AVATAR_LAYOUT_PRESETS = {
+  "Ni-j": { fitWidthRatio: 0.84, fitHeightRatio: 0.95, scaleMultiplier: 1.02, xRatio: 0.5, yRatio: 0.985 },
+  Wanko: { fitWidthRatio: 0.86, fitHeightRatio: 0.96, scaleMultiplier: 1.14, xRatio: 0.5, yRatio: 0.99 },
+  Wild: { fitWidthRatio: 0.86, fitHeightRatio: 0.96, scaleMultiplier: 1.12, xRatio: 0.5, yRatio: 0.99 },
+  "Epsilon2.1": { fitWidthRatio: 0.8, fitHeightRatio: 0.93, scaleMultiplier: 0.9, xRatio: 0.51, yRatio: 0.985 },
+  Haru01: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.97, xRatio: 0.5, yRatio: 0.985, drawableTopPaddingRatio: 0.05 },
+  Haru02: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.97, xRatio: 0.5, yRatio: 0.985, drawableTopPaddingRatio: 0.05 },
+  Chitose: { fitWidthRatio: 0.82, fitHeightRatio: 0.94, scaleMultiplier: 0.95, xRatio: 0.5, yRatio: 0.985 },
+  Shizuku: { fitWidthRatio: 0.8, fitHeightRatio: 0.88, scaleMultiplier: 0.92, xRatio: 0.5, yRatio: 0.985 },
+  Hibiki: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.98, xRatio: 0.5, yRatio: 0.985 },
+  Izumi: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.98, xRatio: 0.5, yRatio: 0.985 },
+  Koharu: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.97, xRatio: 0.5, yRatio: 0.985 },
+  Tororo: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.98, xRatio: 0.5, yRatio: 0.985 },
+  Z16: { fitWidthRatio: 0.8, fitHeightRatio: 0.93, scaleMultiplier: 0.92, xRatio: 0.5, yRatio: 0.985 },
+  Tsumiki: { fitWidthRatio: 0.82, fitHeightRatio: 0.95, scaleMultiplier: 0.97, xRatio: 0.5, yRatio: 0.985 },
+  Unitychan: { fitWidthRatio: 0.8, fitHeightRatio: 0.93, scaleMultiplier: 0.9, xRatio: 0.5, yRatio: 0.985 },
+};
+const getAvatarLayoutPreset = (avatarName) => {
+  const name = String(avatarName || "").trim();
+  const preset = AVATAR_LAYOUT_PRESETS[name];
+  return preset ? { ...DEFAULT_AVATAR_LAYOUT, ...preset } : DEFAULT_AVATAR_LAYOUT;
+};
 const MOUTH_PARAMETER_IDS = [
   "ParamMouthOpenY",
   "PARAM_MOUTH_OPEN_Y",
@@ -27,9 +63,9 @@ const LOOK_X_EYE_PARAMETER_IDS = ["ParamEyeBallX", "PARAM_EYE_BALL_X"];
 const LOOK_Y_EYE_PARAMETER_IDS = ["ParamEyeBallY", "PARAM_EYE_BALL_Y"];
 const EDGE_GAP = 10;
 const MIN_WIDTH = 160;
-const MAX_WIDTH = 640;
+const MAX_WIDTH = 4096;
 const MIN_HEIGHT = 180;
-const MAX_HEIGHT = 760;
+const MAX_HEIGHT = 4096;
 const RANDOM_MOUTH_MIN = 0.55;
 const RANDOM_MOUTH_RANGE = 0.4;
 const MOBILE_BREAKPOINT = 900;
@@ -49,12 +85,23 @@ const isMobileViewport = () => {
 const getMobileTutorRect = () => {
   if (typeof window === "undefined") return { x: EDGE_GAP, y: EDGE_GAP, width: 320, height: 180 };
   const width = Math.max(220, window.innerWidth - (EDGE_GAP * 2));
-  const height = Math.round(Math.max(140, Math.min(260, window.innerHeight * 0.26)));
+  const height = Math.round(Math.max(280, Math.min(520, window.innerHeight * 0.46)));
   return {
     x: EDGE_GAP,
     y: Math.max(EDGE_GAP, window.innerHeight - height - EDGE_GAP),
     width,
     height,
+  };
+};
+const getExpandedTutorRect = () => {
+  if (typeof window === "undefined") return { x: 0, y: 0, width: 320, height: 480 };
+  const viewportWidth = Math.max(1, Math.round(window.visualViewport?.width || window.innerWidth || 1));
+  const viewportHeight = Math.max(1, Math.round(window.visualViewport?.height || window.innerHeight || 1));
+  return {
+    x: 0,
+    y: 0,
+    width: viewportWidth,
+    height: viewportHeight,
   };
 };
 
@@ -166,8 +213,13 @@ const Live2DTutor = ({
   questionEnabled = false,
   questionBusy = false,
   questionStatus = "",
+  chatHistory = [],
   canReplayTts = false,
   onReplayTts,
+  onClearChat,
+  onRegenerate,
+  onStopSpeech,
+  onExportChat,
   questionLanguage = "en-US",
   onSubmitQuestion,
 }) => {
@@ -175,7 +227,7 @@ const Live2DTutor = ({
   const panelRef = useRef(null);
   const dragStateRef = useRef(null);
   const resizeStateRef = useRef(null);
-  const baseModelSizeRef = useRef({ width: 1, height: 1 });
+  const expandedRectRef = useRef(null);
   const mouthValueRef = useRef(0);
   const lookValueRef = useRef({ x: 0, y: 0 });
   const pointerRef = useRef({ x: 0, y: 0 });
@@ -194,6 +246,7 @@ const Live2DTutor = ({
   const [questionText, setQuestionText] = useState("");
   const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
   const [voiceInputStatus, setVoiceInputStatus] = useState("");
+  const [isExpanded, setIsExpanded] = useState(false);
   const speechRecognitionRef = useRef(null);
   const [panelRect, setPanelRect] = useState({
     x: EDGE_GAP,
@@ -234,15 +287,47 @@ const Live2DTutor = ({
     let resizeObserver = null;
     let onAfterMotionUpdate = null;
     let onBeforeModelUpdate = null;
+    let lastFrameAt = 0;
+    const applyDrawableTopCorrection = (layout) => {
+      if (!model) return;
+      const topPaddingRatio = layout.drawableTopPaddingRatio;
+      if (!Number.isFinite(topPaddingRatio)) return;
+      const internalModel = model.internalModel;
+      if (!internalModel?.localTransform || typeof internalModel.getDrawableVertices !== "function") return;
+      const drawCount = Number.isFinite(internalModel.drawDataCount) ? internalModel.drawDataCount : 0;
+      if (drawCount <= 0) return;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < drawCount; i += 1) {
+        const vertices = internalModel.getDrawableVertices(i);
+        if (!vertices || vertices.length < 2) continue;
+        for (let j = 1; j < vertices.length; j += 2) {
+          const y = vertices[j];
+          if (!Number.isFinite(y)) continue;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (!Number.isFinite(minY) || !Number.isFinite(maxY) || maxY <= minY) return;
+      const drawableHeight = maxY - minY;
+      const targetTop = drawableHeight * Math.max(0, topPaddingRatio);
+      const currentTop = (minY * internalModel.localTransform.d) + internalModel.localTransform.ty;
+      const deltaTy = targetTop - currentTop;
+      internalModel.localTransform.ty += deltaTy;
+    };
     const layoutModel = () => {
       if (!app || !model) return;
-      const modelWidth = Math.max(baseModelSizeRef.current.width || 1, 1);
-      const modelHeight = Math.max(baseModelSizeRef.current.height || 1, 1);
-      const targetScale = Math.min((app.screen.width * 0.82) / modelWidth, (app.screen.height * 0.95) / modelHeight);
+      const modelWidth = Math.max(model.internalModel?.width || 1, 1);
+      const modelHeight = Math.max(model.internalModel?.height || 1, 1);
+      const layout = getAvatarLayoutPreset(activeAvatar.name);
+      const scaleToFit = Math.min(
+        (app.screen.width * layout.fitWidthRatio) / modelWidth,
+        (app.screen.height * layout.fitHeightRatio) / modelHeight,
+      );
+      const targetScale = scaleToFit * layout.scaleMultiplier;
       model.anchor.set(0.5, 1);
       model.scale.set(targetScale);
-      model.x = app.screen.width * 0.5;
-      model.y = app.screen.height * 0.98;
+      model.position.set(app.screen.width * layout.xRatio, app.screen.height * layout.yRatio);
     };
 
     const applyFrameValues = () => {
@@ -251,8 +336,14 @@ const Live2DTutor = ({
       applyLookValue(model, lookValueRef.current.x, lookValueRef.current.y);
     };
 
-    const updateLoop = () => {
+    const updateLoop = (frameNow) => {
       if (cancelled) return;
+      if (model?.autoUpdate === false) {
+        const now = Number.isFinite(frameNow) ? frameNow : performance.now();
+        const dt = lastFrameAt > 0 ? Math.max(0, now - lastFrameAt) : 16.67;
+        lastFrameAt = now;
+        model.update(dt);
+      }
       let target = 0;
       const useAssistantMode = Boolean(assistantModeRef.current);
       const isMp3Playing = Boolean(audioElement && !audioElement.paused && !audioElement.ended);
@@ -282,6 +373,7 @@ const Live2DTutor = ({
         y: Math.max(-30, Math.min(30, lookYSmooth * 30)),
       };
 
+      applyDrawableTopCorrection(getAvatarLayoutPreset(activeAvatar.name));
       applyFrameValues();
       animationFrame = window.requestAnimationFrame(updateLoop);
     };
@@ -300,12 +392,8 @@ const Live2DTutor = ({
         Live2DModel = live2dModule.Live2DModel;
         model = await Live2DModel.from(activeAvatar.url);
         if (cancelled) return;
+        model.autoUpdate = false;
         model.scale.set(1);
-        const baseBounds = typeof model.getLocalBounds === "function" ? model.getLocalBounds() : null;
-        baseModelSizeRef.current = {
-          width: Math.max(baseBounds?.width || 1, 1),
-          height: Math.max(baseBounds?.height || 1, 1),
-        };
         app.stage.addChild(model);
         onAfterMotionUpdate = () => {
           applyFrameValues();
@@ -326,7 +414,7 @@ const Live2DTutor = ({
         });
         resizeObserver.observe(mountRef.current);
         setReady(true);
-        updateLoop();
+        updateLoop(performance.now());
       } catch (error) {
         console.error("Live2D tutor initialization failed:", error);
       }
@@ -367,6 +455,9 @@ const Live2DTutor = ({
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     setPanelRect((current) => {
+      if (isExpanded) {
+        return getExpandedTutorRect();
+      }
       if (isMobileViewport()) {
         return getMobileTutorRect();
       }
@@ -385,7 +476,10 @@ const Live2DTutor = ({
       const mobile = isMobileViewport();
       setIsMobile(mobile);
       setPanelRect((current) => {
-        if (mobile) {
+        if (isExpanded) {
+          return getExpandedTutorRect();
+        }
+        if (mobile && !isExpanded) {
           return getMobileTutorRect();
         }
         const responsiveRect = getResponsiveTutorRect();
@@ -407,7 +501,7 @@ const Live2DTutor = ({
     return () => {
       window.removeEventListener("resize", onResize);
     };
-  }, []);
+  }, [isExpanded]);
 
   const handleDragStart = (event) => {
     if (isMobile) return;
@@ -421,18 +515,19 @@ const Live2DTutor = ({
       height: panelRect.height,
     };
     const onMove = (moveEvent) => {
-      if (!dragStateRef.current) return;
-      const deltaX = moveEvent.clientX - dragStateRef.current.startX;
-      const deltaY = moveEvent.clientY - dragStateRef.current.startY;
+      const dragState = dragStateRef.current;
+      if (!dragState) return;
+      const deltaX = moveEvent.clientX - dragState.startX;
+      const deltaY = moveEvent.clientY - dragState.startY;
       const parentWidth = window.innerWidth || 0;
       const parentHeight = window.innerHeight || 0;
-      const maxX = Math.max(EDGE_GAP, parentWidth - dragStateRef.current.width - EDGE_GAP);
+      const maxX = Math.max(EDGE_GAP, parentWidth - dragState.width - EDGE_GAP);
       const safeBottom = Math.max(EDGE_GAP, parentHeight - EDGE_GAP);
-      const maxY = Math.max(EDGE_GAP, safeBottom - dragStateRef.current.height);
+      const maxY = Math.max(EDGE_GAP, safeBottom - dragState.height);
       setPanelRect((current) => ({
         ...current,
-        x: Math.max(EDGE_GAP, Math.min(maxX, dragStateRef.current.originX + deltaX)),
-        y: Math.max(EDGE_GAP, Math.min(maxY, dragStateRef.current.originY + deltaY)),
+        x: Math.max(EDGE_GAP, Math.min(maxX, dragState.originX + deltaX)),
+        y: Math.max(EDGE_GAP, Math.min(maxY, dragState.originY + deltaY)),
       }));
     };
     const onUp = () => {
@@ -457,15 +552,16 @@ const Live2DTutor = ({
       originY: panelRect.y,
     };
     const onMove = (moveEvent) => {
-      if (!resizeStateRef.current) return;
-      const deltaX = moveEvent.clientX - resizeStateRef.current.startX;
-      const deltaY = moveEvent.clientY - resizeStateRef.current.startY;
+      const resizeState = resizeStateRef.current;
+      if (!resizeState) return;
+      const deltaX = moveEvent.clientX - resizeState.startX;
+      const deltaY = moveEvent.clientY - resizeState.startY;
       const parentWidth = window.innerWidth || 0;
       const parentHeight = window.innerHeight || 0;
-      const maxWidthByViewport = Math.max(MIN_WIDTH, parentWidth - EDGE_GAP - resizeStateRef.current.originX);
-      const maxHeightByFooter = Math.max(MIN_HEIGHT, parentHeight - EDGE_GAP - resizeStateRef.current.originY);
-      const nextWidth = Math.max(MIN_WIDTH, Math.min(Math.min(MAX_WIDTH, maxWidthByViewport), resizeStateRef.current.width + deltaX));
-      const nextHeight = Math.max(MIN_HEIGHT, Math.min(Math.min(MAX_HEIGHT, maxHeightByFooter), resizeStateRef.current.height + deltaY));
+      const maxWidthByViewport = Math.max(MIN_WIDTH, parentWidth - EDGE_GAP - resizeState.originX);
+      const maxHeightByFooter = Math.max(MIN_HEIGHT, parentHeight - EDGE_GAP - resizeState.originY);
+      const nextWidth = Math.max(MIN_WIDTH, Math.min(Math.min(MAX_WIDTH, maxWidthByViewport), resizeState.width + deltaX));
+      const nextHeight = Math.max(MIN_HEIGHT, Math.min(Math.min(MAX_HEIGHT, maxHeightByFooter), resizeState.height + deltaY));
       setPanelRect((current) => ({
         ...current,
         width: nextWidth,
@@ -575,6 +671,21 @@ const Live2DTutor = ({
     startVoiceInput();
   };
 
+  const toggleExpand = () => {
+    if (typeof window === "undefined") return;
+    if (!isExpanded) {
+      expandedRectRef.current = { ...panelRect };
+      setPanelRect(getExpandedTutorRect());
+      setIsExpanded(true);
+      return;
+    }
+    const previous = expandedRectRef.current;
+    if (previous) {
+      setPanelRect(previous);
+    }
+    setIsExpanded(false);
+  };
+
   useEffect(() => () => {
     stopVoiceInput();
   }, []);
@@ -582,28 +693,102 @@ const Live2DTutor = ({
   return (
     <div
       ref={panelRef}
-      className={`live2d-tutor ${ready ? "ready" : ""} ${isVisible ? "" : "hidden"}`.trim()}
+      className={`live2d-tutor ${ready ? "ready" : ""} ${isVisible ? "" : "hidden"} ${isExpanded ? "expanded" : ""}`.trim()}
       onDoubleClick={cycleAvatar}
       onPointerUp={handleMobilePointerUp}
       title={`Double click to switch avatar (${activeAvatar.name})`}
       style={{
-        position: isMobile ? "relative" : "fixed",
+        position: (isMobile && !isExpanded) ? "relative" : "fixed",
         width: `${panelRect.width}px`,
         height: `${panelRect.height}px`,
-        left: isMobile ? "auto" : `${panelRect.x}px`,
-        top: isMobile ? "auto" : `${panelRect.y}px`,
+        left: (isMobile && !isExpanded) ? "auto" : `${panelRect.x}px`,
+        top: (isMobile && !isExpanded) ? "auto" : `${panelRect.y}px`,
         bottom: "auto",
-        margin: isMobile ? `${EDGE_GAP}px` : 0,
-        alignSelf: isMobile ? "stretch" : "auto",
+        margin: (isMobile && !isExpanded) ? `${EDGE_GAP}px` : 0,
+        alignSelf: (isMobile && !isExpanded) ? "stretch" : "auto",
       }}
     >
-      {!isMobile && (
+      {!isMobile && !isExpanded && (
         <button type="button" className="live2d-tutor-handle" onPointerDown={handleDragStart}>
           Tutor · {activeAvatar.name}
         </button>
       )}
+      <button
+        type="button"
+        className="live2d-tutor-expand"
+        onClick={toggleExpand}
+        title={isExpanded ? "Close full screen tutor" : "Maximize tutor panel"}
+        aria-label={isExpanded ? "Close full screen tutor" : "Maximize tutor panel"}
+      >
+        {isExpanded ? "✕" : "⛶"}
+      </button>
       <div ref={mountRef} className="live2d-tutor-canvas" />
       <div className="live2d-tutor-chat" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="live2d-tutor-chat-head">
+          <span>Chat</span>
+          <div className="live2d-tutor-chat-tools">
+            <select
+              className="live2d-tutor-avatar-select"
+              value={activeAvatar.name}
+              onChange={(event) => {
+                const nextIdx = AVATAR_MODELS.findIndex((item) => item.name === event.target.value);
+                if (nextIdx >= 0) setAvatarIndex(nextIdx);
+              }}
+              title="Select tutor avatar"
+              aria-label="Select tutor avatar"
+            >
+              {AVATAR_MODELS.map((item) => (
+                <option key={item.name} value={item.name}>{item.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="live2d-tutor-chat-btn"
+              onClick={() => { if (typeof onRegenerate === "function") onRegenerate(); }}
+              disabled={questionBusy}
+              title="Regenerate last tutor answer"
+            >
+              Regen
+            </button>
+            <button
+              type="button"
+              className="live2d-tutor-chat-btn"
+              onClick={() => { if (typeof onExportChat === "function") onExportChat(); }}
+              disabled={!chatHistory.length}
+              title="Export chat transcript"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              className="live2d-tutor-chat-btn"
+              onClick={() => { if (typeof onClearChat === "function") onClearChat(); }}
+              disabled={questionBusy || !chatHistory.length}
+              title="Clear tutor chat history"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        <div className="live2d-tutor-chat-log">
+          {chatHistory.length ? chatHistory.slice(-8).map((item, idx) => (
+            <div key={`${item.role}-${idx}`} className={`live2d-tutor-chat-msg ${item.role === "user" ? "user" : "assistant"}`.trim()}>
+              <strong>{item.role === "user" ? "You" : "Tutor"}:</strong> {String(item.text || "")}
+              {item.role === "assistant" && (item.usage || item.spend || (Array.isArray(item.citations) && item.citations.length)) ? (
+                <div className="live2d-tutor-chat-meta">
+                  {item.usage ? `tokens:${item.usage.total_tokens || 0}` : ""}
+                  {item.spend ? ` cost:$${Number(item.spend.call_cost_usd || 0).toFixed(4)}` : ""}
+                  {Array.isArray(item.citations) && item.citations.length ? (
+                    <span>
+                      {" "}
+                      · <a href={item.citations[0]} target="_blank" rel="noreferrer">source</a>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          )) : <div className="live2d-tutor-chat-empty">Start with a question about this slide.</div>}
+        </div>
         <div className="live2d-tutor-chat-row">
           <input
             type="text"
@@ -640,11 +825,20 @@ const Live2DTutor = ({
           >
             ↻
           </button>
+          <button
+            type="button"
+            className="live2d-tutor-chat-btn"
+            onClick={() => { if (typeof onStopSpeech === "function") onStopSpeech(); }}
+            disabled={questionBusy}
+            title="Stop tutor speech"
+          >
+            ■
+          </button>
         </div>
         {questionStatus ? <div className="live2d-tutor-chat-status">{questionStatus}</div> : null}
         {voiceInputStatus ? <div className="live2d-tutor-chat-status">{voiceInputStatus}</div> : null}
       </div>
-      {!isMobile && (
+      {!isMobile && !isExpanded && (
         <button type="button" className="live2d-tutor-resizer" onPointerDown={handleResizeStart} aria-label="Resize tutor" />
       )}
     </div>

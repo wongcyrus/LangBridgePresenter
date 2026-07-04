@@ -528,6 +528,16 @@ select {
     gap: 4px;
 }
 
+.live2d-tutor-avatar-select {
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 5px 6px;
+    max-width: 110px;
+}
+
 .live2d-tutor-chat-log {
     max-height: 112px;
     overflow-y: auto;
