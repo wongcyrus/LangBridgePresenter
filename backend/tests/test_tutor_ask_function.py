@@ -44,7 +44,7 @@ def tutor_ask_module(monkeypatch):
     storage_mod.Client = MagicMock()
     tts_mod = types.ModuleType("google.cloud.texttospeech")
     tts_mod.TextToSpeechClient = MagicMock()
-    tts_mod.SsmlVoiceGender = types.SimpleNamespace(FEMALE="FEMALE")
+    tts_mod.SsmlVoiceGender = types.SimpleNamespace(FEMALE="FEMALE", MALE="MALE")
     tts_mod.AudioEncoding = types.SimpleNamespace(MP3="MP3")
     tts_mod.VoiceSelectionParams = MagicMock()
     tts_mod.AudioConfig = MagicMock()
@@ -124,5 +124,53 @@ def test_build_prompt_enforces_slide_scope(tutor_ask_module):
             "source_context": "Discuss service models and tradeoffs.",
         },
     )
-    assert "Your scope is strictly limited to the current slide text and speaker notes below." in prompt
+    assert "Decide first whether the question is related to the current slide topic/content." in prompt
     assert "I can only help with this slide." in prompt
+    assert "Recent conversation (oldest to newest):" in prompt
+
+
+def test_extract_citations_from_response_dict(tutor_ask_module):
+    class DummyResponse:
+        def to_dict(self):
+            return {
+                "grounding_metadata": {
+                    "supports": [{"source_uri": "https://example.com/news-a"}],
+                    "chunks": [{"url": "https://example.com/news-b"}],
+                }
+            }
+
+    links = tutor_ask_module._extract_citations(DummyResponse(), max_items=5)
+    assert links == ["https://example.com/news-a", "https://example.com/news-b"]
+
+
+def test_normalize_chat_history_keeps_recent_turns(tutor_ask_module):
+    raw_history = [
+        {"role": "system", "text": "ignore"},
+        {"role": "user", "text": "What is SaaS?"},
+        {"role": "assistant", "text": "Software as a service."},
+        {"role": "user", "text": "x" * 400},
+        {"role": "assistant", "text": ""},
+    ]
+    turns = tutor_ask_module._normalize_chat_history(raw_history, max_turns=4, max_chars=40)
+    assert len(turns) == 3
+    assert turns[0] == {"role": "user", "text": "What is SaaS?"}
+    assert turns[1] == {"role": "assistant", "text": "Software as a service."}
+    assert turns[2]["role"] == "user"
+    assert len(turns[2]["text"]) == 40
+
+
+def test_resolve_tts_profile_for_chitose_and_wild(tutor_ask_module):
+    chitose = tutor_ask_module._resolve_tts_profile("Chitose")
+    assert chitose["gender"] == "MALE"
+    assert float(chitose["speaking_rate"]) == 1.0
+
+    wild = tutor_ask_module._resolve_tts_profile("Wild")
+    assert wild["gender"] == "MALE"
+    assert float(wild["speaking_rate"]) == 0.92
+    assert float(wild["pitch"]) == -2.0
+
+
+def test_resolve_tts_profile_defaults_to_female(tutor_ask_module):
+    profile = tutor_ask_module._resolve_tts_profile("UnknownAvatar")
+    assert profile["gender"] == "FEMALE"
+    assert float(profile["speaking_rate"]) == 1.0

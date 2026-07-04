@@ -28,6 +28,24 @@ if not any(isinstance(h, logging.StreamHandler) for h in _root.handlers):
 logger = logging.getLogger(__name__)
 logger.setLevel(_level)
 
+_DEFAULT_TTS_PROFILE = {
+    "gender": "FEMALE",
+    "speaking_rate": 1.0,
+    "pitch": 0.0,
+}
+_AVATAR_TTS_PROFILE_MAP = {
+    "chitose": {
+        "gender": "MALE",
+        "speaking_rate": 1.0,
+        "pitch": -1.0,
+    },
+    "wild": {
+        "gender": "MALE",
+        "speaking_rate": 0.92,
+        "pitch": -2.0,
+    },
+}
+
 
 if not firebase_admin._apps:
     firebase_project_id = os.environ.get("CLIENT_FIREBASE_PROJECT_ID") or os.environ.get("CLIENT_FIRESTORE_PROJECT_ID")
@@ -75,6 +93,16 @@ def _canonical_language_code(language_code: str) -> str:
         "yue-hk": "yue-HK",
     }
     return mapping.get(language_code.lower(), language_code)
+
+
+def _resolve_tts_profile(avatar_name: str) -> Dict[str, Any]:
+    key = str(avatar_name or "").strip().lower()
+    profile = _AVATAR_TTS_PROFILE_MAP.get(key)
+    if not profile:
+        return dict(_DEFAULT_TTS_PROFILE)
+    merged = dict(_DEFAULT_TTS_PROFILE)
+    merged.update(profile)
+    return merged
 
 
 def _has_text_chat_access(decoded_token: dict, db: firestore.Client) -> bool:
@@ -482,14 +510,16 @@ def _commit_spend_after_call(
     }
 
 
-def _synthesize_answer_audio(answer: str, language_code: str, course_id: str):
+def _synthesize_answer_audio(answer: str, language_code: str, course_id: str, avatar_name: str):
     bucket_name = os.environ.get("SPEECH_FILE_BUCKET")
     if not bucket_name:
         raise RuntimeError("SPEECH_FILE_BUCKET env var missing")
 
     lang = _canonical_language_code(language_code)
-    content_hash = hashlib.sha256(f"{answer}:{lang}".encode("utf-8")).hexdigest()[:12]
-    filename = f"textchat/{course_id}/speech_{lang}_{content_hash}.mp3"
+    profile = _resolve_tts_profile(avatar_name)
+    profile_key = str(profile.get("gender") or "FEMALE").upper()
+    content_hash = hashlib.sha256(f"{answer}:{lang}:{profile_key}".encode("utf-8")).hexdigest()[:12]
+    filename = f"textchat/{course_id}/speech_{lang}_{profile_key.lower()}_{content_hash}.mp3"
 
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
@@ -497,13 +527,16 @@ def _synthesize_answer_audio(answer: str, language_code: str, course_id: str):
 
     if not blob.exists():
         tts_client = texttospeech.TextToSpeechClient()
+        gender_name = str(profile.get("gender") or "FEMALE").upper()
+        gender = getattr(texttospeech.SsmlVoiceGender, gender_name, texttospeech.SsmlVoiceGender.FEMALE)
         voice = texttospeech.VoiceSelectionParams(
             language_code=lang,
-            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE,
+            ssml_gender=gender,
         )
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=1.0,
+            speaking_rate=float(profile.get("speaking_rate", 1.0)),
+            pitch=float(profile.get("pitch", 0.0)),
         )
         tts_response = tts_client.synthesize_speech(
             request={
@@ -597,6 +630,7 @@ def tutor_ask(request: Request):
     presentation_id = str(payload.get("presentationId") or "").strip()
     slide_id = str(payload.get("slideId") or "").strip()
     language_code = str(payload.get("languageCode") or "en-US").strip()
+    avatar_name = str(payload.get("avatarName") or "").strip()
     if not course_id or not presentation_id or not slide_id:
         return (json.dumps({"error": "courseId, presentationId, and slideId are required"}), 400, headers)
     chat_history = _normalize_chat_history(payload.get("chatHistory"))
@@ -645,7 +679,7 @@ def tutor_ask(request: Request):
                 headers,
             )
 
-        audio_url = _synthesize_answer_audio(answer, language_code, course_id)
+        audio_url = _synthesize_answer_audio(answer, language_code, course_id, avatar_name)
     except PermissionError as e:
         return (json.dumps({"error": str(e)}), 429, headers)
     except Exception as e:

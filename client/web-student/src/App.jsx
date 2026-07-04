@@ -11,6 +11,7 @@ import {
   AdminIndexPage,
   ClassSelectionPage,
   TeacherWorkspacePage,
+  VoiceAdminPage,
   VoiceAssistantCard,
 } from "./components/AppPages";
 import Live2DTutor from "./components/Live2DTutor";
@@ -1738,6 +1739,7 @@ function App() {
     const text = String(question || "").trim();
     if (!text) return false;
     const forceSubmit = Boolean(options.force);
+    const avatarName = String(options.avatarName || "").trim();
     const now = Date.now();
     const state = tutorAskStateRef.current;
     if (state.inFlight) {
@@ -1785,6 +1787,7 @@ function App() {
           presentationId: String(presentationId),
           slideId: String(slideId),
           languageCode: listenLang,
+          avatarName,
           chatHistory: historyForRequest,
         }),
       });
@@ -1877,13 +1880,13 @@ function App() {
     setTutorStatus("Tutor chat cleared");
   };
 
-  const regenerateTutorAnswer = async () => {
+  const regenerateTutorAnswer = async (avatarName) => {
     const lastUser = [...tutorChatHistory].reverse().find((row) => row.role === "user" && String(row.text || "").trim());
     if (!lastUser) {
       setTutorStatus("No previous question to regenerate");
       return;
     }
-    await askTutorByText(lastUser.text, { force: true });
+    await askTutorByText(lastUser.text, { force: true, avatarName: String(avatarName || "").trim() });
   };
 
   const stopTutorSpeech = () => {
@@ -4353,417 +4356,61 @@ Keep replies short and explicit about the action completed.`,
 
   if (isAdminPage) {
     return (
-      <div className="container" style={{ padding: "18px", overflow: "auto" }}>
-        <header style={{ padding: 0, borderBottom: "none", marginBottom: "12px" }}>
-          <h1>🎛️ Teacher Student Records</h1>
-          <div className="controls">
-            <button
-              type="button"
-              className="account-action-btn"
-              onClick={() => { window.location.href = backToSlidesHref; }}
-            >
-              Back to Slides
-            </button>
-            <button
-              type="button"
-              className="account-action-btn"
-              onClick={() => { window.location.href = "/"; }}
-              title="Back to class selection"
-              aria-label="Back to class selection page"
-            >
-              Back to class selection
-            </button>
-            <button
-              type="button"
-              className="account-action-btn"
-              onClick={currentUser ? handleSignOut : handleSignIn}
-            >
-              <UserIcon />
-              <span>{currentUser ? "Sign out" : "Sign in"}</span>
-            </button>
-            {currentUser && adminEnabled && (
-              <button
-                type="button"
-                className="account-action-btn"
-                onClick={() => { window.location.href = "/admin"; }}
-              >
-                Admin Index
-              </button>
-            )}
-          </div>
-        </header>      
-        <div className="identity-status" style={{ margin: "0 0 12px" }}>{authStatus}</div>
-        {!currentUser && (
-          <div style={{ color: "#4b5563" }}>Sign in with an admin account to manage student access and limits.</div>
-        )}
-        {currentUser && !adminEnabled && (
-          <div style={{ color: "#b91c1c" }}>This account does not have admin access.</div>
-        )}
-        {currentUser && adminEnabled && (
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-              <strong>Admin Controls</strong>
-              <button
-                type="button"
-                onClick={() => { loadAdminDashboard(); loadAdminTeachers(); loadTeacherRecords(); }}
-                disabled={adminLoading}
-                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-              >
-                Refresh
-              </button>
-            </div>
-            {adminSummary && (
-              <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
-                Granted student access users: {adminSummary.granted_users ?? 0}
-                <br />
-                Granted text chat users: {adminSummary.text_granted_users ?? 0}
-              </div>
-            )}
-            <div style={{ marginBottom: "6px" }}>
-              <div style={{ fontWeight: 600 }}>Teacher role management</div>
-              <div style={{ fontSize: "0.85rem", color: "#6b7280" }}>Independent from voice minutes limits.</div>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-              <label style={{ fontSize: "0.9rem" }}>
-                Grant teacher emails (one per line)
-                <textarea
-                  value={adminTeacherEmail}
-                  onChange={(e) => setAdminTeacherEmail(e.target.value)}
-                  placeholder={"teacher1@example.com\nteacher2@example.com"}
-                  rows={4}
-                  style={{ marginLeft: "6px", width: "260px", resize: "vertical" }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={grantTeacherUser}
-                disabled={adminLoading}
-                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-              >
-                Grant teachers
-              </button>
-            </div>
-            <div style={{ maxHeight: "140px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px", marginBottom: "10px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ background: "#fafafa" }}>
-                    <th style={{ textAlign: "left", padding: "6px" }}>Teacher</th>
-                    <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
-                    <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminTeachers.map((teacher) => (
-                    <tr key={teacher.uid || teacher.email}>
-                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{teacher.email || teacher.uid}</td>
-                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{teacher.active ? "active" : "inactive"}</td>
-                      <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
-                        {teacher.active && (
-                          <button
-                            type="button"
-                            onClick={() => revokeTeacherUser(teacher.email)}
-                            disabled={adminLoading}
-                            style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
-                          >
-                            Revoke
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {adminTeachers.length === 0 && (
-                    <tr>
-                      <td colSpan={3} style={{ padding: "8px", color: "#6b7280" }}>No teachers configured</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "6px" }}>
-              <div style={{ fontWeight: 600 }}>Student access management</div>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-              <label style={{ fontSize: "0.9rem" }}>
-                Grant student access emails (one per line)
-                <textarea
-                  value={adminGrantEmail}
-                  onChange={(e) => setAdminGrantEmail(e.target.value)}
-                  placeholder={"student1@example.com\nstudent2@example.com"}
-                  rows={4}
-                  style={{ marginLeft: "6px", width: "280px", resize: "vertical" }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={grantVoiceUser}
-                disabled={adminLoading}
-                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-              >
-                Grant voice users
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-              <label style={{ fontSize: "0.9rem" }}>
-                Grant text chat emails (one per line)
-                <textarea
-                  value={adminTextGrantEmail}
-                  onChange={(e) => setAdminTextGrantEmail(e.target.value)}
-                  placeholder={"student1@example.com\nstudent2@example.com"}
-                  rows={4}
-                  style={{ marginLeft: "6px", width: "280px", resize: "vertical" }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={grantTextUser}
-                disabled={adminLoading}
-                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-              >
-                Grant text users
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginBottom: "10px" }}>
-              <label style={{ fontSize: "0.9rem" }}>
-                Text chat weekly budget (USD)
-                <input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={textWeeklyBudgetUsd}
-                  onChange={(e) => setTextWeeklyBudgetUsd(e.target.value)}
-                  style={{ marginLeft: "6px", width: "120px" }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={saveTextBudget}
-                disabled={adminLoading}
-                style={{ borderRadius: "14px", border: "1px solid #ddd", padding: "4px 10px", background: "#fff" }}
-              >
-                Save text budget
-              </button>
-            </div>
-            {adminStatus && <div style={{ fontSize: "0.9rem", color: "#4b5563", marginBottom: "8px" }}>{adminStatus}</div>}
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                <div style={{ fontWeight: 600 }}>Voice access users</div>
-                <input
-                  type="text"
-                  value={adminUserQuery}
-                  onChange={(e) => { setAdminUserQuery(e.target.value); setAdminUsersPage(1); setAdminUsagePage(1); }}
-                  placeholder="Filter users..."
-                  style={{ width: "180px" }}
-                />
-              </div>
-              {filteredVoiceUsers.length === 0 ? (
-                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching users</div>
-              ) : (
-                <div style={{ maxHeight: "280px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#fafafa" }}>
-                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Type</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
-                        <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedVoiceUsers.map((user) => (
-                        <tr key={user.key}>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.value}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.type}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.active ? "active" : "inactive"}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {user.type === "email" && user.active && (
-                              <button
-                                type="button"
-                                onClick={() => revokeVoiceUser(user.value)}
-                                disabled={adminLoading}
-                                style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
-                              >
-                                Revoke
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
-                <span>{filteredVoiceUsers.length} users</span>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <button type="button" disabled={adminUsersPage <= 1} onClick={() => setAdminUsersPage((p) => Math.max(1, p - 1))}>Prev</button>
-                  <span>{Math.min(adminUsersPage, userPageCount)} / {userPageCount}</span>
-                  <button type="button" disabled={adminUsersPage >= userPageCount} onClick={() => setAdminUsersPage((p) => Math.min(userPageCount, p + 1))}>Next</button>
-                </div>
-              </div>
-              <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginBottom: "8px" }}>
-                <div style={{ fontWeight: 600, marginBottom: "6px" }}>Text chat users</div>
-                {filteredTextUsers.length === 0 ? (
-                  <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching users</div>
-                ) : (
-                  <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ background: "#fafafa" }}>
-                          <th style={{ textAlign: "left", padding: "6px" }}>User</th>
-                          <th style={{ textAlign: "left", padding: "6px" }}>Type</th>
-                          <th style={{ textAlign: "left", padding: "6px" }}>Status</th>
-                          <th style={{ textAlign: "right", padding: "6px" }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredTextUsers.map((user) => (
-                          <tr key={user.key}>
-                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.value}</td>
-                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.type}</td>
-                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{user.active ? "active" : "inactive"}</td>
-                            <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
-                              {user.type === "email" && user.active && (
-                                <button
-                                  type="button"
-                                  onClick={() => revokeTextUser(user.value)}
-                                  disabled={adminLoading}
-                                  style={{ borderRadius: "12px", border: "1px solid #ddd", padding: "2px 8px", background: "#fff" }}
-                                >
-                                  Revoke
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px" }}>
-              <div style={{ fontWeight: 600, marginBottom: "4px" }}>Top usage today</div>
-              <div style={{ maxHeight: "170px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: "#fafafa" }}>
-                      <th style={{ textAlign: "left", padding: "6px" }}>User</th>
-                      <th style={{ textAlign: "right", padding: "6px" }}>Minutes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pagedTopUsage.map((row) => (
-                      <tr key={`${row.uid}:${row.day_key}`}>
-                        <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.email || row.uid}</td>
-                        <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>{row.used_minutes}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "0.8rem" }}>
-                <button type="button" disabled={adminUsagePage <= 1} onClick={() => setAdminUsagePage((p) => Math.max(1, p - 1))}>Prev</button>
-                <span>{Math.min(adminUsagePage, usagePageCount)} / {usagePageCount}</span>
-                <button type="button" disabled={adminUsagePage >= usagePageCount} onClick={() => setAdminUsagePage((p) => Math.min(usagePageCount, p + 1))}>Next</button>
-              </div>
-            </div>
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                <div style={{ fontWeight: 600 }}>User settings (latest)</div>
-                <input
-                  type="text"
-                  value={adminSettingsQuery}
-                  onChange={(e) => { setAdminSettingsQuery(e.target.value); setAdminSettingsPage(1); }}
-                  placeholder="Filter settings..."
-                  style={{ width: "180px" }}
-                />
-              </div>
-              {filteredUserSettings.length === 0 ? (
-                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching settings</div>
-              ) : (
-                <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#fafafa" }}>
-                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Display</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Audio</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Autoplay</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Presentation</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedUserSettings.map((row) => (
-                        <tr key={`${row.uid || "unknown"}:${row.updated_at || ""}`}>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.email || row.uid}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.display_language || "-"}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.audio_language || "-"}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{typeof row.autoplay === "boolean" ? (row.autoplay ? "on" : "off") : "-"}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{row.presentation_id || "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
-                <span>{filteredUserSettings.length} settings</span>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <button type="button" disabled={adminSettingsPage <= 1} onClick={() => setAdminSettingsPage((p) => Math.max(1, p - 1))}>Prev</button>
-                  <span>{Math.min(adminSettingsPage, settingsPageCount)} / {settingsPageCount}</span>
-                  <button type="button" disabled={adminSettingsPage >= settingsPageCount} onClick={() => setAdminSettingsPage((p) => Math.min(settingsPageCount, p + 1))}>Next</button>
-                </div>
-              </div>
-            </div>
-            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "8px", marginTop: "8px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                <div style={{ fontWeight: 600 }}>Recent session logs</div>
-                <input
-                  type="text"
-                  value={adminLogQuery}
-                  onChange={(e) => { setAdminLogQuery(e.target.value); setAdminLogsPage(1); }}
-                  placeholder="Filter logs..."
-                  style={{ width: "180px" }}
-                />
-              </div>
-              {filteredUsageLogs.length === 0 ? (
-                <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>No matching logs</div>
-              ) : (
-                <div style={{ maxHeight: "220px", overflow: "auto", fontSize: "0.83rem", border: "1px solid #f3f4f6", borderRadius: "6px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: "#fafafa" }}>
-                        <th style={{ textAlign: "left", padding: "6px" }}>User</th>
-                        <th style={{ textAlign: "left", padding: "6px" }}>Reason</th>
-                        <th style={{ textAlign: "right", padding: "6px" }}>Duration</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedUsageLogs.map((log) => (
-                        <tr key={log.id}>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{log.email || log.uid}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6" }}>{log.ended_reason || "ended"}</td>
-                          <td style={{ padding: "6px", borderTop: "1px solid #f3f4f6", textAlign: "right" }}>
-                            {Math.round((log.duration_seconds || 0) / 60)} min
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6px", fontSize: "0.8rem" }}>
-                <span>{filteredUsageLogs.length} logs</span>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <button type="button" disabled={adminLogsPage <= 1} onClick={() => setAdminLogsPage((p) => Math.max(1, p - 1))}>Prev</button>
-                  <span>{Math.min(adminLogsPage, logsPageCount)} / {logsPageCount}</span>
-                  <button type="button" disabled={adminLogsPage >= logsPageCount} onClick={() => setAdminLogsPage((p) => Math.min(logsPageCount, p + 1))}>Next</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <VoiceAdminPage
+        currentUser={currentUser}
+        adminEnabled={adminEnabled}
+        handleSignOut={handleSignOut}
+        handleSignIn={handleSignIn}
+        UserIcon={UserIcon}
+        authStatus={authStatus}
+        backToSlidesHref={backToSlidesHref}
+        adminLoading={adminLoading}
+        adminStatus={adminStatus}
+        adminSummary={adminSummary}
+        loadAllAdminData={() => { loadAdminDashboard(); loadAdminTeachers(); loadTeacherRecords(); }}
+        adminTeacherEmail={adminTeacherEmail}
+        setAdminTeacherEmail={setAdminTeacherEmail}
+        grantTeacherUser={grantTeacherUser}
+        adminTeachers={adminTeachers}
+        revokeTeacherUser={revokeTeacherUser}
+        adminGrantEmail={adminGrantEmail}
+        setAdminGrantEmail={setAdminGrantEmail}
+        adminTextGrantEmail={adminTextGrantEmail}
+        setAdminTextGrantEmail={setAdminTextGrantEmail}
+        grantVoiceUser={grantVoiceUser}
+        grantTextUser={grantTextUser}
+        textWeeklyBudgetUsd={textWeeklyBudgetUsd}
+        setTextWeeklyBudgetUsd={setTextWeeklyBudgetUsd}
+        saveTextBudget={saveTextBudget}
+        adminUserQuery={adminUserQuery}
+        setAdminUserQuery={(value) => { setAdminUserQuery(value); setAdminUsersPage(1); setAdminUsagePage(1); }}
+        adminUsersPage={adminUsersPage}
+        setAdminUsersPage={setAdminUsersPage}
+        userPageCount={userPageCount}
+        filteredVoiceUsers={filteredVoiceUsers}
+        pagedVoiceUsers={pagedVoiceUsers}
+        revokeVoiceUser={revokeVoiceUser}
+        filteredTextUsers={filteredTextUsers}
+        revokeTextUser={revokeTextUser}
+        pagedTopUsage={pagedTopUsage}
+        adminUsagePage={adminUsagePage}
+        setAdminUsagePage={setAdminUsagePage}
+        usagePageCount={usagePageCount}
+        adminSettingsQuery={adminSettingsQuery}
+        setAdminSettingsQuery={setAdminSettingsQuery}
+        filteredUserSettings={filteredUserSettings}
+        pagedUserSettings={pagedUserSettings}
+        adminSettingsPage={adminSettingsPage}
+        setAdminSettingsPage={setAdminSettingsPage}
+        settingsPageCount={settingsPageCount}
+        adminLogQuery={adminLogQuery}
+        setAdminLogQuery={setAdminLogQuery}
+        filteredUsageLogs={filteredUsageLogs}
+        pagedUsageLogs={pagedUsageLogs}
+        adminLogsPage={adminLogsPage}
+        setAdminLogsPage={setAdminLogsPage}
+        logsPageCount={logsPageCount}
+      />
     );
   }
 

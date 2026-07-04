@@ -596,7 +596,7 @@ const Live2DTutor = ({
   const handleAsk = async () => {
     const text = String(questionText || "").trim();
     if (!text || questionBusy || !questionEnabled || typeof onSubmitQuestion !== "function") return;
-    const ok = await onSubmitQuestion(text);
+    const ok = await onSubmitQuestion(text, { avatarName: activeAvatar.name });
     if (ok) setQuestionText("");
   };
 
@@ -641,7 +641,7 @@ const Live2DTutor = ({
       if (!transcript) return;
       setQuestionText(transcript);
       if (typeof onSubmitQuestion === "function") {
-        await onSubmitQuestion(transcript);
+        await onSubmitQuestion(transcript, { avatarName: activeAvatar.name });
       }
     };
     recognition.onerror = (event) => {
@@ -744,7 +744,7 @@ const Live2DTutor = ({
             <button
               type="button"
               className="live2d-tutor-chat-btn"
-              onClick={() => { if (typeof onRegenerate === "function") onRegenerate(); }}
+              onClick={() => { if (typeof onRegenerate === "function") onRegenerate(activeAvatar.name); }}
               disabled={questionBusy}
               title="Regenerate last tutor answer"
             >
