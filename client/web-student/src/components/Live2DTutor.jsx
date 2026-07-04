@@ -69,6 +69,36 @@ const MAX_HEIGHT = 4096;
 const RANDOM_MOUTH_MIN = 0.55;
 const RANDOM_MOUTH_RANGE = 0.4;
 const MOBILE_BREAKPOINT = 900;
+const PANEL_RECT_STORAGE_KEY = "live2d.panelRect";
+const readStoredPanelRect = () => {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(PANEL_RECT_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const x = Number(parsed?.x);
+    const y = Number(parsed?.y);
+    const width = Number(parsed?.width);
+    const height = Number(parsed?.height);
+    if (![x, y, width, height].every((value) => Number.isFinite(value))) return null;
+    return { x, y, width, height };
+  } catch (_error) {
+    return null;
+  }
+};
+const clampDesktopPanelRect = (rect) => {
+  if (typeof window === "undefined") return rect;
+  const parentWidth = window.innerWidth || 0;
+  const parentHeight = window.innerHeight || 0;
+  const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(Number(rect?.width) || MIN_WIDTH)));
+  const height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, Math.round(Number(rect?.height) || MIN_HEIGHT)));
+  const maxX = Math.max(EDGE_GAP, parentWidth - width - EDGE_GAP);
+  const safeBottom = Math.max(EDGE_GAP, parentHeight - EDGE_GAP);
+  const maxY = Math.max(EDGE_GAP, safeBottom - height);
+  const x = Math.max(EDGE_GAP, Math.min(maxX, Math.round(Number(rect?.x) || EDGE_GAP)));
+  const y = Math.max(EDGE_GAP, Math.min(maxY, Math.round(Number(rect?.y) || EDGE_GAP)));
+  return { x, y, width, height };
+};
 const getResponsiveTutorRect = () => {
   if (typeof window === "undefined") return { width: 220, height: 320 };
   const widthByViewport = window.innerWidth * 0.24;
@@ -249,10 +279,12 @@ const Live2DTutor = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const speechRecognitionRef = useRef(null);
   const [panelRect, setPanelRect] = useState({
-    x: EDGE_GAP,
-    y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorRect().height - EDGE_GAP),
-    width: getResponsiveTutorRect().width,
-    height: getResponsiveTutorRect().height,
+    ...(readStoredPanelRect() || {
+      x: EDGE_GAP,
+      y: Math.max(EDGE_GAP, window.innerHeight - getResponsiveTutorRect().height - EDGE_GAP),
+      width: getResponsiveTutorRect().width,
+      height: getResponsiveTutorRect().height,
+    }),
   });
 
   const activeAvatar = useMemo(() => {
@@ -461,16 +493,7 @@ const Live2DTutor = ({
       if (isMobileViewport()) {
         return getMobileTutorRect();
       }
-      const responsiveRect = getResponsiveTutorRect();
-      const safeBottom = Math.max(EDGE_GAP, window.innerHeight - EDGE_GAP);
-      const next = {
-        ...current,
-        width: responsiveRect.width,
-        height: responsiveRect.height,
-        x: EDGE_GAP,
-        y: Math.max(EDGE_GAP, safeBottom - responsiveRect.height),
-      };
-      return next;
+      return clampDesktopPanelRect(current);
     });
     const onResize = () => {
       const mobile = isMobileViewport();
@@ -482,19 +505,7 @@ const Live2DTutor = ({
         if (mobile && !isExpanded) {
           return getMobileTutorRect();
         }
-        const responsiveRect = getResponsiveTutorRect();
-        const parentWidth = window.innerWidth || 0;
-        const parentHeight = window.innerHeight || 0;
-        const maxX = Math.max(EDGE_GAP, parentWidth - responsiveRect.width - EDGE_GAP);
-        const safeBottom = Math.max(EDGE_GAP, parentHeight - EDGE_GAP);
-        const maxY = Math.max(EDGE_GAP, safeBottom - responsiveRect.height);
-        return {
-          ...current,
-          width: responsiveRect.width,
-          height: responsiveRect.height,
-          x: Math.max(EDGE_GAP, Math.min(maxX, current.x)),
-          y: Math.max(EDGE_GAP, Math.min(maxY, current.y)),
-        };
+        return clampDesktopPanelRect(current);
       });
     };
     window.addEventListener("resize", onResize);
@@ -502,6 +513,17 @@ const Live2DTutor = ({
       window.removeEventListener("resize", onResize);
     };
   }, [isExpanded]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isMobile || isExpanded) return;
+    window.localStorage.setItem(PANEL_RECT_STORAGE_KEY, JSON.stringify({
+      x: panelRect.x,
+      y: panelRect.y,
+      width: panelRect.width,
+      height: panelRect.height,
+    }));
+  }, [panelRect, isMobile, isExpanded]);
 
   const handleDragStart = (event) => {
     if (isMobile) return;
